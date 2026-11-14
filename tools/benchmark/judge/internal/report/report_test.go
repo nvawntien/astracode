@@ -56,3 +56,18 @@ func TestAdmissionOnlyReportMakesZeroAttemptAcceptanceUnavailable(t *testing.T) 
 		t.Fatalf("report did not make zero-attempt acceptance unavailable:\n%s", text)
 	}
 }
+
+func TestRealisticReportIncludesTransportDispatchQualification(t *testing.T) {
+	dispatch := 17.0
+	text := Markdown(model.RunSummary{
+		RunID:             "realistic-dispatch",
+		Latencies:         model.Latencies{ConnectionAcquireMS: model.Distribution{P95: &dispatch}, TransportDispatchMS: model.Distribution{P95: &dispatch}},
+		ClientDiagnostics: model.ClientDiagnostics{TransportMaxConnsPerHost: 8192},
+		Realistic:         &model.RealisticMetrics{ObservationMode: "realistic"},
+	})
+	for _, want := range []string{"Shared transport max connections per host: 8192", "Connection-acquire p50 / p95 / p99", "Transport-dispatch p50 / p95 / p99"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("report missing %q:\n%s", want, text)
+		}
+	}
+}

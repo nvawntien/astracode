@@ -103,14 +103,15 @@ def load_run(run_dir: str | Path, container_stats: str | None = None, kafka_lag:
             raise DataError(f"run.json has invalid UTC {name}")
     submissions = _csv(submissions_path, REQUIRED_SUBMISSION_COLUMNS, "submissions")
     windows = _csv(windows_path, REQUIRED_WINDOW_COLUMNS, "windows")
-    _time(submissions, ["intended_at", "post_started_at", "post_completed_at", "terminal_observed_at", "ticket_started_at", "ticket_completed_at", "sse_started_at", "sse_established_at", "sse_closed_at"], "submissions")
+    _time(submissions, ["intended_at", "post_started_at", "post_completed_at", "transport_got_conn_at", "transport_wrote_at", "transport_first_response_at", "terminal_observed_at", "ticket_started_at", "ticket_completed_at", "sse_started_at", "sse_established_at", "sse_closed_at"], "submissions")
     _time(windows, ["window_start", "window_end"], "windows")
     _boolean(submissions, ["attempted", "accepted", "rate_limited", "ticket_attempted", "ticket_succeeded", "sse_attempted", "sse_established", "sse_terminal_during_hold", "sse_survived_full_hold"], "submissions")
-    _number(submissions, ["sequence", "submission_id", "submit_latency_ms", "end_to_end_latency_ms", "accepted_to_terminal_ms", "ticket_latency_ms", "sse_establishment_latency_ms"], "submissions")
+    _number(submissions, ["sequence", "submission_id", "submission_transport_shard", "submit_latency_ms", "connection_acquire_delay_ms", "transport_dispatch_delay_ms", "wire_to_first_byte_ms", "wire_to_response_complete_ms", "end_to_end_latency_ms", "accepted_to_terminal_ms", "ticket_latency_ms", "sse_establishment_latency_ms"], "submissions")
     _number(windows, ["window_index", "window_duration_ms", "intended", "attempted", "accepted", "completed", "accepted_cumulative", "completed_cumulative", "client_outstanding", "client_outstanding_peak", "attempted_rate_per_sec", "accepted_rate_per_sec", "completion_rate_per_sec"], "windows")
     if submissions.duplicated(["sequence"], keep=False).any():
         raise DataError("duplicate submission sequence records")
-    if (submissions[["submit_latency_ms", "end_to_end_latency_ms", "accepted_to_terminal_ms"]] < 0).any().any():
+    latency_columns = [column for column in ["submit_latency_ms", "connection_acquire_delay_ms", "transport_dispatch_delay_ms", "end_to_end_latency_ms", "accepted_to_terminal_ms"] if column in submissions]
+    if (submissions[latency_columns] < 0).any().any():
         raise DataError("negative latency in submissions")
     # The Go harness restarts the window index for the drain phase, so monotonic
     # indexing is required within each phase rather than globally.

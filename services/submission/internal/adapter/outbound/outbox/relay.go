@@ -51,7 +51,7 @@ func (r *OutboxRelay) processPendingMessages(ctx context.Context) {
 		r.logger.Error("failed to get pending outbox messages", zap.Error(err))
 		return
 	}
-
+	
 	for _, msg := range messages {
 		// Stop processing if context is cancelled
 		select {

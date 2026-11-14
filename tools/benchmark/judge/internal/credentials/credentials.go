@@ -1,9 +1,12 @@
-// Package credentials handles local, pre-issued benchmark sessions. It does
-// not provision accounts, log in, or persist refreshed cookies.
+// Package credentials handles local, pre-issued benchmark sessions and their
+// secure local-file representation. It never provisions accounts or logs in.
 package credentials
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -37,6 +41,8 @@ func NewBenchmarkTransport(maxConnsPerHost int) *http.Transport {
 	transport.MaxIdleConnsPerHost = maxIdle
 	transport.MaxConnsPerHost = maxConnsPerHost
 	transport.IdleConnTimeout = 90 * time.Second
+	// Clone preserves Go's default HTTP/2 negotiation behavior. Cookie jars
+	// remain isolated in NewSessions; only TCP/HTTP transport state is shared.
 	return transport
 }
 
@@ -228,4 +234,122 @@ func (s *Session) AccessToken(base *url.URL) string {
 		}
 	}
 	return ""
+}
+
+// RefreshToken returns the in-memory refresh cookie only to local preparation
+// code. Callers must never log or persist this value outside a credential file.
+func (s *Session) RefreshToken(base *url.URL) string {
+	for _, cookie := range s.Jar.Cookies(base) {
+		if cookie.Name == "refresh_token" {
+			return cookie.Value
+		}
+	}
+	return ""
+}
+
+// TokenExpiryUnverified decodes only the JWT payload exp claim for local
+// lifetime planning. It deliberately does not validate a signature.
+func TokenExpiryUnverified(token string) (time.Time, bool) {
+	parts := bytes.Split([]byte(token), []byte("."))
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(string(parts[1]))
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claim struct {
+		Exp json.Number `json:"exp"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if err := decoder.Decode(&claim); err != nil {
+		return time.Time{}, false
+	}
+	expiration, err := claim.Exp.Int64()
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(expiration, 0), true
+}
+
+// WriteAtomic installs a complete credential file only after it has been
+// encoded and synced. It never follows a symlink and leaves an existing file
+// untouched unless replace is explicitly requested.
+func WriteAtomic(path string, file File, replace bool) error {
+	if err := ensureOutputTarget(path, replace); err != nil {
+		return err
+	}
+	directory := filepath.Dir(path)
+	random := make([]byte, 12)
+	if _, err := rand.Read(random); err != nil {
+		return errors.New("create output temporary name")
+	}
+	temporary := filepath.Join(directory, ".users.local."+hex.EncodeToString(random)+".tmp")
+	f, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return errors.New("create output temporary file")
+	}
+	defer func() { _ = f.Close(); _ = os.Remove(temporary) }()
+	if err := json.NewEncoder(f).Encode(file); err != nil {
+		return errors.New("write credential output")
+	}
+	if err := f.Sync(); err != nil {
+		return errors.New("sync credential output")
+	}
+	if err := f.Close(); err != nil {
+		return errors.New("close credential output")
+	}
+	if replace {
+		if err := ensureOutputTarget(path, true); err != nil {
+			return err
+		}
+		if err := os.Rename(temporary, path); err != nil {
+			return errors.New("install credential output")
+		}
+	} else if err := os.Link(temporary, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return errors.New("output file already exists; use --replace to renew it")
+		}
+		return errors.New("install credential output")
+	} else if err := os.Remove(temporary); err != nil {
+		return errors.New("remove credential temporary file")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return errors.New("secure credential output permissions")
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return errors.New("verify credential output permissions")
+	}
+	return nil
+}
+
+// ValidateOutputTarget checks that a future atomic credential install is safe.
+// WriteAtomic repeats this check immediately before installing the file.
+func ValidateOutputTarget(path string, replace bool) error {
+	return ensureOutputTarget(path, replace)
+}
+
+func ensureOutputTarget(path string, replace bool) error {
+	if path == "" {
+		return errors.New("output path is required")
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("inspect output path")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("output path must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("output path must be a regular file")
+	}
+	if !replace {
+		return errors.New("output file already exists; use --replace to renew it")
+	}
+	return nil
 }

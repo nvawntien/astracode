@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/nvawntien/go-judge-system/tools/benchmark/judge/internal/credentials"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }
 
 func TestTransportErrorClassPreservesClientCapacitySignals(t *testing.T) {
 	if got := TransportErrorClass(&TransportError{Err: syscall.EMFILE}); got != "client_emfile" {
@@ -50,7 +55,7 @@ func TestSubmitParsesCreatedAndRateLimited(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"success","code":20100,"data":{"id":42,"problem_id":1,"language":"GO","status":"PENDING"}}`))
 		}))
 		result, err := api.Submit(context.Background(), SubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: "x"})
-		if err != nil || result.Kind != SubmitAccepted || result.Submission.ID != 42 {
+		if err != nil || result.Kind != SubmitAccepted || result.Submission.ID != 42 || result.GotConnAt == nil || result.WroteRequestAt == nil || result.FirstResponseAt == nil {
 			t.Fatalf("result=%+v err=%v", result, err)
 		}
 	})
@@ -65,6 +70,31 @@ func TestSubmitParsesCreatedAndRateLimited(t *testing.T) {
 			t.Fatalf("result=%+v err=%v", result, err)
 		}
 	})
+}
+
+func TestDomainClientsSeparatePoolsButKeepSessionJar(t *testing.T) {
+	base, _ := url.Parse("https://benchmark.invalid")
+	sessions, err := credentials.NewSessions(credentials.File{SchemaVersion: 1, Users: []credentials.User{{Alias: "bench-001", Cookies: credentials.Cookies{AccessToken: "one"}}, {Alias: "bench-002", Cookies: credentials.Cookies{AccessToken: "two"}}}}, base, credentials.NewBenchmarkTransport(8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newClient := func() *http.Client {
+		return &http.Client{Transport: credentials.NewBenchmarkTransport(8), Jar: sessions[0].Jar}
+	}
+	control, submission, ticket, sse := newClient(), newClient(), newClient(), newClient()
+	api, err := NewWithDomainClients(base, sessions[0], DomainClients{Control: control, Submission: submission, Ticket: ticket, SSE: sse})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.control.client == api.submission.client || api.submission.client == api.ticket.client || api.ticket.client == api.sse.client {
+		t.Fatal("transport domains were not separate")
+	}
+	if api.submission.client.Jar != sessions[0].Jar || sessions[0].Jar == sessions[1].Jar {
+		t.Fatal("cookie jars were not isolated per identity")
+	}
+	if transport, ok := api.submission.client.Transport.(*http.Transport); !ok || !transport.ForceAttemptHTTP2 {
+		t.Fatal("HTTP/2 was intentionally disabled")
+	}
 }
 
 func TestSubmitMalformed201IsAmbiguous(t *testing.T) {
@@ -99,6 +129,27 @@ func TestSubmitClassifies4xx5xxAndNeverRetries(t *testing.T) {
 				t.Fatalf("result=%+v calls=%d err=%v", got, calls, err)
 			}
 		})
+	}
+}
+
+func TestSubmitDoesNotRetryAmbiguousTransportFailure(t *testing.T) {
+	base, _ := url.Parse("https://example.test")
+	calls := 0
+	sessions, err := credentials.NewSessions(credentials.File{SchemaVersion: 1, Users: []credentials.User{{Alias: "bench-001", Cookies: credentials.Cookies{AccessToken: "secret"}}}}, base, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, context.DeadlineExceeded
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(base, sessions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.Submit(context.Background(), SubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: "x"})
+	var transportErr *TransportError
+	if !errors.As(err, &transportErr) || TransportErrorClass(err) != "transport_deadline" || calls != 1 {
+		t.Fatalf("err=%T %v", err, err)
 	}
 }
 

@@ -83,9 +83,13 @@ func TestLoadRejectsSymlinkAndNonRegularFile(t *testing.T) {
 
 func TestNewSessionsKeepsCookieJarsIsolated(t *testing.T) {
 	base, _ := url.Parse("https://example.test")
-	sessions, err := NewSessions(validFile(), base, http.DefaultTransport)
+	transport := NewBenchmarkTransport(8192)
+	sessions, err := NewSessions(validFile(), base, transport)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if sessions[0].Client.Transport != transport || sessions[1].Client.Transport != transport {
+		t.Fatal("benchmark sessions do not share the configured transport")
 	}
 	sessions[0].Jar.SetCookies(base, []*http.Cookie{{Name: "only-first", Value: "yes", Path: "/"}})
 	for _, cookie := range sessions[1].Jar.Cookies(base) {
@@ -129,5 +133,12 @@ func TestNewBenchmarkTransportHasExplicitHighScaleLimits(t *testing.T) {
 	transport := NewBenchmarkTransport(10000)
 	if transport.MaxConnsPerHost != 10000 || transport.MaxIdleConnsPerHost != 4096 || transport.MaxIdleConns != 4096 {
 		t.Fatalf("transport=%+v", transport)
+	}
+}
+
+func TestNewBenchmarkTransportPreservesHTTP2Negotiation(t *testing.T) {
+	transport := NewBenchmarkTransport(8192)
+	if transport.ForceAttemptHTTP2 != http.DefaultTransport.(*http.Transport).ForceAttemptHTTP2 {
+		t.Fatalf("ForceAttemptHTTP2=%t differs from Go default=%t", transport.ForceAttemptHTTP2, http.DefaultTransport.(*http.Transport).ForceAttemptHTTP2)
 	}
 }

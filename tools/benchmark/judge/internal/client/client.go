@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,10 +24,45 @@ import (
 
 const maxResponseBytes = 1 << 20
 
+var errResponseBodyRead = errors.New("response body read failed")
+
 type API struct {
 	BaseURL     *url.URL
 	Session     *credentials.Session
-	Diagnostics *Diagnostics
+	Diagnostics *Diagnostics // retained for callers using one transport domain
+	control     domainClient
+	submission  domainClient
+	ticket      domainClient
+	sse         domainClient
+}
+
+// Domain identifies an intentionally isolated HTTP transport domain. Cookie
+// jars remain session-scoped; only connection pools are separated.
+type Domain string
+
+const (
+	DomainControl    Domain = "control"
+	DomainSubmission Domain = "submission"
+	DomainTicket     Domain = "ticket"
+	DomainSSE        Domain = "sse"
+)
+
+type domainClient struct {
+	client      *http.Client
+	diagnostics *Diagnostics
+}
+
+// DomainClients supplies the four clients for one logical identity. Each may
+// use a different shared transport but must use the same identity cookie jar.
+type DomainClients struct {
+	Control               *http.Client
+	Submission            *http.Client
+	Ticket                *http.Client
+	SSE                   *http.Client
+	ControlDiagnostics    *Diagnostics
+	SubmissionDiagnostics *Diagnostics
+	TicketDiagnostics     *Diagnostics
+	SSEDiagnostics        *Diagnostics
 }
 
 // Diagnostics is shared by APIs in one benchmark run. It records only local
@@ -37,6 +73,11 @@ type Diagnostics struct {
 	http1             atomic.Uint64
 	http2             atomic.Uint64
 	otherProtocol     atomic.Uint64
+	active            atomic.Int64
+	peakActive        atomic.Int64
+	timingMu          sync.Mutex
+	connectionAcquire []float64
+	dispatch          []float64
 }
 
 type DiagnosticsSnapshot struct {
@@ -45,13 +86,49 @@ type DiagnosticsSnapshot struct {
 	HTTP1Responses         uint64
 	HTTP2Responses         uint64
 	OtherProtocolResponses uint64
+	ActiveRequests         int
+	PeakActiveRequests     int
+	ConnectionAcquireMS    []float64
+	DispatchMS             []float64
 }
 
 func (d *Diagnostics) Snapshot() DiagnosticsSnapshot {
 	if d == nil {
 		return DiagnosticsSnapshot{}
 	}
-	return DiagnosticsSnapshot{NewConnections: d.newConnections.Load(), ReusedConnections: d.reusedConnections.Load(), HTTP1Responses: d.http1.Load(), HTTP2Responses: d.http2.Load(), OtherProtocolResponses: d.otherProtocol.Load()}
+	d.timingMu.Lock()
+	connectionAcquire := append([]float64(nil), d.connectionAcquire...)
+	dispatch := append([]float64(nil), d.dispatch...)
+	d.timingMu.Unlock()
+	return DiagnosticsSnapshot{NewConnections: d.newConnections.Load(), ReusedConnections: d.reusedConnections.Load(), HTTP1Responses: d.http1.Load(), HTTP2Responses: d.http2.Load(), OtherProtocolResponses: d.otherProtocol.Load(), ActiveRequests: int(d.active.Load()), PeakActiveRequests: int(d.peakActive.Load()), ConnectionAcquireMS: connectionAcquire, DispatchMS: dispatch}
+}
+
+func (d *Diagnostics) begin() func() {
+	if d == nil {
+		return func() {}
+	}
+	active := d.active.Add(1)
+	for {
+		peak := d.peakActive.Load()
+		if active <= peak || d.peakActive.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	return func() { d.active.Add(-1) }
+}
+
+func (d *Diagnostics) recordTiming(start time.Time, timing requestTiming) {
+	if d == nil {
+		return
+	}
+	d.timingMu.Lock()
+	if timing.gotConnAt != nil {
+		d.connectionAcquire = append(d.connectionAcquire, timing.gotConnAt.Sub(start).Seconds()*1000)
+	}
+	if timing.wroteRequestAt != nil {
+		d.dispatch = append(d.dispatch, timing.wroteRequestAt.Sub(start).Seconds()*1000)
+	}
+	d.timingMu.Unlock()
 }
 
 type Envelope struct {
@@ -105,13 +182,26 @@ const (
 )
 
 type SubmitResult struct {
-	Kind       SubmitKind
-	HTTPStatus int
-	APICode    int
-	Submission *Submission
-	RetryAfter *time.Duration
-	Message    string
-	Protocol   string
+	Kind            SubmitKind
+	HTTPStatus      int
+	APICode         int
+	Submission      *Submission
+	RetryAfter      *time.Duration
+	Message         string
+	Protocol        string
+	GotConnAt       *time.Time
+	WroteRequestAt  *time.Time
+	FirstResponseAt *time.Time
+}
+
+// RefreshResult exposes only the HTTP facts needed by the operator-only
+// session preparation command. It never includes response bodies or cookies.
+type RefreshResult struct {
+	HTTPStatus       int
+	APICode          int
+	RetryAfter       *time.Duration
+	Protocol         string
+	ResponseReadFail bool
 }
 
 // TransportError is ambiguous: the server may have received the POST. Callers
@@ -155,7 +245,17 @@ func NewWithDiagnostics(base *url.URL, session *credentials.Session, diagnostics
 	if base == nil || session == nil || session.Client == nil {
 		return nil, errors.New("base URL and isolated session are required")
 	}
-	return &API{BaseURL: base, Session: session, Diagnostics: diagnostics}, nil
+	return NewWithDomainClients(base, session, DomainClients{Control: session.Client, Submission: session.Client, Ticket: session.Client, SSE: session.Client, ControlDiagnostics: diagnostics, SubmissionDiagnostics: diagnostics, TicketDiagnostics: diagnostics, SSEDiagnostics: diagnostics})
+}
+
+// NewWithDomainClients constructs an API with isolated connection-pool
+// domains. It never shares a cookie jar between sessions: every supplied
+// client is expected to be created for this session's jar.
+func NewWithDomainClients(base *url.URL, session *credentials.Session, clients DomainClients) (*API, error) {
+	if base == nil || session == nil || clients.Control == nil || clients.Submission == nil || clients.Ticket == nil || clients.SSE == nil {
+		return nil, errors.New("base URL, isolated session, and all transport domains are required")
+	}
+	return &API{BaseURL: base, Session: session, Diagnostics: clients.ControlDiagnostics, control: domainClient{clients.Control, clients.ControlDiagnostics}, submission: domainClient{clients.Submission, clients.SubmissionDiagnostics}, ticket: domainClient{clients.Ticket, clients.TicketDiagnostics}, sse: domainClient{clients.SSE, clients.SSEDiagnostics}}, nil
 }
 
 func (a *API) Me(ctx context.Context) (Me, error) {
@@ -171,8 +271,33 @@ func (a *API) PublicProblem(ctx context.Context, slug string) (Problem, error) {
 }
 
 func (a *API) Refresh(ctx context.Context) error {
-	_, err := a.doJSON(ctx, http.MethodPost, "/api/v1/auth/refresh-token", nil, nil)
+	_, err := a.RefreshDetailed(ctx)
 	return err
+}
+
+// RefreshDetailed performs exactly one public Auth refresh request. Its
+// caller owns retry policy because refresh is retryable under the current
+// Auth contract, unlike submission creation.
+func (a *API) RefreshDetailed(ctx context.Context) (RefreshResult, error) {
+	response, err := a.request(ctx, http.MethodPost, "/api/v1/auth/refresh-token", nil, "application/json")
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	defer response.Body.Close()
+	result := RefreshResult{HTTPStatus: response.StatusCode, Protocol: response.Proto}
+	if retryAfter, ok := parseRetryAfter(response.Header.Get("Retry-After")); ok {
+		result.RetryAfter = &retryAfter
+	}
+	envelope, err := readEnvelope(response)
+	if err != nil {
+		result.ResponseReadFail = errors.Is(err, errResponseBodyRead)
+		return result, err
+	}
+	result.APICode = envelope.Code
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices || envelope.Status != "success" {
+		return result, fmt.Errorf("API request returned HTTP %d code %d", response.StatusCode, envelope.Code)
+	}
+	return result, nil
 }
 
 // Submit makes exactly one HTTP request. It intentionally exposes ambiguous
@@ -182,16 +307,19 @@ func (a *API) Submit(ctx context.Context, request SubmissionRequest) (SubmitResu
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("marshal submission request: %w", err)
 	}
-	response, err := a.request(ctx, http.MethodPost, "/api/v1/submissions", bytes.NewReader(body), "application/json")
+	timing := requestTiming{}
+	response, err := a.requestWithTiming(ctx, a.submission, http.MethodPost, "/api/v1/submissions", bytes.NewReader(body), "application/json", &timing)
+	result := SubmitResult{GotConnAt: timing.gotConnAt, WroteRequestAt: timing.wroteRequestAt, FirstResponseAt: timing.firstResponseAt}
 	if err != nil {
-		return SubmitResult{}, &TransportError{Err: err}
+		return result, &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	envelope, err := readEnvelope(response)
 	if err != nil {
-		return SubmitResult{Kind: Submit5xx, HTTPStatus: response.StatusCode}, &TransportError{Err: err}
+		result.Kind, result.HTTPStatus = Submit5xx, response.StatusCode
+		return result, &TransportError{Err: err}
 	}
-	result := SubmitResult{HTTPStatus: response.StatusCode, APICode: envelope.Code, Message: safeMessage(envelope.Msg), Protocol: response.Proto}
+	result.HTTPStatus, result.APICode, result.Message, result.Protocol = response.StatusCode, envelope.Code, safeMessage(envelope.Msg), response.Proto
 	switch {
 	case response.StatusCode == http.StatusCreated:
 		var submission Submission
@@ -218,7 +346,7 @@ func (a *API) Submit(ctx context.Context, request SubmissionRequest) (SubmitResu
 
 func (a *API) IssueTicket(ctx context.Context, submissionID int64) (Ticket, error) {
 	var data Ticket
-	_, err := a.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/submissions/%d/events/ticket", submissionID), nil, &data)
+	_, err := a.doJSONWithDomain(ctx, a.ticket, http.MethodPost, fmt.Sprintf("/api/v1/submissions/%d/events/ticket", submissionID), nil, &data)
 	if err == nil && data.Value == "" {
 		err = errors.New("ticket response contains no ticket")
 	}
@@ -234,6 +362,33 @@ func (a *API) GetSubmission(ctx context.Context, submissionID int64) (Submission
 	return data, err
 }
 
+// Prewarm performs a non-mutating public GET through one transport domain.
+// It is always outside the measured release and never creates benchmark state.
+func (a *API) Prewarm(ctx context.Context, domain Domain, slug string) (string, error) {
+	selected := a.control
+	switch domain {
+	case DomainControl:
+	case DomainSubmission:
+		selected = a.submission
+	case DomainTicket:
+		selected = a.ticket
+	case DomainSSE:
+		selected = a.sse
+	default:
+		return "", errors.New("unknown transport domain")
+	}
+	response, err := a.requestWithTiming(ctx, selected, http.MethodGet, "/api/v1/problems/"+url.PathEscape(slug), nil, "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return response.Proto, fmt.Errorf("prewarm returned HTTP %d", response.StatusCode)
+	}
+	_, err = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
+	return response.Proto, err
+}
+
 // OpenEvents returns a stream response. The ticket query must never be logged
 // or persisted by callers.
 func (a *API) OpenEvents(ctx context.Context, submissionID int64, ticket string) (*http.Response, error) {
@@ -247,31 +402,36 @@ func (a *API) OpenEvents(ctx context.Context, submissionID int64, ticket string)
 		return nil, err
 	}
 	request.Header.Set("Accept", "text/event-stream")
-	if a.Diagnostics != nil {
-		request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
-			if info.Reused {
-				a.Diagnostics.reusedConnections.Add(1)
-			} else {
-				a.Diagnostics.newConnections.Add(1)
-			}
-		}}))
+	start := time.Now()
+	timing := requestTiming{}
+	if a.sse.diagnostics != nil {
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), a.clientTrace(a.sse.diagnostics, &timing)))
 	}
-	response, err := a.Session.Client.Do(request)
+	done := a.sse.diagnostics.begin()
+	response, err := a.sse.client.Do(request)
+	a.sse.diagnostics.recordTiming(start, timing)
 	if err != nil {
+		done()
 		// The URL embeds a one-time ticket. Never surface a transport error that
 		// might include the full request URL through net/http formatting.
 		return nil, &StreamTransportError{Err: err}
 	}
-	a.trackResponse(response)
+	a.trackResponseWith(a.sse.diagnostics, response)
 	if response.StatusCode != http.StatusOK || !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		done()
 		response.Body.Close()
 		return nil, fmt.Errorf("SSE endpoint returned HTTP %d", response.StatusCode)
 	}
+	response.Body = &trackedBody{ReadCloser: response.Body, done: done}
 	return response, nil
 }
 
 func (a *API) doJSON(ctx context.Context, method, path string, body io.Reader, output any) (Envelope, error) {
-	response, err := a.request(ctx, method, path, body, "application/json")
+	return a.doJSONWithDomain(ctx, a.control, method, path, body, output)
+}
+
+func (a *API) doJSONWithDomain(ctx context.Context, domain domainClient, method, path string, body io.Reader, output any) (Envelope, error) {
+	response, err := a.requestWithTiming(ctx, domain, method, path, body, "application/json", nil)
 	if err != nil {
 		return Envelope{}, err
 	}
@@ -292,6 +452,16 @@ func (a *API) doJSON(ctx context.Context, method, path string, body io.Reader, o
 }
 
 func (a *API) request(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	return a.requestWithTiming(ctx, a.control, method, path, body, contentType, nil)
+}
+
+type requestTiming struct {
+	gotConnAt       *time.Time
+	wroteRequestAt  *time.Time
+	firstResponseAt *time.Time
+}
+
+func (a *API) requestWithTiming(ctx context.Context, domain domainClient, method, path string, body io.Reader, contentType string, timing *requestTiming) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, method, a.resolve(path).String(), body)
 	if err != nil {
 		return nil, err
@@ -300,32 +470,90 @@ func (a *API) request(ctx context.Context, method, path string, body io.Reader, 
 		request.Header.Set("Content-Type", contentType)
 	}
 	request.Header.Set("Accept", "application/json")
-	if a.Diagnostics != nil {
-		request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
-			if info.Reused {
-				a.Diagnostics.reusedConnections.Add(1)
-			} else {
-				a.Diagnostics.newConnections.Add(1)
-			}
-		}}))
+	traceTiming := timing
+	if traceTiming == nil {
+		traceTiming = &requestTiming{}
 	}
-	response, err := a.Session.Client.Do(request)
-	a.trackResponse(response)
+	if domain.diagnostics != nil || timing != nil {
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), a.clientTrace(domain.diagnostics, traceTiming)))
+	}
+	start := time.Now()
+	done := domain.diagnostics.begin()
+	response, err := domain.client.Do(request)
+	done()
+	domain.diagnostics.recordTiming(start, dereferenceTiming(traceTiming))
+	a.trackResponseWith(domain.diagnostics, response)
 	return response, err
 }
 
+func dereferenceTiming(timing *requestTiming) requestTiming {
+	if timing == nil {
+		return requestTiming{}
+	}
+	return *timing
+}
+
+func (a *API) clientTrace(diagnostics *Diagnostics, timing *requestTiming) *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			at := time.Now()
+			if timing != nil {
+				timing.gotConnAt = &at
+			}
+			if diagnostics == nil {
+				return
+			}
+			if info.Reused {
+				diagnostics.reusedConnections.Add(1)
+			} else {
+				diagnostics.newConnections.Add(1)
+			}
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			if timing == nil {
+				return
+			}
+			at := time.Now()
+			timing.wroteRequestAt = &at
+		},
+		GotFirstResponseByte: func() {
+			if timing == nil {
+				return
+			}
+			at := time.Now()
+			timing.firstResponseAt = &at
+		},
+	}
+}
+
 func (a *API) trackResponse(response *http.Response) {
-	if response == nil || a.Diagnostics == nil {
+	a.trackResponseWith(a.Diagnostics, response)
+}
+
+func (a *API) trackResponseWith(diagnostics *Diagnostics, response *http.Response) {
+	if response == nil || diagnostics == nil {
 		return
 	}
 	switch response.ProtoMajor {
 	case 1:
-		a.Diagnostics.http1.Add(1)
+		diagnostics.http1.Add(1)
 	case 2:
-		a.Diagnostics.http2.Add(1)
+		diagnostics.http2.Add(1)
 	default:
-		a.Diagnostics.otherProtocol.Add(1)
+		diagnostics.otherProtocol.Add(1)
 	}
+}
+
+type trackedBody struct {
+	io.ReadCloser
+	once sync.Once
+	done func()
+}
+
+func (b *trackedBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.done)
+	return err
 }
 
 func (a *API) resolve(path string) *url.URL {
@@ -339,7 +567,7 @@ func (a *API) resolve(path string) *url.URL {
 func readEnvelope(response *http.Response) (Envelope, error) {
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return Envelope{}, fmt.Errorf("read HTTP %d API response", response.StatusCode)
+		return Envelope{}, fmt.Errorf("read HTTP %d API response: %w", response.StatusCode, errResponseBodyRead)
 	}
 	if len(data) > maxResponseBytes {
 		return Envelope{}, fmt.Errorf("HTTP %d API response exceeds size limit", response.StatusCode)
@@ -355,11 +583,19 @@ func readEnvelope(response *http.Response) (Envelope, error) {
 }
 
 func parseRetryAfter(raw string) (time.Duration, bool) {
-	seconds, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil || seconds < 0 {
+	raw = strings.TrimSpace(raw)
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
 		return 0, false
 	}
-	return time.Duration(seconds) * time.Second, true
+	delay := time.Until(when)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
 }
 
 func safeMessage(message string) string {

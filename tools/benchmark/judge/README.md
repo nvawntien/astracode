@@ -41,6 +41,38 @@ live credentials: keep it mode `0600`, do not share or upload it, and remove or
 regenerate it after the benchmark window. Bootstrap sessions before warmup, not
 during a measured run.
 
+## Bulk refresh of an existing benchmark pool
+
+When a protected `users-100k.local.json` pool already exists but its access
+cookies have expired, renew it **before** any benchmark preflight or measured
+burst. `refresh-sessions` uses the public Auth refresh endpoint with one
+isolated cookie jar per benchmark user and a shared, bounded HTTP/2-capable
+transport. It is preparation traffic, not part of benchmark timing.
+
+The command first inspects only unverified local JWT expiry payloads. It aborts
+without network refresh traffic if any selected refresh cookie is missing,
+malformed, or expired. It refreshes every selected user through a bounded
+worker pool, retries only retryable refresh failures (429, 5xx, and temporary
+transport/body-read failures), and writes nothing until the complete pool plus
+a small deterministic `/api/v1/me` sample pass. Submission POSTs remain
+non-retried by the benchmark itself.
+
+```bash
+go run ./cmd/refresh-sessions \
+  --base-url https://<public-host> --allow-remote \
+  --confirm-target-host <public-host> \
+  --input ./users-100k.local.json --output ./users-100k.local.json --replace \
+  --user-count 100000 --concurrency 256 --request-timeout 10s \
+  --max-attempts 5 --min-access-valid-for 5m --validation-sample 32
+```
+
+The output is encoded into a same-directory `0600` temporary file, fsynced,
+and atomically renamed only after all checks succeed. A failed or cancelled
+refresh leaves the original credential file untouched. The command prints only
+aggregate counts and expiry times; it never prints cookie or token values.
+Do not run it during a measured burst and do not use it as a 100K `/me`
+preflight—the validation sample is deliberately bounded.
+
 For a remote target, require HTTPS and explicitly confirm its host:
 
 ```bash
@@ -216,7 +248,8 @@ ulimit -n 262144
 go run . burst --benchmark-objective massive-burst --observation-mode realistic \
   --base-url https://<public-host> --allow-remote --confirm-target-host <public-host> \
   --users-file ./users-100k.local.json --user-count 100000 --burst-size 100000 \
-  --max-in-flight 100000 --max-submissions 100000 --submit-error-policy continue \
+  --max-in-flight 100000 --client-max-conns-per-host 8192 --submission-transport-shards 16 --ticket-transport-shards 4 --sse-transport-shards 4 --transport-prewarm \
+  --api-timeout 15s --client-schedule-p95-budget 500ms --client-dispatch-p95-budget 500ms --max-submissions 100000 --submit-error-policy continue \
   --preflight-concurrency 256 --admission-preflight-sample 32 --sse-hold-duration 30s \
   --safety-reconcile-interval=0 --problem-id <id> --problem-slug <slug> \
   --language PYTHON --source-file ./approved-benchmark.py --expected-verdict ACCEPTED \
@@ -231,10 +264,25 @@ For realistic mode, the qualification estimate is `2 × max-in-flight + 256`
 (200,256 at 100K): one transient stage slot plus one potentially held SSE
 slot. It is deliberately conservative and **not** a claim that every logical
 user consumes two TCP sockets; HTTP/2 may multiplex while HTTP/1.1 may not.
+It is independent of `--client-max-conns-per-host` (default `8192`), which is
+the aggregate per-domain transport TCP connection cap rather than a logical-user
+or FD limit. Submission POSTs use 16 deterministic shared transport shards by
+default; ticket POSTs use 4 and SSE GETs use 4. Submission retains the 8192
+aggregate cap; ticket and SSE domains are each bounded to 2048 aggregate
+connections (and control traffic to 64) so domain separation does not multiply
+the intended TCP fan-out. This keeps long-lived SSE
+streams out of the Submission connection pools while retaining HTTP/2 and one
+isolated cookie jar per user. All 100K logical users still release at the common
+barrier; sharding never batches or serializes logical users. `--transport-prewarm`
+uses only a safe public problem GET once per shard before measurement so DNS,
+TLS, and HTTP/2 setup are visible setup evidence rather than release noise.
 The report records soft/hard RLIMIT, sampled open FDs, Go CPU/goroutine counts,
 active POST/ticket/SSE peaks, connection reuse/new-connection counters,
-HTTP/1.1 versus HTTP/2 response counts, scheduling spread, and transport error
-classes. `262144` is a reasonable starting operator limit, not a guarantee.
+HTTP/1.1 versus HTTP/2 response counts, scheduling spread, connection-acquire
+delay, transport-dispatch delay (`WroteRequest - POST start`), wire-to-first-byte,
+wire-to-response-complete, and per-domain/per-shard transport diagnostics. Missing
+`httptrace` timestamps remain unavailable rather than becoming zero. The report
+error classes. `262144` is a reasonable starting operator limit, not a guarantee.
 Admission-only has its separate `max-in-flight + 256` estimate (100,256 at
 100K). Direct local evidence such as `EMFILE`, `ENFILE`, `EADDRNOTAVAIL`, or
 sustained scheduling lag emits the `LOAD_GENERATOR_LIMITED` quality flag; the
@@ -244,6 +292,10 @@ failures unless corroborated by explicit FD, ephemeral-port, scheduling, or
 other measured load-generator resource saturation. One load generator is
 scientifically defensible only if these qualification fields pass; otherwise use
 multiple qualified generators and report their aggregate actual POST timing.
+Dispatch delay is direct qualification evidence: a p95 above
+`--client-dispatch-p95-budget` marks the run `CLIENT_LIMITED` rather than hiding
+requests queued inside the Go transport. Logical release scheduling is separately
+qualified by `--client-schedule-p95-budget`; neither is a server-latency SLO.
 
 Diagnostic admission-only command (same source and user set; still no ticket,
 SSE, reconciliation, or terminal drain):
@@ -253,6 +305,8 @@ go run . burst --benchmark-objective massive-burst --observation-mode admission-
   --base-url https://<public-host> --allow-remote --confirm-target-host <public-host> \
   --users-file ./users-100k.local.json --user-count 100000 --burst-size 100000 \
   --max-in-flight 100000 --max-submissions 100000 --submit-error-policy continue \
+  --client-max-conns-per-host 8192 --submission-transport-shards 16 --transport-prewarm \
+  --api-timeout 15s --client-schedule-p95-budget 500ms --client-dispatch-p95-budget 500ms \
   --preflight-concurrency 256 --admission-preflight-sample 32 --safety-reconcile-interval=0 \
   --problem-id <id> --problem-slug <slug> --language PYTHON --source-file ./approved-benchmark.py \
   --expected-verdict ACCEPTED --submit-cooldown 3s --result-root ./bench-results
