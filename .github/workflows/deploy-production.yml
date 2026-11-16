@@ -69,15 +69,15 @@ jobs:
             docker-compose.yml \
             docker-compose.prod.yml \
             envoy/envoy.prod.yaml \
-            gateway/krakend.tmpl \
-            gateway/settings \
-            gateway/templates \
+            envoy/edge.lua \
             infra/kafka/kafka-init.sh \
             infra/postgres/init.sql \
             services/auth/config \
             services/problem/config \
             services/submission/config \
-            scripts/deploy-app-node.sh
+            scripts/deploy-app-node.sh \
+            scripts/envoy-runtime.sh \
+            scripts/deploy-app-bundle.py
 
           tar -czf /tmp/astracode-judge-deployment.tgz \
             scripts/deploy-judge-node.sh
@@ -194,7 +194,7 @@ jobs:
           PREVIOUS_JUDGE_TAG: ${{ steps.judge_before.outputs.tag }}
         run: |
           if ssh astracode-app \
-            "mkdir -p /opt/astracode && tar -xzf /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz -C /opt/astracode && rm -f /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz && /opt/astracode/scripts/deploy-app-node.sh '$IMAGE_TAG'"; then
+            "tar -xOf /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz scripts/deploy-app-bundle.py | python3 - '$IMAGE_TAG' /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz"; then
             exit 0
           else
             app_status=$?

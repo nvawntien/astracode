@@ -1,5 +1,5 @@
 /**
- * Types mirroring the Go backend DTOs exposed through the KrakenD gateway.
+ * Types mirroring the Go backend DTOs exposed through the Envoy gateway.
  *
  * auth service       services/auth/internal/application/dto
  * problem service    services/problem/internal/application/dto

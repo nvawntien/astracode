@@ -8,13 +8,13 @@ Go Judge System is an online-judge backend. It manages identities, authoring and
 
 The repository is a Go workspace with five modules: the shared `pkg/` module plus `services/auth`, `services/problem`, `services/submission`, and `workers/judge` (`go.work`). Each Go service uses a ports-and-adapters shape: `cmd/server` composes dependencies with Google Wire; `internal/domain` holds entities/errors; `internal/application` exposes use cases and port interfaces; and `internal/adapter` implements HTTP/gRPC/Kafka/storage concerns.
 
-Public traffic enters Envoy on port 8080, then KrakenD. KrakenD validates HS256 JWTs on protected endpoints and propagates identity headers. Auth, Problem, and Submission are independently deployable HTTP services. Auth, Problem and Judge Worker additionally expose internal gRPC servers. The durable judging path is Kafka-based and uses a submission-side transactional outbox.
+Public traffic enters Envoy on port 8080 and routes directly to the backend services. Envoy validates HS256 JWTs on protected endpoints and propagates identity headers. Auth, Problem, and Submission are independently deployable HTTP services. Auth, Problem and Judge Worker additionally expose internal gRPC servers. The durable judging path is Kafka-based and uses a submission-side transactional outbox.
 
 ## Components
 
 | Component | Role | Main evidence |
 | --- | --- | --- |
-| Envoy + KrakenD | Public edge, gateway routing, JWT validation/claim propagation | `envoy/envoy.yaml`, `gateway/krakend.tmpl`, `gateway/settings/` |
+| Envoy | Public edge, gateway routing, JWT validation/claim propagation | `envoy/envoy.yaml`, `envoy/envoy.prod.yaml`, `envoy/routes.json` |
 | Auth Service | Accounts, credentials, JWTs, verification/reset mail, profiles/avatars, roles | `services/auth/` |
 | Problem Service | Problems, tags, testcase bundle metadata and object storage | `services/problem/` |
 | Submission Service | Submission/attempt/result persistence, outbox, Kafka result consumption, SSE, ad-hoc run-code orchestration | `services/submission/` |
@@ -30,10 +30,9 @@ Public traffic enters Envoy on port 8080, then KrakenD. KrakenD validates HS256 
 ```mermaid
 flowchart LR
   client[Client / Next.js] --> envoy[Envoy :8080]
-  envoy --> gateway[KrakenD]
-  gateway --> auth[Auth :8081]
-  gateway --> problem[Problem HTTP :8082]
-  gateway --> submission[Submission :8083]
+  envoy --> auth[Auth :8081]
+  envoy --> problem[Problem HTTP :8082]
+  envoy --> submission[Submission :8083]
   submission -->|ResolvePublicUser| authgrpc[Auth gRPC :9091]
   submission -->|transactional outbox| jobs[(Kafka jobs)]
   jobs --> worker[Judge Worker]
@@ -49,4 +48,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for communication and layers, [FLOWS.md](
 
 ## Technology inventory
 
-Go 1.25.8 workspace, Gin, GORM with PostgreSQL, Sarama/Kafka, grpc-go, Viper, Zap, MinIO SDK, Redis, Google Wire, Docker Compose, Envoy, KrakenD, and Next.js. No Kubernetes manifests, Makefile, CI workflow, SQL migration framework, or protobuf generation configuration were found in this checkout. Schema evolution is currently performed by GORM `AutoMigrate` during repository construction.
+Go 1.25.8 workspace, Gin, GORM with PostgreSQL, Sarama/Kafka, grpc-go, Viper, Zap, MinIO SDK, Redis, Google Wire, Docker Compose, Envoy, and Next.js. CI workflows live in `.github/workflows/`. No Kubernetes manifests, Makefile, SQL migration framework, or protobuf generation configuration were found in this checkout. Schema evolution is currently performed by GORM `AutoMigrate` during repository construction.

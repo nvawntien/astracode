@@ -16,11 +16,11 @@ import (
 
 // This black-box test targets Envoy, never Auth directly. The supplied JWK
 // must belong to an isolated non-production stack; it is read only to create
-// JWTs that KrakenD validates before it derives X-User-* headers.
+// JWTs that Envoy validates before it derives X-User-* headers.
 //
 // Example:
 // AUTH_IDENTITY_HEADER_TRUST_INTEGRATION_BASE_URL=http://127.0.0.1:8080 \
-// AUTH_IDENTITY_HEADER_TRUST_INTEGRATION_JWK_PATH=../../../../../../gateway/symmetric.json \
+// AUTH_IDENTITY_HEADER_TRUST_INTEGRATION_JWK_PATH=../../../../../../envoy/symmetric.json \
 // go test ./internal/adapter/inbound/http -run TestIdentityHeaderTrustIntegration -count=1
 func TestIdentityHeaderTrustIntegration(t *testing.T) {
 	baseURL := strings.TrimRight(os.Getenv("AUTH_IDENTITY_HEADER_TRUST_INTEGRATION_BASE_URL"), "/")

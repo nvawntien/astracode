@@ -235,7 +235,7 @@ go run ./cmd/bootstrap-sessions --base-url https://<public-host> --allow-remote 
 
 # C/D. On the App node, start independent UTC collectors before the burst.
 ./scripts/collect-container-stats.sh --node app-1 --interval 1 \
-  --container judge_envoy --container judge_gateway --container judge_submission \
+  --container judge_envoy --container judge_submission \
   --container judge_problem --container judge_auth --container judge_postgres \
   --container judge_redis --container judge_kafka > /safe/100k-container-stats.csv &
 ./scripts/collect-kafka-lag.sh --bootstrap-server <broker> \

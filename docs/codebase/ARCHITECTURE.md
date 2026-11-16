@@ -15,7 +15,7 @@ All four Go runtime components follow the same directional dependency pattern: i
 
 ```mermaid
 flowchart TB
-  gateway[Envoy -> KrakenD]
+  gateway[Envoy]
   auth[Auth]
   problem[Problem]
   submission[Submission]
@@ -43,7 +43,7 @@ flowchart TB
 
 ### Synchronous paths
 
-* Client -> gateway -> Gin services: KrakenD endpoint JSON is authoritative for public exposure. Service routers may contain endpoints that are not necessarily routed publicly; compare `gateway/settings/` with router files before changing an API.
+* Client -> gateway -> Gin services: The explicit Envoy route inventory is authoritative for public exposure. Service routers may contain endpoints that are not necessarily routed publicly; compare `envoy/routes.json` with router files before changing an API.
 * Submission -> Problem gRPC `GetProblem`: verifies canonical problem metadata/access before persisting a submission (`services/submission/internal/adapter/outbound/problem/grpc_client.go`).
 * Submission -> Auth gRPC `ResolvePublicUser`: resolves an active, non-suspended username to a stable user ID before serving public competitive aggregates. Auth owns this visibility decision; Submission then reads only its own database.
 * Submission -> Judge Worker gRPC `RunCode`: serves the interactive `/api/v1/submissions/run` feature, with request validation/limits in the Submission use case and worker execution adapter.
