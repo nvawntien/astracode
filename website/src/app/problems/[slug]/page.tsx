@@ -30,7 +30,6 @@ import type {
   CodeDiagnostic,
   LanguageCode,
   Problem,
-  RunResponse,
   Submission,
   SubmissionDetail,
   SubmissionStreamEvent,
@@ -41,10 +40,10 @@ import { RunSubmitButtons } from '@/features/problem-workspace/components/RunSub
 import { TestcasePanel } from '@/features/problem-workspace/components/TestcasePanel';
 import { ResultPanel } from '@/features/problem-workspace/components/ResultPanel';
 import { iconButton } from '@/features/problem-workspace/components/workspaceStyles';
-import { isRunFailure } from '@/features/problem-workspace/runResult';
-import type { TestCase } from '@/features/problem-workspace/types';
 import { useEditorDraft } from '@/features/problem-workspace/hooks/useEditorDraft';
 import { useEditorPreferences } from '@/features/problem-workspace/hooks/useEditorPreferences';
+import { useTestcases } from '@/features/problem-workspace/hooks/useTestcases';
+import { useRunCode } from '@/features/problem-workspace/hooks/useRunCode';
 
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
@@ -197,72 +196,21 @@ export default function WorkspacePage() {
 
   /* ---------------------------------------------------------------- tests */
 
-  const [tests, setTests] = useState<TestCase[]>([]);
-  const [selectedTest, setSelectedTest] = useState(0);
-
-  useEffect(() => {
-    if (!problem) return;
-    const fromExamples = (problem.examples ?? []).map((example, index) => ({
-      id: `sample-${index + 1}`,
-      kind: 'sample' as const,
-      name: `Case ${index + 1}`,
-      input: example.input,
-      expected: example.expected_output,
-      fromExample: true,
-    }));
-    setTests(
-      fromExamples.length > 0
-        ? fromExamples
-        : [
-            {
-              id: 'custom-1',
-              kind: 'custom',
-              name: 'Custom 1',
-              input: '',
-              expected: null,
-              fromExample: false,
-            },
-          ],
-    );
-    setSelectedTest(0);
-  }, [problem]);
-
-  const updateTest = (index: number, patch: Partial<TestCase>) => {
-    setTests((current) => current.map((test, i) => (i === index ? { ...test, ...patch } : test)));
-  };
-
-  const addTest = () => {
-    if (tests.length >= 10) {
-      showToast('Maximum of 10 test cases', 'error');
-      return;
-    }
-    const customCount = tests.filter((test) => test.kind === 'custom').length + 1;
-    setTests((current) => [
-      ...current,
-      {
-        id: `custom-${Date.now()}`,
-        kind: 'custom',
-        name: `Custom ${customCount}`,
-        input: '',
-        expected: null,
-        fromExample: false,
-      },
-    ]);
-    setSelectedTest(tests.length);
-  };
-
-  const removeTest = (index: number) => {
-    setTests((current) => current.filter((_, i) => i !== index));
-    setSelectedTest((current) => Math.max(0, current > index ? current - 1 : current));
-  };
+  const {
+    tests,
+    selectedTest,
+    setSelectedTest,
+    updateTest,
+    addTest,
+    removeTest,
+    addExample,
+    selectRunResult,
+  } = useTestcases({ problem, showToast });
 
   /* --------------------------------------------------------- run & submit */
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('tests');
   const [bottomOpen, setBottomOpen] = useState(true);
-  const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<RunResponse | null>(null);
-  const [consoleLines, setConsoleLines] = useState<{ text: string; color: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [checkingResult, setCheckingResult] = useState(false);
   const [submission, setSubmission] = useState<Submission | null>(null);
@@ -306,65 +254,27 @@ export default function WorkspacePage() {
     return false;
   };
 
-  const run = async () => {
-    if (!problem || running || submitting) return;
-    if (!requireAuth('run code')) return;
-    if (!online) {
-      showToast('You appear to be offline', 'error');
-      return;
-    }
-
-    setRunning(true);
-    setCodeDiagnostics([]);
-    setJumpLine(null);
-    setBottomTab('result');
-
-    try {
-      const result = await submissionApi.run({
-        problem_id: problem.id,
-        language,
-        source_code: code,
-        testcases: tests.map((test) => ({
-          id: test.id,
-          kind: test.kind,
-          stdin: test.input,
-          expected_output: test.expected,
-        })),
-      });
-      setRunResult(result);
-      const diagnostics = collectRunDiagnostics(result);
+  const { running, runResult, consoleLines, run, setRunResult } = useRunCode({
+    problem,
+    language,
+    code,
+    tests,
+    submitting,
+    online,
+    requireAuth,
+    showToast,
+    onStart: () => {
+      setCodeDiagnostics([]);
+      setJumpLine(null);
+      setBottomTab('result');
+    },
+    onResult: (result, diagnostics) => {
       setCodeDiagnostics(diagnostics);
       if (diagnostics[0]?.line) setJumpLine(diagnostics[0].line);
-      const firstFailed = result.tests.findIndex((test) => isRunFailure(test));
-      if (firstFailed >= 0) setSelectedTest(firstFailed);
-      else if (selectedTest >= tests.length) setSelectedTest(0);
-      setConsoleLines(buildRunConsoleLines(result));
-    } catch (err) {
-      if (err instanceof ApiError && err.isUnimplemented) {
-        showToast('Custom runs are unavailable right now — use Submit', 'error');
-        setConsoleLines([
-          {
-            text: `POST ${process.env.NEXT_PUBLIC_RUN_ENDPOINT ?? '/api/v1/submissions/run'} → ${err.httpStatus}`,
-            color: 'var(--text3)',
-          },
-          {
-            text: 'Custom tests are unavailable right now. Submit runs the official test suite.',
-            color: 'var(--warn)',
-          },
-        ]);
-        setBottomTab('console');
-      } else if (err instanceof NetworkError) {
-        showToast(
-          'AstraCode is temporarily unreachable. Check your connection and try again.',
-          'error',
-        );
-      } else if (err instanceof ApiError) {
-        showToast(err.message || 'Run failed', 'error');
-      }
-    } finally {
-      setRunning(false);
-    }
-  };
+      selectRunResult(result);
+    },
+    onUnavailable: () => setBottomTab('console'),
+  });
 
   const applyStreamStatus = useCallback((event: SubmissionStreamEvent) => {
     setSubmission((current) => {
@@ -781,21 +691,7 @@ export default function WorkspacePage() {
                 signedIn={Boolean(user)}
                 historyRefreshKey={historyRefreshKey}
                 onUseExample={(input, expected) => {
-                  setTests((current) => {
-                    const next = [
-                      ...current,
-                      {
-                        id: `custom-${Date.now()}`,
-                        kind: 'custom' as const,
-                        name: `Custom ${current.filter((test) => test.kind === 'custom').length + 1}`,
-                        input,
-                        expected,
-                        fromExample: false,
-                      },
-                    ];
-                    setSelectedTest(next.length - 1);
-                    return next;
-                  });
+                  addExample(input, expected);
                   setBottomTab('tests');
                   setBottomOpen(true);
                   showToast('Example added as a custom test', 'success');
@@ -1286,43 +1182,4 @@ export default function WorkspacePage() {
       )}
     </div>
   );
-}
-
-function collectRunDiagnostics(result: RunResponse): CodeDiagnostic[] {
-  const seen = new Set<string>();
-  const diagnostics: CodeDiagnostic[] = [];
-  const add = (diagnostic: CodeDiagnostic) => {
-    if (!diagnostic || diagnostic.line <= 0) return;
-    const key = [
-      diagnostic.testcase_id ?? '',
-      diagnostic.kind,
-      diagnostic.line,
-      diagnostic.column,
-      diagnostic.message,
-    ].join('|');
-    if (seen.has(key)) return;
-    seen.add(key);
-    diagnostics.push(diagnostic);
-  };
-
-  for (const diagnostic of result.diagnostics ?? []) add(diagnostic);
-  for (const test of result.tests ?? []) {
-    for (const diagnostic of test.diagnostics ?? []) add(diagnostic);
-  }
-  return diagnostics;
-}
-
-function buildRunConsoleLines(result: RunResponse): { text: string; color: string }[] {
-  if (result.status === 'compile_error') {
-    return [{ text: result.compile_output || 'Compilation failed', color: 'var(--warn)' }];
-  }
-
-  const lines: { text: string; color: string }[] = [];
-  for (const test of result.tests) {
-    if (test.stdout)
-      lines.push({ text: `[${test.id}] stdout\n${test.stdout}`, color: 'var(--code-fg)' });
-    if (test.stderr)
-      lines.push({ text: `[${test.id}] stderr\n${test.stderr}`, color: 'var(--error)' });
-  }
-  return lines;
 }
