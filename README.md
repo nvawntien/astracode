@@ -46,11 +46,10 @@ statistics, and Judge Worker owns asynchronous execution orchestration.
 flowchart TB
   browser[Browser] --> edge[Envoy edge]
   edge --> website[Next.js workspace]
-  edge --> gateway[KrakenD gateway]
 
-  gateway --> auth[Auth Service]
-  gateway --> problem[Problem Service]
-  gateway --> submission[Submission Service]
+  edge --> auth[Auth Service]
+  edge --> problem[Problem Service]
+  edge --> submission[Submission Service]
 
   auth --> authdb[(auth_db)]
   auth --> redis[(Redis)]
@@ -75,7 +74,7 @@ The diagram above describes the logical runtime relationships. The verified
 production deployment separates those components across two physical roles:
 
 - **App Node** — runs `website`, `auth-service`, `problem-service`,
-  `submission-service`, Envoy, KrakenD, PostgreSQL, Redis, Kafka, and MinIO. It
+  `submission-service`, Envoy, PostgreSQL, Redis, Kafka, and MinIO. It
   does not run Judge Worker or the go-judge executor.
 - **Judge Node** — runs `judge-worker` and the go-judge sandbox/executor.
 
@@ -85,7 +84,7 @@ Judge Worker gRPC path and do not enter the official-submission queue.
 
 ### Official judging lifecycle
 
-1. The browser submits source code through Envoy and KrakenD to Submission Service.
+1. The browser submits source code through Envoy to Submission Service.
 2. Submission Service validates the request and Problem access, then creates a
    submission, immutable attempt, and outbox record in one transaction.
 3. The outbox relay publishes the committed job to `judge.submission.jobs`.
@@ -139,8 +138,7 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 | `problem-service` | Problems, tags, contributor ownership, testcase metadata, and object storage access. |
 | `submission-service` | Submission/attempt/result state, transactional outbox, profile statistics, and SSE. |
 | `judge-worker` | Kafka consumption, testcase retrieval, executor orchestration, and result publication. |
-| `gateway` | KrakenD API composition, JWT validation, and trusted identity propagation. |
-| `envoy` | Public edge routing for the website, API, avatars, and submission-event traffic. |
+| `envoy` | Public routing, JWT validation, trusted identity propagation, and SSE. |
 | `go-judge` | Executorserver-based isolated program execution runtime. |
 
 ## Technology stack
@@ -152,7 +150,7 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 | Messaging | Apache Kafka **4.0.0** in KRaft mode, Sarama |
 | Data | PostgreSQL **15.6**, Redis **7.2**, MinIO |
 | Execution | `criyle/executorserver`-based go-judge image with C/C++, Python, and Go tooling |
-| Edge | Envoy **1.34.2**, KrakenD **2.6.0** |
+| Edge | Envoy **1.34.2** |
 | Local topology | Docker Compose, persistent volumes, health checks, and resource limits |
 
 ## Roles and authoring workflow
@@ -190,12 +188,18 @@ test -f environment/redis.env || \
 test -f environment/service.env || \
   cp environment/service.env.example environment/service.env
 
+# Generate the ignored JWK from the SAME access secret used by Auth.
+set -a
+source environment/service.env
+set +a
+JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+
 docker compose --profile dev --profile worker up -d --build
 docker compose ps
 ```
 
 The `worker` profile is required for official asynchronous judging; `dev` enables
-MailHog and Kafka UI. Compose starts the edge, gateway, services, Kafka,
+MailHog and Kafka UI. Compose starts the edge, services, Kafka,
 storage, and executor. Start the Next.js app separately.
 
 ### Start the frontend
@@ -269,8 +273,7 @@ Further technical documentation:
 ├── workers/judge/           # Kafka judge consumer and run-code gRPC service
 ├── pkg/                     # shared Go configuration, middleware, contracts, clients
 ├── proto/                   # internal gRPC contracts
-├── gateway/                 # KrakenD configuration and endpoint definitions
-├── envoy/                   # public edge proxy configuration
+├── envoy/                   # Envoy configuration and explicit route inventory
 ├── build/sandbox/           # executor image definition
 ├── infra/                   # PostgreSQL and Kafka bootstrap assets
 ├── environment/             # local Compose runtime configuration
@@ -342,7 +345,7 @@ before a multi-replica or public deployment.
 
 ## Security model
 
-- KrakenD validates JWTs for protected gateway routes and propagates trusted
+- Envoy validates JWTs for protected gateway routes and propagates trusted
   identity claims to internal services.
 - Auth records Redis-backed issued-at cutoffs for logout-all, suspension, and
   password lifecycle invalidation.

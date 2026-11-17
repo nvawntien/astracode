@@ -81,8 +81,28 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Gateway client contract
+        run: node --test ../envoy/tests/frontend.mjs
+
       - name: Build
         run: npm run build
+
+  edge:
+    name: Envoy routing and authentication
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+          fetch-depth: 0 # Independent pre-migration route oracle uses an immutable commit.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -r envoy/requirements.txt
+      - run: python3 envoy/generate.py --check
+      - run: python3 envoy/tests/route_parity.py
+      - run: python3 envoy/tests/integration.py
+      - run: python3 envoy/tests/deployment.py
 
   compose:
     name: Compose configuration
@@ -98,7 +118,7 @@ jobs:
           POSTGRES_ENV_FILE: ./environment/postgres.env.example
           REDIS_ENV_FILE: ./environment/redis.env.example
           SERVICE_ENV_FILE: ./environment/service.env.example
-          GATEWAY_JWK_FILE: ./gateway/symmetric.json
+          GATEWAY_JWK_FILE: ./envoy/symmetric.json
         run: docker compose config --quiet
 
       - name: Validate App Node production topology
@@ -106,7 +126,7 @@ jobs:
           POSTGRES_ENV_FILE: ./environment/postgres.prod.env.example
           REDIS_ENV_FILE: ./environment/redis.prod.env.example
           SERVICE_ENV_FILE: ./environment/service.prod.env.example
-          GATEWAY_JWK_FILE: ./gateway/symmetric.json
+          GATEWAY_JWK_FILE: ./envoy/symmetric.json
           ASTRACODE_IMAGE_ROOT: ghcr.io/example/astracode
           ASTRACODE_IMAGE_TAG: v0.0.0-ci
         run: |
@@ -126,6 +146,7 @@ jobs:
 
           jq -e '
             .name == "go-judge-system" and
+            (.services | has("gateway") | not) and
             (.services | has("go-judge") | not) and
             (.services | has("judge-worker") | not) and
             (.services.kafka.environment.KAFKA_HEAP_OPTS == "-Xms512m -Xmx512m") and
@@ -152,6 +173,8 @@ jobs:
       - name: Validate deployment and Kafka initialization scripts
         run: |
           bash -n scripts/deploy-app-node.sh
+          bash -n scripts/envoy-runtime.sh
+          python3 -c 'import ast; from pathlib import Path; ast.parse(Path("scripts/deploy-app-bundle.py").read_text())'
           bash -n scripts/deploy-judge-node.sh
           bash -n scripts/deploy-production.sh
           bash -n infra/kafka/kafka-init.sh
@@ -166,10 +189,12 @@ jobs:
           activation="$(sed -n '/^activate() {/,/^}/p' scripts/deploy-app-node.sh)"
           required_activation_guards=(
             '  compose config --quiet || return 1'
+            '  validate_envoy_runtime || return 1'
             '  compose pull "${APP_RELEASE_SERVICES[@]}" || return 1'
             '  compose up -d --pull never --timeout "${COMPOSE_STOP_TIMEOUT:-30}" kafka || return 1'
             '  compose up --no-deps --force-recreate --pull never --timeout "${COMPOSE_STOP_TIMEOUT:-30}" --exit-code-from kafka-init kafka-init || return 1'
             '  compose up -d --pull never --timeout "${COMPOSE_STOP_TIMEOUT:-30}" "${APP_SERVICES[@]}" || return 1'
+            '  activate_envoy_runtime || return 1'
             '  compose ps || return 1'
             '  smoke_test || return 1'
             '  wait_for_services || return 1'
@@ -189,6 +214,7 @@ jobs:
             compose_calls+=("$*")
             return 0
           }
+          source scripts/envoy-runtime.sh
           smoke_test() { return 0; }
           wait_for_services() { return 0; }
           configure_avatar_bucket() { return 0; }
@@ -198,10 +224,13 @@ jobs:
           activate
           expected_calls=(
             'config --quiet'
+            'run --rm --no-deps envoy-jwk'
+            'run --rm --no-deps envoy --mode validate -c /etc/envoy/envoy.yaml'
             'pull website'
             'up -d --pull never --timeout 30 kafka'
             'up --no-deps --force-recreate --pull never --timeout 30 --exit-code-from kafka-init kafka-init'
             'up -d --pull never --timeout 30 website'
+            'up -d --no-deps --force-recreate --pull never --timeout 30 envoy'
             'ps'
           )
           [[ "${compose_calls[*]}" == "${expected_calls[*]}" ]]
@@ -225,6 +254,7 @@ jobs:
             fi
             return 0
           }
+          source scripts/envoy-runtime.sh
           smoke_test() { return 0; }
           wait_for_services() { return 0; }
           configure_avatar_bucket() { return 0; }
@@ -246,6 +276,7 @@ jobs:
           APP_RELEASE_SERVICES=(website)
           APP_SERVICES=(website)
           compose() { return 0; }
+          source scripts/envoy-runtime.sh
           smoke_test() { return 0; }
           wait_for_services() { return 1; }
           configure_avatar_bucket() {

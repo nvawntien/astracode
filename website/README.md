@@ -1,7 +1,7 @@
 # AstraCode — website
 
 Front-end for the go-judge-system, implementing the `AstraCode.dc.html` Claude Design
-prototype against the real services behind the KrakenD gateway.
+prototype against the real services behind the Envoy gateway.
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript**
 - No CSS framework: the prototype is inline styles over CSS custom properties, so the
@@ -23,7 +23,7 @@ npm run dev            # http://localhost:3000
 ```
 
 > The gateway's CORS policy only allows `http://localhost:3000`
-> (`gateway/settings/service.json`), so the dev server must stay on port 3000.
+> (`envoy/generate.py`), so the dev server must stay on port 3000.
 
 | Script | Purpose |
 | --- | --- |
@@ -36,7 +36,7 @@ npm run dev            # http://localhost:3000
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | KrakenD gateway |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | Envoy gateway |
 | `NEXT_PUBLIC_RUN_ENDPOINT` | `/api/v1/submissions/run` | Custom-test execution; **not implemented yet** — see below |
 
 ## Screens → API
@@ -89,8 +89,7 @@ These are backend limitations, not missing UI work. Nothing is mocked.
 `time_limit` has no documented unit — the admin DTO caps it at 30 (seconds) while seeded
 rows store `1000` (milliseconds). `formatTimeLimit()` reads values ≥ 50 as milliseconds.
 
-## Gateway change
+## Gateway configuration
 
-`PATCH` was missing from `allow_methods` in `gateway/settings/service.json`, so the
-browser preflight for `PATCH /api/v1/me/profile` failed even though the endpoint works.
-It has been added; restart the gateway after pulling (`docker compose restart gateway`).
+Envoy owns CORS, JWT verification and explicit API routing. See
+[`envoy/README.md`](../envoy/README.md) for generation, verification and rollback.

@@ -36,17 +36,22 @@ services:
       - "${ASTRACODE_EDGE_BIND:-127.0.0.1}:${ASTRACODE_EDGE_PORT:-8080}:8080"
     volumes: !override
       - ./envoy/envoy.prod.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy/edge.lua:/etc/envoy/edge.lua:ro
+      - envoy_jwk:/etc/envoy/secrets:ro
     depends_on:
       website:
         condition: service_healthy
-      gateway:
-        condition: service_started
+      auth-service:
+        condition: service_healthy
+      problem-service:
+        condition: service_healthy
       submission-service:
         condition: service_healthy
 
-  gateway:
-    volumes:
-      - ${GATEWAY_JWK_FILE:?Set GATEWAY_JWK_FILE}:/etc/krakend/symmetric.json:ro
+  envoy-jwk:
+    volumes: !override
+      - ${GATEWAY_JWK_FILE:?Set GATEWAY_JWK_FILE}:/source/symmetric.json:ro
+      - envoy_jwk:/keys
 
   postgres:
     ports: !reset []

@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// NewAuthMiddleware creates a middleware that trusts the KrakenD API Gateway.
+// NewAuthMiddleware creates a middleware that trusts the Envoy API Gateway.
 // It extracts the user identity from X-User-* headers set by the gateway's JWT validator.
 func NewAuthMiddleware(logoutAllStore auth.LogoutAllIATStore) gin.HandlerFunc {
 	return func(c *gin.Context) {

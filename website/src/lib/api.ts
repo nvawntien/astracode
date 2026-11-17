@@ -111,7 +111,7 @@ let refreshInFlight: Promise<boolean> | null = null;
 
 /**
  * The gateway validates a JWT taken from the `access_token` cookie
- * (gateway/settings/*.json → auth/validator.cookie_key). Cookies are HttpOnly,
+ * (envoy/generate.py → jwt_authn.from_cookies). Cookies are HttpOnly,
  * so every request just needs `credentials: 'include'`; on a 401 we try the
  * refresh endpoint once and replay the original request.
  */

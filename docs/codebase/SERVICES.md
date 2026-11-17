@@ -41,4 +41,4 @@
 
 ## Edge and frontend
 
-`envoy/envoy.yaml` exposes Envoy on 8080 in front of KrakenD. Gateway definitions in `gateway/settings/` do JWT validation and pass `X-User-ID`, `X-Username`, `X-Role`, and `X-Token-Iat` downstream. `website/` is a Next.js application with API/SSE client code under `website/src/lib/`; it is not part of the Go workspace and its `.next`/`node_modules` are build/generated directories.
+`envoy/envoy.yaml` exposes the single Envoy gateway on 8080, routing directly to services. Gateway definitions in `envoy/routes.json` do JWT validation and pass `X-User-ID`, `X-Username`, `X-Role`, and `X-Token-Iat` downstream. `website/` is a Next.js application with API/SSE client code under `website/src/lib/`; it is not part of the Go workspace and its `.next`/`node_modules` are build/generated directories.

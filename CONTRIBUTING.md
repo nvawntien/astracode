@@ -56,8 +56,7 @@ frontend:
 - `workers/judge/` — asynchronous judging and interactive Run Code;
 - `pkg/` — shared Go packages and generated service contracts;
 - `proto/` — source protocol definitions;
-- `gateway/` — KrakenD routes, JWT validation, and API composition; and
-- `envoy/` — public edge routing.
+- `envoy/` — explicit public routes, JWT validation, identity propagation and streaming.
 
 Respect the existing domain, application, port, and adapter boundaries. Auth,
 Problem, and Submission each own their database; never read or write another
@@ -92,7 +91,7 @@ Validate the development Compose model without relying on local secret files:
 POSTGRES_ENV_FILE=./environment/postgres.env.example \
 REDIS_ENV_FILE=./environment/redis.env.example \
 SERVICE_ENV_FILE=./environment/service.env.example \
-GATEWAY_JWK_FILE=./gateway/symmetric.json \
+GATEWAY_JWK_FILE=./envoy/symmetric.json \
 docker compose config --quiet
 ```
 
