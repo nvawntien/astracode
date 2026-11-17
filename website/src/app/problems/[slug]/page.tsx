@@ -13,14 +13,11 @@ import {
   ProblemPanelSkeleton,
   type ProblemTab,
 } from '@/components/workspace/ProblemPanel';
-import { Icon, Spinner } from '@/components/ui';
+import { Icon } from '@/components/ui';
 import { ApiError, NetworkError, problemApi, submissionApi } from '@/lib/api';
 import {
   LANGUAGES,
   formatDateTime,
-  formatMemoryKb,
-  formatRuntimeMs,
-  formatTestcaseCount,
   isPendingStatus,
   isTerminalSubmissionStatus,
   languageMeta,
@@ -28,31 +25,28 @@ import {
 } from '@/lib/format';
 import { useDismissable, useOnline, useViewportWidth } from '@/lib/hooks';
 import { fetchProgress, invalidateProgress } from '@/lib/progress';
-import { useSubmissionStream, type SubmissionStreamState } from '@/lib/submission-stream';
+import { useSubmissionStream } from '@/lib/submission-stream';
 import { CODE_TEMPLATES, draftKey } from '@/lib/templates';
 import type {
   CodeDiagnostic,
   LanguageCode,
   Problem,
   RunResponse,
-  RunTestCaseResult,
   Submission,
   SubmissionDetail,
   SubmissionStreamEvent,
 } from '@/lib/types';
 
+import { EditorToolbar } from '@/features/problem-workspace/components/EditorToolbar';
+import { RunSubmitButtons } from '@/features/problem-workspace/components/RunSubmitButtons';
+import { TestcasePanel } from '@/features/problem-workspace/components/TestcasePanel';
+import { ResultPanel } from '@/features/problem-workspace/components/ResultPanel';
+import { iconButton } from '@/features/problem-workspace/components/workspaceStyles';
+import { isRunFailure } from '@/features/problem-workspace/runResult';
+import type { TestCase } from '@/features/problem-workspace/types';
+
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
-
-interface TestCase {
-  id: string;
-  kind: 'sample' | 'custom';
-  name: string;
-  input: string;
-  expected: string | null;
-  /** Examples come from the problem and cannot be removed. */
-  fromExample: boolean;
-}
 
 export default function WorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -201,6 +195,26 @@ export default function WorkspacePage() {
     }
   };
 
+  const changeFontSize = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = Number(event.target.value);
+    setFontSize(next);
+    try {
+      localStorage.setItem('astra-font', String(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const changeTabSize = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = Number(event.target.value);
+    setTabSize(next);
+    try {
+      localStorage.setItem('astra-tab', String(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const restoreSubmissionCode = useCallback(
     (detail: SubmissionDetail) => {
       if (!problem) return;
@@ -262,7 +276,16 @@ export default function WorkspacePage() {
     setTests(
       fromExamples.length > 0
         ? fromExamples
-        : [{ id: 'custom-1', kind: 'custom', name: 'Custom 1', input: '', expected: null, fromExample: false }],
+        : [
+            {
+              id: 'custom-1',
+              kind: 'custom',
+              name: 'Custom 1',
+              input: '',
+              expected: null,
+              fromExample: false,
+            },
+          ],
     );
     setSelectedTest(0);
   }, [problem]);
@@ -394,7 +417,10 @@ export default function WorkspacePage() {
         ]);
         setBottomTab('console');
       } else if (err instanceof NetworkError) {
-        showToast('AstraCode is temporarily unreachable. Check your connection and try again.', 'error');
+        showToast(
+          'AstraCode is temporarily unreachable. Check your connection and try again.',
+          'error',
+        );
       } else if (err instanceof ApiError) {
         showToast(err.message || 'Run failed', 'error');
       }
@@ -486,11 +512,16 @@ export default function WorkspacePage() {
       if (isTerminalSubmissionStatus(latest.status)) {
         finishSubmissionFromDetail(latest);
       } else {
-        showToast(`Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`, 'success');
+        showToast(
+          `Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`,
+          'success',
+        );
       }
     } catch (err) {
       if (err instanceof NetworkError) {
-        setDetailFetchError('AstraCode is temporarily unreachable. Check your connection and try again.');
+        setDetailFetchError(
+          'AstraCode is temporarily unreachable. Check your connection and try again.',
+        );
       } else if (err instanceof ApiError) {
         setDetailFetchError(err.message || 'Could not read the submission.');
       } else {
@@ -579,7 +610,10 @@ export default function WorkspacePage() {
     } catch (err) {
       setSubmitting(false);
       if (err instanceof NetworkError) {
-        showToast('AstraCode is temporarily unreachable. Check your connection and try again.', 'error');
+        showToast(
+          'AstraCode is temporarily unreachable. Check your connection and try again.',
+          'error',
+        );
       } else if (err instanceof ApiError) {
         showToast(err.message || 'Submission rejected', 'error');
       } else {
@@ -705,8 +739,17 @@ export default function WorkspacePage() {
       <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
         <Header />
         <div style={{ padding: '64px 24px', textAlign: 'center' }}>
-          <p style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 600 }}>Couldn&apos;t load the problem</p>
-          <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 600 }}>
+            Couldn&apos;t load the problem
+          </p>
+          <p
+            style={{
+              margin: '0 0 16px',
+              fontSize: 12.5,
+              color: 'var(--text3)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
             {loadError}
           </p>
           <Link href="/problems" style={{ fontSize: 13, fontWeight: 600 }}>
@@ -718,7 +761,14 @@ export default function WorkspacePage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'var(--bg)',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <Header />
 
       <main
@@ -881,166 +931,28 @@ export default function WorkspacePage() {
                     style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--warn)' }}
                   />
                   <span style={{ fontSize: 12, fontWeight: 550 }}>
-                    Network disconnected — code is saved locally; Run and Submit are disabled until you
-                    reconnect.
+                    Network disconnected — code is saved locally; Run and Submit are disabled until
+                    you reconnect.
                   </span>
                 </div>
               )}
 
-              <div
-                className="ac-workspace-editor-toolbar"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '6px 10px',
-                  borderBottom: '1px solid var(--code-line)',
-                  background: 'var(--editor-chrome)',
-                  flexShrink: 0,
-                }}
-              >
-                <select
-                  value={language}
-                  onChange={(event) => changeLanguage(event.target.value as LanguageCode)}
-                  aria-label="Programming language"
-                  style={{
-                    height: 30,
-                    borderRadius: 6,
-                    border: '1px solid var(--code-line)',
-                    background: 'var(--code-bg)',
-                    padding: '0 8px',
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: 'var(--text)',
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-mono)',
-                  }}
-                >
-                  {LANGUAGES.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="ac-workspace-editor-file" style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
-                  main.{langMeta.ext}
-                </span>
-                {draftSavedAt !== null && (
-                  <span
-                    aria-label="Draft saved locally"
-                    style={{ fontSize: 10.5, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}
-                  >
-                    · saved locally
-                  </span>
-                )}
-
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ position: 'relative' }} ref={settingsRef}>
-                    <button
-                      type="button"
-                      onClick={() => setSettingsOpen(!settingsOpen)}
-                      aria-label="Editor settings"
-                      aria-expanded={settingsOpen}
-                      title="Editor settings — font size, tab size"
-                      className="ac-hover-surface2"
-                      style={iconButton}
-                    >
-                      <Icon.Gear />
-                    </button>
-                    {settingsOpen && (
-                      <div
-                        role="menu"
-                        aria-label="Editor settings"
-                        style={{
-                          position: 'absolute',
-                          right: 0,
-                          top: 38,
-                          width: 210,
-                          background: 'var(--surface)',
-                          border: '1px solid var(--border)',
-                          borderRadius: 12,
-                          boxShadow: 'var(--shadow-lg)',
-                          padding: 12,
-                          zIndex: 30,
-                          animation: 'acPop .15s ease',
-                        }}
-                      >
-                        <label style={settingsLabel}>Font size — {fontSize}px</label>
-                        <input
-                          type="range"
-                          min={11}
-                          max={18}
-                          value={fontSize}
-                          onChange={(event) => {
-                            const next = Number(event.target.value);
-                            setFontSize(next);
-                            try {
-                              localStorage.setItem('astra-font', String(next));
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                          aria-label="Editor font size"
-                          style={{ width: '100%', accentColor: 'var(--accent)' }}
-                        />
-                        <label style={{ ...settingsLabel, margin: '12px 0 6px' }}>Tab size</label>
-                        <select
-                          value={tabSize}
-                          onChange={(event) => {
-                            const next = Number(event.target.value);
-                            setTabSize(next);
-                            try {
-                              localStorage.setItem('astra-tab', String(next));
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                          aria-label="Tab size"
-                          style={{
-                            width: '100%',
-                            height: 32,
-                            borderRadius: 8,
-                            border: '1px solid var(--border)',
-                            background: 'var(--surface2)',
-                            padding: '0 8px',
-                            fontSize: 12.5,
-                            color: 'var(--text)',
-                          }}
-                        >
-                          <option value={2}>2 spaces</option>
-                          <option value={4}>4 spaces</option>
-                          <option value={8}>8 spaces</option>
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setResetDialog(true)}
-                    aria-label="Reset code to template"
-                    title="Reset code"
-                    className="ac-hover-surface2"
-                    style={iconButton}
-                  >
-                    <Icon.Reset />
-                  </button>
-
-                  {!stacked && (
-                    <button
-                      type="button"
-                      onClick={() => setFullscreen(!fullscreen)}
-                      aria-label={fullscreen ? 'Exit full-width editor' : 'Full-width editor'}
-                      aria-pressed={fullscreen}
-                      title={fullscreen ? 'Exit full-width editor' : 'Full-width editor'}
-                      className="ac-hover-surface2"
-                      style={iconButton}
-                    >
-                      {fullscreen ? <Icon.Collapse /> : <Icon.Expand />}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <EditorToolbar
+                language={language}
+                draftSavedAt={draftSavedAt}
+                fontSize={fontSize}
+                tabSize={tabSize}
+                settingsOpen={settingsOpen}
+                settingsRef={settingsRef}
+                stacked={stacked}
+                fullscreen={fullscreen}
+                onLanguageChange={changeLanguage}
+                onFontSizeChange={changeFontSize}
+                onTabSizeChange={changeTabSize}
+                onToggleSettings={() => setSettingsOpen(!settingsOpen)}
+                onReset={() => setResetDialog(true)}
+                onToggleFullscreen={() => setFullscreen(!fullscreen)}
+              />
 
               <CodeEditor
                 value={code}
@@ -1136,56 +1048,15 @@ export default function WorkspacePage() {
 
                   {!isMobile && (
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 7, padding: '4px 0' }}>
-                      <button
-                        type="button"
-                        onClick={run}
-                        disabled={busy || !online}
-                        title="Run all visible test cases (Ctrl+Enter)"
-                        className="ac-hover-surface2"
-                        style={{
-                          height: 30,
-                          padding: '0 13px',
-                          border: '1px solid var(--border2)',
-                          borderRadius: 7,
-                          background: 'var(--editor-chrome)',
-                          color: 'var(--text)',
-                          fontSize: 12.5,
-                          fontWeight: 600,
-                          cursor: busy ? 'progress' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          opacity: busy || !online ? 0.55 : 1,
-                        }}
-                      >
-                        {running ? <Spinner size={11} /> : <Icon.Play />}
-                        Run
-                      </button>
-                      <button
-                        type="button"
-                        onClick={submit}
-                        disabled={busy || !online}
-                        title="Submit to the judge (Ctrl+Shift+Enter)"
-                        className="ac-hover-accent ac-active-press"
-                        style={{
-                          height: 30,
-                          padding: '0 14px',
-                          border: 'none',
-                          borderRadius: 7,
-                          background: 'var(--accent)',
-                          color: 'var(--accent-ink)',
-                          fontSize: 12.5,
-                          fontWeight: 600,
-                          cursor: busy ? 'progress' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          opacity: busy || !online ? 0.55 : 1,
-                        }}
-                      >
-                        {submitting && <Spinner size={11} color="currentColor" />}
-                        Submit
-                      </button>
+                      <RunSubmitButtons
+                        variant="desktop"
+                        busy={busy}
+                        online={online}
+                        running={running}
+                        submitting={submitting}
+                        onRun={run}
+                        onSubmit={submit}
+                      />
                       <button
                         type="button"
                         onClick={() => setBottomOpen(!bottomOpen)}
@@ -1211,7 +1082,7 @@ export default function WorkspacePage() {
                 {bottomOpen && (
                   <div style={{ overflowY: 'auto', padding: '10px 14px', flex: 1, minHeight: 0 }}>
                     {bottomTab === 'tests' && (
-                      <TestsPanel
+                      <TestcasePanel
                         tests={tests}
                         selected={selectedTest}
                         results={runResultsByID}
@@ -1235,7 +1106,10 @@ export default function WorkspacePage() {
                             }}
                           >
                             {consoleLines.map((line, index) => (
-                              <div key={index} style={{ color: line.color, whiteSpace: 'pre-wrap' }}>
+                              <div
+                                key={index}
+                                style={{ color: line.color, whiteSpace: 'pre-wrap' }}
+                              >
                                 {line.text}
                               </div>
                             ))}
@@ -1288,46 +1162,15 @@ export default function WorkspacePage() {
                     background: 'var(--surface)',
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={run}
-                    disabled={busy || !online}
-                    className="ac-hover-surface2"
-                    style={{
-                      flex: 1,
-                      minHeight: 44,
-                      border: '1px solid var(--border2)',
-                      borderRadius: 9,
-                      background: 'var(--surface)',
-                      color: 'var(--text)',
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      opacity: busy || !online ? 0.55 : 1,
-                    }}
-                  >
-                    Run
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submit}
-                    disabled={busy || !online}
-                    className="ac-hover-accent"
-                    style={{
-                      flex: 2,
-                      minHeight: 44,
-                      border: 'none',
-                      borderRadius: 9,
-                      background: 'var(--accent)',
-                      color: 'var(--accent-ink)',
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      opacity: busy || !online ? 0.55 : 1,
-                    }}
-                  >
-                    Submit
-                  </button>
+                  <RunSubmitButtons
+                    variant="mobile"
+                    busy={busy}
+                    online={online}
+                    running={running}
+                    submitting={submitting}
+                    onRun={run}
+                    onSubmit={submit}
+                  />
                 </div>
               )}
             </div>
@@ -1460,7 +1303,8 @@ export default function WorkspacePage() {
                 color: 'var(--text3)',
               }}
             >
-              {languageMeta(restoreSubmission.language).label} · {formatDateTime(restoreSubmission.created_at)}
+              {languageMeta(restoreSubmission.language).label} ·{' '}
+              {formatDateTime(restoreSubmission.created_at)}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
@@ -1507,674 +1351,6 @@ export default function WorkspacePage() {
   );
 }
 
-/* ------------------------------------------------------------ subpanels */
-
-function TestsPanel({
-  tests,
-  selected,
-  results,
-  running,
-  onSelect,
-  onAdd,
-  onRemove,
-  onUpdate,
-}: {
-  tests: TestCase[];
-  selected: number;
-  results: Map<string, RunTestCaseResult>;
-  running: boolean;
-  onSelect: (index: number) => void;
-  onAdd: () => void;
-  onRemove: (index: number) => void;
-  onUpdate: (index: number, patch: Partial<TestCase>) => void;
-}) {
-  const current = tests[selected];
-  const currentResult = current ? results.get(current.id) : undefined;
-
-  return (
-    <>
-      <div
-        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}
-      >
-        {tests.map((test, index) => {
-          const active = index === selected;
-          return (
-            <span
-              key={index}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                background: active ? 'var(--accent-soft)' : 'var(--surface)',
-                borderRadius: 8,
-                overflow: 'hidden',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => onSelect(index)}
-                aria-pressed={active}
-                style={{
-                  height: 30,
-                  padding: '0 11px',
-                  border: 'none',
-                  background: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: active ? 'var(--accent-fg)' : 'var(--text2)',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {test.name}
-              </button>
-              {!test.fromExample && tests.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => onRemove(index)}
-                  aria-label={`Remove ${test.name}`}
-                  className="ac-hover-error"
-                  style={{
-                    height: 30,
-                    width: 24,
-                    border: 'none',
-                    background: 'none',
-                    color: 'var(--text3)',
-                    cursor: 'pointer',
-                    fontSize: 10,
-                  }}
-                >
-                  ✕
-                </button>
-              )}
-            </span>
-          );
-        })}
-        <button
-          type="button"
-          onClick={onAdd}
-          className="ac-hover-dash"
-          style={{
-            height: 30,
-            padding: '0 11px',
-            border: '1px dashed var(--border2)',
-            borderRadius: 8,
-            background: 'none',
-            color: 'var(--text2)',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          + Add case
-        </button>
-      </div>
-
-      {current && (
-        <>
-          <label style={testLabel}>
-            Input — {current.name}
-            <textarea
-              value={current.input}
-              onChange={(event) => onUpdate(selected, { input: event.target.value })}
-              readOnly={current.fromExample}
-              rows={4}
-              spellCheck={false}
-              aria-label={`Test input for ${current.name}`}
-              className="ac-field"
-              style={testField}
-            />
-          </label>
-          <label style={{ ...testLabel, marginTop: 10 }}>
-            Expected output
-            <textarea
-              value={current.expected ?? ''}
-              onChange={(event) =>
-                onUpdate(selected, {
-                  expected:
-                    event.target.value === '' && current.kind === 'custom' ? null : event.target.value,
-                })
-              }
-              readOnly={current.fromExample}
-              rows={2}
-              spellCheck={false}
-              aria-label={`Expected output for ${current.name}`}
-              className="ac-field"
-              style={testField}
-            />
-          </label>
-          <RunCaseDetails result={currentResult} running={running} />
-        </>
-      )}
-    </>
-  );
-}
-
-function RunCaseDetails({
-  result,
-  running,
-}: {
-  result?: RunTestCaseResult;
-  running: boolean;
-}) {
-  if (running) {
-    return (
-      <div role="status" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Spinner size={12} />
-        <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
-          Running all visible test cases…
-        </span>
-      </div>
-    );
-  }
-
-  if (!result) return null;
-
-  const ok = result.status === 'accepted' || result.status === 'executed';
-  return (
-    <div
-      style={{
-        marginTop: 12,
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'var(--code-bg)',
-        padding: 10,
-        display: 'grid',
-        gap: 8,
-      }}
-    >
-      <ResultTile value={formatRunStatus(result.status)} label="Status" />
-      <ResultTile value={`${result.execution_time_ms} ms`} label="Runtime" />
-      <ResultTile value={`${result.memory_used_kb} KB`} label="Memory" />
-      <div>
-        <div style={testLabel}>Actual Output</div>
-        <pre style={runOutputBlock}>{result.stdout || result.stderr || (ok ? '' : 'No output')}</pre>
-      </div>
-    </div>
-  );
-}
-
-function ResultPanel({
-  submitting,
-  checkingResult,
-  submission,
-  streamState,
-  liveUpdateError,
-  detailFetchError,
-  runResult,
-  running,
-  diagnostics,
-  onReconnectStream,
-  onCheckResult,
-  onSelectDiagnostic,
-  onOpenSubmissions,
-}: {
-  submitting: boolean;
-  checkingResult: boolean;
-  submission: Submission | null;
-  streamState: SubmissionStreamState;
-  liveUpdateError: string;
-  detailFetchError: string;
-  runResult: RunResponse | null;
-  running: boolean;
-  diagnostics: CodeDiagnostic[];
-  onReconnectStream: () => void;
-  onCheckResult: () => void;
-  onSelectDiagnostic: (diagnostic: CodeDiagnostic) => void;
-  onOpenSubmissions: () => void;
-}) {
-  if (running) {
-    return (
-      <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}>
-        <Spinner />
-        <span style={{ fontSize: 12.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>
-          Running your code…
-        </span>
-      </div>
-    );
-  }
-
-  if (submission && isPendingStatus(submission.status) && (submitting || liveUpdateError)) {
-    const queued = submission.status === 'PENDING';
-    const reconnecting = streamState === 'reconnecting';
-    const connecting =
-      streamState === 'requesting_ticket' || streamState === 'connecting' || streamState === 'open';
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}>
-          {!liveUpdateError && <Spinner color={queued ? 'var(--accent)' : 'var(--success)'} />}
-          <span style={{ fontSize: 12.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>
-            {liveUpdateError
-              ? `Submission #${submission.id} is saved, but live updates are unavailable.`
-              : reconnecting
-                ? `Submission #${submission.id} reconnecting to live updates…`
-                : connecting
-                  ? `Submission #${submission.id} connecting to live updates…`
-                  : queued
-                    ? `Submission #${submission.id} queued — waiting for a judge worker…`
-                    : `Submission #${submission.id} is being judged…`}
-          </span>
-        </div>
-
-        {liveUpdateError && (
-          <div
-            role="alert"
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 10,
-              padding: '10px 12px',
-              border: '1px solid var(--warn)',
-              borderRadius: 10,
-              background: 'var(--warn-bg)',
-            }}
-          >
-            <span style={{ flex: 1, minWidth: 200, fontSize: 12.5 }}>
-              {liveUpdateError} You can reconnect live updates or check the result once.
-            </span>
-            <button type="button" onClick={onReconnectStream} className="ac-hover-surface2" style={smallActionButton}>
-              Reconnect
-            </button>
-            <button
-              type="button"
-              onClick={onCheckResult}
-              disabled={checkingResult}
-              className="ac-hover-surface2"
-              style={{ ...smallActionButton, opacity: checkingResult ? 0.6 : 1 }}
-            >
-              {checkingResult ? 'Checking…' : 'Check result'}
-            </button>
-            <button type="button" onClick={onOpenSubmissions} className="ac-hover-surface2" style={smallActionButton}>
-              View submissions
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (detailFetchError && submission) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 12px',
-            border: '1px solid var(--warn)',
-            borderRadius: 10,
-            background: 'var(--warn-bg)',
-          }}
-        >
-          <span style={{ flex: 1, minWidth: 200, fontSize: 12.5 }}>{detailFetchError}</span>
-          <button
-            type="button"
-            onClick={onCheckResult}
-            disabled={checkingResult}
-            className="ac-hover-surface2"
-            style={{ ...smallActionButton, opacity: checkingResult ? 0.6 : 1 }}
-          >
-            {checkingResult ? 'Checking…' : 'Retry detail'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (submission && !isPendingStatus(submission.status)) {
-    const verdict = verdictMeta(submission.status);
-    const diagnosticOutput = submissionDetailOutput(submission);
-
-    return (
-      <div style={{ animation: 'acFadeUp .3s ease' }}>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 10,
-            padding: '12px 14px',
-            border: `1px solid ${verdict.color}`,
-            borderRadius: 10,
-            background: verdict.bg,
-            marginBottom: 12,
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: verdict.shape,
-              background: 'var(--surface)',
-              color: verdict.color,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            {verdict.icon}
-          </span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: verdict.color }}>{verdict.label}</span>
-          <span
-            style={{
-              marginLeft: 'auto',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 11.5,
-              color: verdict.color,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            #{submission.id}
-          </span>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
-          <ResultTile value={languageMeta(submission.language).label} label="Language" />
-          <ResultTile value={`#${submission.problem_id}`} label={submission.problem_title} />
-          <ResultTile value={formatRuntimeMs(submission.execution_time_ms)} label="Runtime" />
-          <ResultTile value={formatMemoryKb(submission.memory_used_kb)} label="Memory" />
-          <ResultTile
-            value={formatTestcaseCount(submission.passed_testcases, submission.total_testcases)}
-            label="Test cases"
-          />
-          <ResultTile value={new Date(submission.updated_at).toLocaleTimeString()} label="Judged at" />
-        </div>
-
-        {diagnosticOutput && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={settingsLabel}>{diagnosticOutput.label}</div>
-            <pre style={runOutputBlock}>{diagnosticOutput.output}</pre>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <button
-            type="button"
-            onClick={onOpenSubmissions}
-            className="ac-hover-surface2"
-            style={{
-              height: 34,
-              padding: '0 14px',
-              border: '1px solid var(--border2)',
-              borderRadius: 8,
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            View all submissions
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (runResult) {
-    if (runResult.status === 'compile_error') {
-      return (
-        <div style={{ animation: 'acFadeUp .25s ease' }}>
-          <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 650, color: 'var(--warn)' }}>
-            Compile Error
-          </div>
-          <pre style={runOutputBlock}>{runResult.compile_output || 'Compilation failed'}</pre>
-          <DiagnosticList diagnostics={diagnostics} onSelect={onSelectDiagnostic} />
-        </div>
-      );
-    }
-
-    const passed = runResult.tests.filter((test) => !isRunFailure(test)).length;
-    const allPassed = runResult.tests.length > 0 && passed === runResult.tests.length;
-    return (
-      <div style={{ animation: 'acFadeUp .25s ease' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 650,
-              color: allPassed ? 'var(--success)' : 'var(--error)',
-            }}
-          >
-            {allPassed ? '✓ All test cases passed' : `✕ ${runResult.tests.length - passed} failed`}
-          </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>
-            {passed}/{runResult.tests.length}
-          </span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {runResult.tests.map((test, index) => (
-            <div
-              key={test.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 10px',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                background: 'var(--code-bg)',
-              }}
-            >
-              <span
-                role="img"
-                aria-label={isRunFailure(test) ? 'Failed' : 'Passed'}
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: isRunFailure(test) ? 4 : '50%',
-                  background: isRunFailure(test) ? 'var(--error-bg)' : 'var(--success-bg)',
-                  color: isRunFailure(test) ? 'var(--error)' : 'var(--success)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  flexShrink: 0,
-                }}
-              >
-                {isRunFailure(test) ? '✕' : '✓'}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 11,
-                  color: 'var(--text3)',
-                  flexShrink: 0,
-                }}
-              >
-                {test.id}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 11.5,
-                  color: 'var(--syn-str)',
-                  flex: 1,
-                  minWidth: 0,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                → {formatRunStatus(test.status)}
-              </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text3)' }}>
-                {test.execution_time_ms} ms
-              </span>
-            </div>
-          ))}
-        </div>
-        <DiagnosticList diagnostics={diagnostics} onSelect={onSelectDiagnostic} />
-      </div>
-    );
-  }
-
-  return (
-    <p style={{ margin: '8px 0', fontSize: 12.5, color: 'var(--text3)' }}>
-      Run your code against the test cases, or submit for the full judge.
-    </p>
-  );
-}
-
-function DiagnosticList({
-  diagnostics,
-  onSelect,
-}: {
-  diagnostics: CodeDiagnostic[];
-  onSelect: (diagnostic: CodeDiagnostic) => void;
-}) {
-  if (diagnostics.length === 0) return null;
-
-  return (
-    <div
-      role="list"
-      aria-label="Code diagnostics"
-      style={{
-        marginTop: 12,
-        border: '1px solid var(--error)',
-        borderRadius: 10,
-        background: 'var(--error-bg)',
-        overflow: 'hidden',
-      }}
-    >
-      {diagnostics.map((diagnostic, index) => (
-        <button
-          key={`${diagnostic.kind}-${diagnostic.testcase_id ?? 'compile'}-${diagnostic.line}-${diagnostic.column}-${index}`}
-          type="button"
-          role="listitem"
-          onClick={() => onSelect(diagnostic)}
-          className="ac-hover-surface2"
-          style={{
-            display: 'flex',
-            width: '100%',
-            gap: 10,
-            alignItems: 'flex-start',
-            padding: '9px 11px',
-            border: 'none',
-            borderTop: index === 0 ? 'none' : '1px solid color-mix(in srgb, var(--error) 25%, transparent)',
-            background: 'transparent',
-            color: 'var(--text)',
-            textAlign: 'left',
-            cursor: diagnostic.line > 0 ? 'pointer' : 'default',
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 5,
-              background: 'var(--surface)',
-              color: 'var(--error)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            !
-          </span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--error)' }}>
-              {diagnostic.testcase_id ? `${diagnostic.testcase_id} · ` : ''}
-              Line {diagnostic.line || '—'}, Column {diagnostic.column || 1}
-            </span>
-            <span style={{ display: 'block', marginTop: 2, fontSize: 12.5, color: 'var(--text2)' }}>
-              {diagnostic.message}
-            </span>
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ResultTile({ value, label }: { value: string; label: string }) {
-  return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-      <span
-        style={{
-          display: 'block',
-          fontFamily: 'var(--font-mono)',
-          fontSize: 15,
-          fontWeight: 650,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {value}
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--text3)',
-          display: 'block',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function isRunFailure(test: RunTestCaseResult): boolean {
-  return !['accepted', 'executed'].includes(test.status);
-}
-
-function formatRunStatus(status: string): string {
-  return status
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function submissionDetailOutput(
-  submission: Pick<Submission | SubmissionDetail, 'status' | 'compile_output' | 'error_message'>,
-): { label: string; output: string } | null {
-  if (submission.status === 'COMPILATION_ERROR' && submission.compile_output) {
-    return { label: 'Compilation output', output: submission.compile_output };
-  }
-  if (submission.status === 'RUNTIME_ERROR' && submission.error_message) {
-    return { label: 'Runtime error', output: submission.error_message };
-  }
-  if (submission.status === 'SYSTEM_ERROR' && submission.error_message) {
-    return { label: 'System error', output: submission.error_message };
-  }
-  if (
-    (submission.status === 'TIME_LIMIT_EXCEEDED' || submission.status === 'MEMORY_LIMIT_EXCEEDED') &&
-    submission.error_message
-  ) {
-    return { label: 'Message', output: submission.error_message };
-  }
-  if (submission.status === 'OUTPUT_LIMIT_EXCEEDED' && submission.error_message) {
-    return { label: 'Message', output: submission.error_message };
-  }
-  return null;
-}
-
 function collectRunDiagnostics(result: RunResponse): CodeDiagnostic[] {
   const seen = new Set<string>();
   const diagnostics: CodeDiagnostic[] = [];
@@ -2206,80 +1382,10 @@ function buildRunConsoleLines(result: RunResponse): { text: string; color: strin
 
   const lines: { text: string; color: string }[] = [];
   for (const test of result.tests) {
-    if (test.stdout) lines.push({ text: `[${test.id}] stdout\n${test.stdout}`, color: 'var(--code-fg)' });
-    if (test.stderr) lines.push({ text: `[${test.id}] stderr\n${test.stderr}`, color: 'var(--error)' });
+    if (test.stdout)
+      lines.push({ text: `[${test.id}] stdout\n${test.stdout}`, color: 'var(--code-fg)' });
+    if (test.stderr)
+      lines.push({ text: `[${test.id}] stderr\n${test.stderr}`, color: 'var(--error)' });
   }
   return lines;
 }
-
-const iconButton: React.CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: 7,
-  border: '1px solid var(--code-line)',
-  background: 'var(--editor-chrome)',
-  color: 'var(--text2)',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const smallActionButton: React.CSSProperties = {
-  height: 32,
-  padding: '0 13px',
-  border: '1px solid var(--border2)',
-  borderRadius: 8,
-  background: 'var(--surface)',
-  color: 'var(--text)',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const settingsLabel: React.CSSProperties = {
-  display: 'block',
-  fontSize: 11,
-  fontWeight: 650,
-  color: 'var(--text3)',
-  textTransform: 'uppercase',
-  letterSpacing: '.06em',
-  marginBottom: 6,
-};
-
-const testLabel: React.CSSProperties = {
-  display: 'block',
-  fontSize: 11,
-  fontWeight: 650,
-  color: 'var(--text3)',
-  textTransform: 'uppercase',
-  letterSpacing: '.06em',
-};
-
-const testField: React.CSSProperties = {
-  display: 'block',
-  width: '100%',
-  boxSizing: 'border-box',
-  resize: 'vertical',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  background: 'var(--code-bg)',
-  color: 'var(--code-fg)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12.5,
-  padding: '9px 11px',
-  lineHeight: 1.6,
-  marginTop: 6,
-};
-
-const runOutputBlock: React.CSSProperties = {
-  margin: '5px 0 0',
-  minHeight: 34,
-  maxHeight: 120,
-  overflow: 'auto',
-  whiteSpace: 'pre-wrap',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12,
-  lineHeight: 1.6,
-  color: 'var(--code-fg)',
-};
