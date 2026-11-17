@@ -290,8 +290,16 @@ export default function WorkspacePage() {
 
   /* ---------------------------------------------------------------- split */
 
-  const { shellRef, splitPct, bottomPx, startDrag, resetSplit, resetBottom } =
-    useWorkspaceGeometry();
+  const {
+    shellRef,
+    splitPct,
+    bottomPx,
+    startDrag,
+    resetSplit,
+    resetBottom,
+    splitSeparatorProps,
+    bottomSeparatorProps,
+  } = useWorkspaceGeometry();
 
   /* -------------------------------------------------------------- derived */
 
@@ -394,14 +402,17 @@ export default function WorkspacePage() {
             }}
           >
             {(['problem', 'editor'] as const).map((view) => {
-              const active = mobileView === view;
+              const active = (fullscreen ? 'editor' : mobileView) === view;
               return (
                 <button
                   key={view}
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => setMobileView(view)}
+                  onClick={() => {
+                    setMobileView(view);
+                    if (view === 'problem') setFullscreen(false);
+                  }}
                   style={{
                     flex: 1,
                     minHeight: 44,
@@ -424,6 +435,7 @@ export default function WorkspacePage() {
         <div ref={shellRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {leftVisible && (
             <div
+              id="workspace-problem-pane"
               style={{
                 width: stacked ? '100%' : `${splitPct}%`,
                 height: '100%',
@@ -457,13 +469,15 @@ export default function WorkspacePage() {
 
           {!stacked && !fullscreen && (
             <div
+              {...splitSeparatorProps}
               onMouseDown={startDrag('h')}
               onDoubleClick={resetSplit}
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize panels — drag, or double-click to reset"
+              aria-label="Resize problem panel — Left/Right arrows, Home/End; drag or double-click to reset"
+              aria-controls="workspace-problem-pane"
               tabIndex={0}
-              title="Drag to resize · double-click to reset"
+              title="Left/Right arrows or drag to resize · Home/End for bounds · double-click to reset"
               className="ac-hover-accent-soft2"
               style={{
                 width: 8,
@@ -555,11 +569,13 @@ export default function WorkspacePage() {
               />
 
               <div
+                {...bottomSeparatorProps}
                 onMouseDown={startDrag('v')}
                 onDoubleClick={resetBottom}
                 role="separator"
                 aria-orientation="horizontal"
-                aria-label="Resize result panel — drag, or double-click to reset"
+                aria-label="Resize result panel — Up/Down arrows, Home/End; drag or double-click to reset"
+                aria-controls="workspace-result-panel"
                 tabIndex={0}
                 className="ac-hover-accent-soft2"
                 style={{
@@ -579,6 +595,7 @@ export default function WorkspacePage() {
               </div>
 
               <div
+                id="workspace-result-panel"
                 style={{
                   flexShrink: 0,
                   height: bottomOpen ? bottomPx : 39,

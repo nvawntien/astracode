@@ -165,7 +165,7 @@ export function EditorToolbar({
           <Icon.Reset />
         </button>
 
-        {!stacked && (
+        {(!stacked || fullscreen) && (
           <button
             type="button"
             onClick={onToggleFullscreen}

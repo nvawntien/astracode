@@ -214,6 +214,24 @@ async function reset(mode: Mode) {
     separator(mode).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })),
   );
 }
+async function press(mode: Mode, key: string, options: KeyboardEventInit = {}) {
+  const element = separator(mode);
+  element.focus();
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+  await act(async () => element.dispatchEvent(event));
+  return event;
+}
+function expectResizeValue(mode: Mode, value: number) {
+  const element = separator(mode);
+  expect(element.getAttribute('aria-valuenow')).toBe(String(value));
+  expect(element.getAttribute('aria-valuemin')).toBe(mode === 'h' ? '30' : '120');
+  expect(element.getAttribute('aria-valuemax')).toBe(mode === 'h' ? '68' : '520');
+  expect(element.getAttribute('aria-valuetext')).toBe(
+    mode === 'h' ? `${value}% left pane width` : `${value} pixels when expanded`,
+  );
+  const controlled = document.getElementById(element.getAttribute('aria-controls')!);
+  expect(controlled).toBe(mode === 'h' ? problemPane() : bottomPanel());
+}
 function expectSelected(name: string | RegExp) {
   expect(findButton(name)?.getAttribute('aria-selected')).toBe('true');
 }
@@ -830,19 +848,22 @@ describe('workspace responsive and display state', () => {
     expect(editorPane()?.style.width).toBe('40%');
   });
 
-  it('characterizes full-width mode surviving stacked resize while its exit control is absent', async () => {
+  it('keeps Exit full-width editor available after stacked resize and restores the selected responsive view', async () => {
     await mount();
     await click('Full-width editor');
     await resize(759);
-    expectSelected('Problem');
+    expectSelected('Code');
     expect(problemPane()).toBeUndefined();
     expect(editorPane()?.style.width).toBe('100%');
-    expect(findButton('Exit full-width editor')).toBeUndefined();
-    await click('Problem');
-    expect(problemPane()).toBeUndefined();
-    expect(editorPane()).toBeDefined();
-    await resize(1020);
+    expect(findButton('Exit full-width editor')).toBeDefined();
     await click('Exit full-width editor');
+    expect(problemPane()?.style.width).toBe('100%');
+    expect(editorPane()).toBeUndefined();
+    await click('Code');
+    expect(editorPane()?.style.width).toBe('100%');
+    await click('Problem');
+    expect(problemPane()).toBeDefined();
+    await resize(1020);
     expect(problemPane()?.style.width).toBe('52%');
   });
 
@@ -878,6 +899,385 @@ describe('workspace responsive and display state', () => {
     await click('Console');
     expect(bottomPanel().style.height).toBe('235px');
     expectSelected('Console');
+  });
+});
+
+describe('workspace fullscreen responsive accessibility', () => {
+  it.each([900, 700])(
+    'lets explicit Problem navigation leave fullscreen without losing the draft (%spx)',
+    async (width) => {
+      await mount();
+      await click('Full-width editor');
+      await resize(width);
+      expect(findButton('Exit full-width editor')).toBeDefined();
+      await click('Problem');
+      expectSelected('Problem');
+      expect(problemPane()?.style.width).toBe('100%');
+      expect(editorPane()).toBeUndefined();
+      await click('Code');
+      expectSelected('Code');
+      expect(editorPane()?.style.width).toBe('100%');
+      expect(observed.editor?.value).toBe(sourceCode);
+      expect(findButton('Exit full-width editor')).toBeUndefined();
+    },
+  );
+
+  it.each([900, 700])(
+    'preserves language, draft and testcases while exiting fullscreen in stacked Code view (%spx)',
+    async (width) => {
+      localStorage.setItem('astra-lang', 'JAVA');
+      localStorage.setItem('astra-draft:1:JAVA', '// existing Java draft');
+      await mount();
+      await click('Use fixture example');
+      await act(async () => observed.editor!.onChange('// edited Java draft'));
+      await act(async () => vi.advanceTimersByTimeAsync(600));
+      // jsdom schedules a storage event from inside the draft-save timer. Fake timers
+      // defer that nested zero-delay callback to the next tick; flush it explicitly.
+      await act(async () => vi.advanceTimersToNextTimerAsync());
+      expect(localStorage.getItem('astra-draft:1:JAVA')).toBe('// edited Java draft');
+      await click('Full-width editor');
+      await resize(width);
+      await click('Code');
+      expect(findButton('Exit full-width editor')?.getAttribute('aria-pressed')).toBe('true');
+      await click('Exit full-width editor');
+      expectSelected('Code');
+      expect(editorPane()?.style.width).toBe('100%');
+      expect(observed.editor?.language).toBe('JAVA');
+      expect(observed.editor?.value).toBe('// edited Java draft');
+      expectSelected('Tests (2)');
+      expect(findButton('Custom 1')?.getAttribute('aria-pressed')).toBe('true');
+      await click('Problem');
+      expect(problemPane()).toBeDefined();
+      await click('Code');
+      expect(observed.editor?.value).toBe('// edited Java draft');
+      expect(localStorage.getItem('astra-lang')).toBe('JAVA');
+      expect(localStorage.getItem('astra-draft:1:JAVA')).toBe('// edited Java draft');
+      expect(submissionApi.create).not.toHaveBeenCalled();
+      expect(submissionApi.run).not.toHaveBeenCalled();
+      expect(observed.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Enter', ' '])(
+    'exposes a focusable native Exit button that accepts a keyboard-origin activation (%s)',
+    async (key) => {
+      await mount();
+      await click('Full-width editor');
+      await resize(700);
+      await click('Code');
+      const exit = findButton('Exit full-width editor');
+      expect(exit).toBeDefined();
+      expect(exit!.tagName).toBe('BUTTON');
+      expect(exit!.type).toBe('button');
+      expect(exit!.disabled).toBe(false);
+      expect(exit!.tabIndex).toBe(0);
+      exit!.focus();
+      expect(document.activeElement).toBe(exit);
+      const clicks = vi.fn();
+      exit!.addEventListener('click', clicks);
+      await act(async () => {
+        const down = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        exit!.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(false);
+        exit!.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+        // jsdom does not synthesize native button activation from keys. Supply its
+        // keyboard-origin click (detail=0); browser key-to-click behavior is not E2E coverage.
+        exit!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+      });
+      expect(clicks).toHaveBeenCalledTimes(1);
+      expect(findButton('Exit full-width editor')).toBeUndefined();
+      await click('Problem');
+      expect(problemPane()).toBeDefined();
+      expect(observed.editor?.value).toBe(sourceCode);
+    },
+  );
+});
+
+describe('workspace keyboard resize accessibility', () => {
+  it.each<Mode>(['h', 'v'])(
+    'uses focused %s arrow keys with 2 percentage point / 20px increments',
+    async (mode) => {
+      document.body.style.userSelect = 'text';
+      const { measure } = await mount();
+      const increase = mode === 'h' ? 'ArrowRight' : 'ArrowUp';
+      const decrease = mode === 'h' ? 'ArrowLeft' : 'ArrowDown';
+      expect((await press(mode, increase)).defaultPrevented).toBe(true);
+      expectResizeValue(mode, mode === 'h' ? 54 : 255);
+      expect((await press(mode, decrease)).defaultPrevented).toBe(true);
+      expectResizeValue(mode, mode === 'h' ? 52 : 235);
+      await press(mode, decrease);
+      expectResizeValue(mode, mode === 'h' ? 50 : 215);
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '50%' : '52%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '215px' : '235px');
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-split' : 'astra-bottom')).toBe(
+        mode === 'h' ? '50' : '215',
+      );
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-bottom' : 'astra-split')).toBeNull();
+      expect(document.body.style.userSelect).toBe('text');
+      expect(document.activeElement).toBe(separator(mode));
+      await move(700);
+      expect(measure).not.toHaveBeenCalled();
+      expect(submissionApi.create).not.toHaveBeenCalled();
+      expect(submissionApi.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each<Mode>(['h', 'v'])(
+    'applies Home/End and clamps %s arrows at both boundaries',
+    async (mode) => {
+      await mount();
+      expect((await press(mode, 'Home')).defaultPrevented).toBe(true);
+      expectResizeValue(mode, mode === 'h' ? 30 : 120);
+      await press(mode, mode === 'h' ? 'ArrowLeft' : 'ArrowDown');
+      expectResizeValue(mode, mode === 'h' ? 30 : 120);
+      expect((await press(mode, 'End')).defaultPrevented).toBe(true);
+      expectResizeValue(mode, mode === 'h' ? 68 : 520);
+      await press(mode, mode === 'h' ? 'ArrowRight' : 'ArrowUp');
+      expectResizeValue(mode, mode === 'h' ? 68 : 520);
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-split' : 'astra-bottom')).toBe(
+        mode === 'h' ? '68' : '520',
+      );
+    },
+  );
+
+  it.each<Mode>(['h', 'v'])(
+    'ignores unrelated and modified keys on the %s separator',
+    async (mode) => {
+      await mount();
+      const write = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, 'setItem');
+      for (const key of [
+        mode === 'h' ? 'ArrowUp' : 'ArrowRight',
+        mode === 'h' ? 'ArrowDown' : 'ArrowLeft',
+        'Tab',
+        'Enter',
+        ' ',
+        'a',
+      ]) {
+        expect((await press(mode, key)).defaultPrevented).toBe(false);
+      }
+      for (const modifier of ['ctrlKey', 'metaKey', 'altKey', 'shiftKey']) {
+        expect(
+          (await press(mode, mode === 'h' ? 'ArrowRight' : 'ArrowUp', { [modifier]: true }))
+            .defaultPrevented,
+        ).toBe(false);
+      }
+      expectResizeValue('h', 52);
+      expectResizeValue('v', 235);
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it('updates ARIA values after storage restoration, mouse dragging and resets', async () => {
+    sessionStorage.setItem('astra-split', '61.5');
+    sessionStorage.setItem('astra-bottom', '333');
+    await mount();
+    expectResizeValue('h', 61.5);
+    expectResizeValue('v', 333);
+    await start('h');
+    await move(700);
+    await release();
+    expectResizeValue('h', 60);
+    await start('v');
+    await move(0, 450);
+    await release();
+    expectResizeValue('v', 350);
+    await reset('h');
+    await reset('v');
+    expectResizeValue('h', 52);
+    expectResizeValue('v', 235);
+  });
+
+  it.each<Mode>(['h', 'v'])(
+    'accumulates rapid %s keyboard changes within one React batch',
+    async (mode) => {
+      await mount();
+      const element = separator(mode);
+      element.focus();
+      await act(async () => {
+        for (const key of mode === 'h'
+          ? ['ArrowRight', 'ArrowRight', 'ArrowLeft']
+          : ['ArrowUp', 'ArrowUp', 'ArrowDown']) {
+          const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+          element.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+        }
+      });
+      expectResizeValue(mode, mode === 'h' ? 54 : 255);
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-split' : 'astra-bottom')).toBe(
+        mode === 'h' ? '54' : '255',
+      );
+    },
+  );
+
+  it('restores both keyboard-resized dimensions and ARIA values after remount', async () => {
+    await mount();
+    await press('h', 'ArrowRight');
+    await press('v', 'ArrowUp');
+    await view!.unmount();
+    await mount();
+    expect(problemPane()?.style.width).toBe('54%');
+    expect(bottomPanel().style.height).toBe('255px');
+    expectResizeValue('h', 54);
+    expectResizeValue('v', 255);
+  });
+
+  it.each<Mode>(['h', 'v'])(
+    'keeps %s mouse → keyboard → mouse geometry synchronized',
+    async (mode) => {
+      await mount();
+      await start(mode);
+      await move(700, 450);
+      await release();
+      await press(mode, mode === 'h' ? 'ArrowLeft' : 'ArrowDown');
+      expectResizeValue(mode, mode === 'h' ? 58 : 330);
+      await start(mode);
+      await move(600, 500);
+      await release();
+      expectResizeValue(mode, mode === 'h' ? 50 : 300);
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-split' : 'astra-bottom')).toBe(
+        mode === 'h' ? '50' : '300',
+      );
+    },
+  );
+
+  it.each<Mode>(['h', 'v'])(
+    'ends an active %s drag before keyboard resizing so queued mouse events cannot overwrite it',
+    async (mode) => {
+      document.body.style.userSelect = 'text';
+      await mount();
+      await start(mode);
+      await act(async () => {
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 700, clientY: 450, buttons: 1 }),
+        );
+        separator(mode).focus();
+        separator(mode).dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: mode === 'h' ? 'ArrowRight' : 'ArrowUp',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 400, clientY: 600, buttons: 1 }),
+        );
+        window.dispatchEvent(new MouseEvent('mouseup'));
+      });
+      expectResizeValue(mode, mode === 'h' ? 62 : 370);
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-split' : 'astra-bottom')).toBe(
+        mode === 'h' ? '62' : '370',
+      );
+      expect(sessionStorage.getItem(mode === 'h' ? 'astra-bottom' : 'astra-split')).toBeNull();
+      expect(document.body.style.userSelect).toBe('text');
+    },
+  );
+
+  it('keeps reset defaults authoritative after keyboard resizing', async () => {
+    await mount();
+    await press('h', 'End');
+    await press('v', 'End');
+    await reset('h');
+    expectResizeValue('h', 52);
+    expectResizeValue('v', 520);
+    await reset('v');
+    expectResizeValue('v', 235);
+    expect(sessionStorage.getItem('astra-split')).toBe('52');
+    expect(sessionStorage.getItem('astra-bottom')).toBe('235');
+  });
+
+  it.each<Mode>(['h', 'v'])(
+    'keeps %s keyboard resizing usable when storage fails',
+    async (mode) => {
+      await mount();
+      const prototype = Object.getPrototypeOf(sessionStorage) as Storage;
+      const write = prototype.setItem;
+      vi.spyOn(prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (this === sessionStorage) throw new Error('fixture storage unavailable');
+        return write.call(this, key, value);
+      });
+      expect((await press(mode, mode === 'h' ? 'ArrowRight' : 'ArrowUp')).defaultPrevented).toBe(
+        true,
+      );
+      expectResizeValue(mode, mode === 'h' ? 54 : 255);
+      expect(document.body.style.userSelect).toBe('');
+    },
+  );
+
+  it('resizes the saved bottom height without opening a collapsed panel or changing its tab', async () => {
+    await mount();
+    await click('Console');
+    await click('Collapse panel');
+    await press('v', 'ArrowUp');
+    expect(bottomPanel().style.height).toBe('39px');
+    expectSelected('Console');
+    expectResizeValue('v', 255);
+    await click('Expand panel');
+    expect(bottomPanel().style.height).toBe('255px');
+    await click('Result');
+    await press('v', 'ArrowDown');
+    expectSelected('Result');
+    expect(bottomPanel().style.height).toBe('235px');
+  });
+
+  it.each([false, true])(
+    'keeps keyboard handling single and drag cleanup intact across rerenders (StrictMode=%s)',
+    async (strict) => {
+      document.body.style.userSelect = 'text';
+      const listeners = trackListeners();
+      await mount(1280, strict);
+      await press('h', 'ArrowRight');
+      const page = createElement(WorkspacePage);
+      await view!.rerender(strict ? createElement(StrictMode, null, page) : page);
+      await press('h', 'ArrowRight');
+      expectResizeValue('h', 56);
+      for (const type of ['mousemove', 'mouseup', 'blur', 'resize'])
+        expect(listeners.active(type).size).toBe(1);
+      await start('v');
+      await press('v', 'ArrowUp');
+      expectResizeValue('v', 255);
+      expect(document.body.style.userSelect).toBe('text');
+      await start('h');
+      await view!.unmount();
+      expect(document.body.style.userSelect).toBe('text');
+      for (const type of ['mousemove', 'mouseup', 'blur', 'resize'])
+        expect(listeners.active(type).size).toBe(0);
+    },
+  );
+
+  it('leaves editor Run/Submit shortcuts operational without resizing panels', async () => {
+    await mount();
+    const editor = view!.container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Layout fixture editor"]',
+    )!;
+    await act(async () =>
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(submissionApi.run).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(submissionApi.create).toHaveBeenCalledTimes(1);
+    expectResizeValue('h', 52);
+    expectResizeValue('v', 235);
   });
 });
 
@@ -1031,22 +1431,21 @@ describe('workspace resize lifecycle and existing limitations', () => {
     expect(document.body.style.userSelect).toBe('');
   });
 
-  it('characterizes focusable separators without keyboard resizing or numeric ARIA values', async () => {
+  it('makes both focusable separators keyboard operable with numeric ARIA values', async () => {
     await mount();
     for (const mode of ['h', 'v'] as const) {
       const element = separator(mode);
       element.focus();
       expect(document.activeElement).toBe(element);
       expect(element.tabIndex).toBe(0);
-      expect(element.getAttribute('aria-valuenow')).toBeNull();
-      await act(async () => {
-        for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
-          element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-        }
-      });
+      expectResizeValue(mode, mode === 'h' ? 52 : 235);
+      expect((await press(mode, mode === 'h' ? 'ArrowRight' : 'ArrowUp')).defaultPrevented).toBe(
+        true,
+      );
+      expectResizeValue(mode, mode === 'h' ? 54 : 255);
     }
-    expect(problemPane()?.style.width).toBe('52%');
-    expect(bottomPanel().style.height).toBe('235px');
+    expect(problemPane()?.style.width).toBe('54%');
+    expect(bottomPanel().style.height).toBe('255px');
     expect(submissionApi.run).not.toHaveBeenCalled();
     expect(submissionApi.create).not.toHaveBeenCalled();
   });
