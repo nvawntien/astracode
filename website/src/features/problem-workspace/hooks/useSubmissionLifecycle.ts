@@ -96,17 +96,17 @@ export function useSubmissionLifecycle({
     );
   }, []);
 
-  const authenticated = Boolean(user);
+  const accountId = user?.id ?? null;
   useLayoutEffect(() => {
     const operations = operationsRef.current;
     operations.mounted = true;
     return () => {
       // Invalidate at commit/unmount, before passive reset effects or late
-      // promise continuations. Truthy user-object refreshes keep this scope.
+      // promise continuations. Same-account object refreshes keep this scope.
       operations.mounted = false;
       invalidateOperations();
     };
-  }, [slug, authenticated, invalidateOperations]);
+  }, [slug, accountId, invalidateOperations]);
 
   useEffect(() => {
     setActiveSubmissionId(null);
@@ -117,12 +117,17 @@ export function useSubmissionLifecycle({
     setDetailFetchError('');
   }, [slug]);
 
-  useEffect(() => {
-    if (user) return;
+  useLayoutEffect(() => {
     setActiveSubmissionId(null);
     setSubmitting(false);
     setCheckingResult(false);
-  }, [user]);
+    // Retain the existing logout view, but clear it before an authenticated
+    // account (including a login after logout) can display another account's data.
+    if (accountId === null) return;
+    setSubmission(null);
+    setLiveUpdateError('');
+    setDetailFetchError('');
+  }, [accountId]);
 
   const applyStreamStatus = useCallback((event: SubmissionStreamEvent) => {
     setSubmission((current) => {
@@ -264,12 +269,27 @@ export function useSubmissionLifecycle({
     setSubmitting(false);
   }, []);
 
+  const handleStreamConnected = useCallback(
+    (id: number) => {
+      const operations = operationsRef.current;
+      if (
+        id !== activeSubmissionId ||
+        !isCurrent(operations.generation, id) ||
+        operations.completed
+      )
+        return;
+      setLiveUpdateError('');
+    },
+    [activeSubmissionId, isCurrent],
+  );
+
   const stream = useSubmissionStream({
     submissionId: activeSubmissionId,
     enabled: Boolean(activeSubmissionId && submission && isPendingStatus(submission.status)),
     onStatus: applyStreamStatus,
     onTerminal: handleStreamTerminal,
     onError: handleStreamError,
+    onConnected: handleStreamConnected,
   });
 
   const submit = async () => {

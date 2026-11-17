@@ -478,22 +478,43 @@ describe('submission recovery and cancellation', () => {
     expect(observed.problem!.historyRefreshKey).toBe(0);
   });
 
-  it('characterizes a successful reconnect that leaves the page recovery warning until completion', async () => {
-    await mount();
-    await click('Submit');
-    await disconnect();
-    const warning = state().liveUpdateError;
-    await click('Reconnect');
-    expect(TestEventSource.instances).toHaveLength(2);
-    await act(async () => {
-      TestEventSource.instances[1].open();
-      TestEventSource.instances[1].emit('submission.updated', event());
-    });
-    expect(state().streamState).toBe('open');
-    expect(state().liveUpdateError).toBe(warning);
-    await terminal();
-    expect(state()).toMatchObject({ submitting: false, liveUpdateError: '', detailFetchError: '' });
-  });
+  it.each([false, true])(
+    'clears the warning only on current open and keeps pending status (StrictMode=%s)',
+    async (strict) => {
+      await mount(strict);
+      await click('Submit');
+      await disconnect();
+      const warning = state().liveUpdateError;
+      const pending = deferred<Awaited<ReturnType<typeof submissionApi.issueStreamTicket>>>();
+      vi.mocked(submissionApi.issueStreamTicket).mockReturnValueOnce(pending.promise);
+      await click('Reconnect');
+      expect(state().streamState).toBe('requesting_ticket');
+      expect(state().liveUpdateError).toBe(warning);
+      await act(async () => pending.resolve({ ticket: 'fixture-reconnect', expires_at: '' }));
+      expect(TestEventSource.instances).toHaveLength(2);
+      expect(state().streamState).toBe('connecting');
+      expect(state().liveUpdateError).toBe(warning);
+      expect(view!.container.textContent).toContain(warning);
+      await act(async () => {
+        TestEventSource.instances[1].open();
+      });
+      expect(state().streamState).toBe('open');
+      expect(state().liveUpdateError).toBe('');
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+      expect(submissionApi.create).toHaveBeenCalledTimes(1);
+      expect(submissionApi.get).not.toHaveBeenCalled();
+      expect(view!.container.textContent).not.toContain(warning);
+      expect(view!.container.textContent).toContain('queued — waiting for a judge worker');
+      await act(async () => TestEventSource.instances[1].emit('submission.updated', event()));
+      expect(view!.container.textContent).toContain('is being judged');
+      await terminal();
+      expect(state()).toMatchObject({
+        submitting: false,
+        liveUpdateError: '',
+        detailFetchError: '',
+      });
+    },
+  );
 
   it.each([
     [
@@ -555,9 +576,11 @@ describe('submission recovery and cancellation', () => {
       });
       expect(observed.stream!.submissionId).toBe(41);
       expect(invalidateProgress).not.toHaveBeenCalled();
-      // While a live-update error exists, the pending/live branch precedes detailFetchError in ResultPanel.
       expect(view!.container.textContent).toContain('Live update payload was not valid JSON.');
-      expect(view!.container.textContent).not.toContain(message);
+      expect(view!.container.textContent).toContain(message);
+      expect(
+        [...view!.container.querySelectorAll('button')].map((button) => button.textContent?.trim()),
+      ).toEqual(expect.arrayContaining(['Reconnect', 'Retry detail', 'View submissions']));
     },
   );
 
@@ -657,10 +680,10 @@ describe('submission recovery and cancellation', () => {
     expect(invalidateProgress).not.toHaveBeenCalled();
   });
 
-  it('retains submission and recovery errors on logout, and does not reset on a truthy user change', async () => {
+  it('retains submission and recovery errors on logout, and does not reset on same-account refresh', async () => {
     await mount();
     await click('Submit');
-    observed.user = { ...user, id: 'another-fixture-user', username: 'another-user' };
+    observed.user = { ...user, username: 'refreshed-user' };
     await rerender();
     expect(state().submitting).toBe(true);
     expect(observed.stream!.submissionId).toBe(41);
@@ -677,6 +700,136 @@ describe('submission recovery and cancellation', () => {
     });
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
   });
+});
+
+describe('cross-account workspace isolation', () => {
+  it('keeps the logout view, then clears submission and both errors when B logs in', async () => {
+    await mount();
+    await click('Submit');
+    await disconnect();
+    vi.mocked(submissionApi.get).mockRejectedValue(
+      new ApiError('account A detail error', 503, 50300),
+    );
+    await click('Check result');
+    const retained = state().submission;
+    const warning = state().liveUpdateError;
+    expect(state().detailFetchError).toBe('account A detail error');
+    observed.user = null;
+    await rerender();
+    expect(state()).toMatchObject({
+      submission: retained,
+      liveUpdateError: warning,
+      detailFetchError: 'account A detail error',
+      submitting: false,
+      checkingResult: false,
+    });
+    observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+    await rerender();
+    expect(state()).toMatchObject({
+      submission: null,
+      liveUpdateError: '',
+      detailFetchError: '',
+      submitting: false,
+      checkingResult: false,
+    });
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(observed.editor!.value).toBe(sourceCode);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    expect(invalidateProgress).not.toHaveBeenCalled();
+  });
+
+  it('clears already completed A submission data when the authenticated account becomes B', async () => {
+    await mount();
+    await click('Submit');
+    await terminal();
+    expect(state().submission).toEqual(detail());
+    expect(observed.problem!.historyRefreshKey).toBe(1);
+    observed.toast.mockClear();
+    observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+    await rerender();
+    expect(state().submission).toBeNull();
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(observed.toast).not.toHaveBeenCalled();
+    expect(observed.problem!.historyRefreshKey).toBe(1);
+    expect(invalidateProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears tracked submission state on A to B and ignores the closed stream events', async () => {
+    await mount();
+    await click('Submit');
+    const oldSource = TestEventSource.instances[0];
+    observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+    await rerender();
+    expect(state()).toMatchObject({
+      submission: null,
+      submitting: false,
+      checkingResult: false,
+      liveUpdateError: '',
+      detailFetchError: '',
+    });
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(oldSource.closed).toBe(true);
+    await act(async () => {
+      oldSource.emit('submission.updated', event());
+      oldSource.emit('submission.completed', event({ status: 'ACCEPTED' }));
+      oldSource.raw('submission.updated', '{invalid');
+    });
+    expect(state().submission).toBeNull();
+    expect(state().liveUpdateError).toBe('');
+    expect(submissionApi.get).not.toHaveBeenCalled();
+    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(observed.problem!.historyRefreshKey).toBe(0);
+    expect(observed.toast).not.toHaveBeenCalled();
+    vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
+    await shortcut();
+    expect(state().submission).toMatchObject({ id: 42, user_id: 'fixture-user-b' });
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+    expect(TestEventSource.instances).toHaveLength(2);
+    expect(TestEventSource.instances[1].closed).toBe(false);
+    await act(async () => oldSource.emit('submission.updated', event({ submission_id: 42 })));
+    expect(state().submission?.status).toBe('PENDING');
+  });
+
+  it.each(['resolve', 'reject'] as const)(
+    'ignores account A terminal detail %s after B starts its own lifecycle',
+    async (outcome) => {
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await mount();
+      await click('Submit');
+      await terminal();
+      const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+      observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+      await rerender();
+      expect(signal.aborted).toBe(true);
+      vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
+      await shortcut();
+      await act(async () => {
+        if (outcome === 'resolve') pending.resolve(detail());
+        else pending.reject(new NetworkError());
+      });
+      expect(state()).toMatchObject({
+        submitting: true,
+        submission: { id: 42, user_id: 'fixture-user-b', status: 'PENDING' },
+        detailFetchError: '',
+      });
+      expect(observed.problem!.historyRefreshKey).toBe(0);
+      expect(invalidateProgress).not.toHaveBeenCalled();
+      expect(fetchProgress).not.toHaveBeenCalledWith(true);
+      expect(observed.toast).not.toHaveBeenCalled();
+      vi.mocked(submissionApi.get).mockResolvedValue(
+        detail({ id: 42, user_id: 'fixture-user-b', username: 'fixture-user-b' }),
+      );
+      await act(async () =>
+        TestEventSource.instances
+          .at(-1)!
+          .emit('submission.completed', event({ submission_id: 42, status: 'ACCEPTED' })),
+      );
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(invalidateProgress).toHaveBeenCalledTimes(1);
+      expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+    },
+  );
 });
 
 describe('async lifecycle response validity', () => {
@@ -804,4 +957,190 @@ describe('async lifecycle response validity', () => {
     expect(observed.problem!.historyRefreshKey).toBe(1);
     expect(invalidateProgress).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('SSE recovery and independent detail errors', () => {
+  it('keeps the inactive logout presentation and ignores an old open without reactivating tracking', async () => {
+    await mount();
+    await click('Submit');
+    const previous = TestEventSource.instances[0];
+    await act(async () => previous.open());
+    observed.user = null;
+    await rerender();
+    await act(async () => previous.open());
+    expect(state()).toMatchObject({
+      submission: { id: 41, status: 'PENDING' },
+      streamState: 'idle',
+      liveUpdateError: '',
+      submitting: false,
+    });
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(view!.container.textContent).toContain('Run your code against the test cases');
+    expect(view!.container.textContent).not.toContain('queued — waiting for a judge worker');
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the warning through a failed reconnect and ignores opens from its replaced source', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    await mount();
+    await click('Submit');
+    await disconnect();
+    const warning = state().liveUpdateError;
+    await click('Reconnect');
+    const previous = TestEventSource.instances[1];
+    await act(async () => previous.fail());
+    expect(state().streamState).toBe('reconnecting');
+    expect(state().liveUpdateError).toBe(warning);
+    await act(async () => previous.open());
+    expect(state().streamState).toBe('reconnecting');
+    expect(view!.container.textContent).toContain(warning);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(TestEventSource.instances).toHaveLength(3);
+    await act(async () => previous.open());
+    expect(state().streamState).toBe('connecting');
+    expect(state().liveUpdateError).toBe(warning);
+    await act(async () => TestEventSource.instances[2].open());
+    expect(state().liveUpdateError).toBe('');
+    expect(view!.container.textContent).not.toContain(warning);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(3);
+    expect(submissionApi.get).not.toHaveBeenCalled();
+  });
+
+  it.each(['manual retry', 'terminal event'] as const)(
+    'keeps a real detail error through SSE recovery and clears it on successful %s',
+    async (recovery) => {
+      await mount();
+      await click('Submit');
+      await disconnect();
+      const warning = state().liveUpdateError;
+      const message = 'fixture manual detail failure';
+      vi.mocked(submissionApi.get).mockRejectedValueOnce(new ApiError(message, 503, 50300));
+      await click('Check result');
+      expect(view!.container.textContent).toContain(warning);
+      expect(view!.container.textContent).toContain(message);
+      await click('Reconnect');
+      expect(state().detailFetchError).toBe(message);
+      expect(view!.container.textContent).toContain(warning);
+      await act(async () => TestEventSource.instances[1].open());
+      expect(state()).toMatchObject({ liveUpdateError: '', detailFetchError: message });
+      expect(view!.container.textContent).not.toContain(warning);
+      expect(view!.container.textContent).toContain(message);
+      expect(view!.container.textContent).toContain('queued — waiting for a judge worker');
+      const retry = [...view!.container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Retry detail',
+      );
+      expect(retry?.disabled).toBe(false);
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      if (recovery === 'manual retry') {
+        await click('Retry detail');
+        expect(state().checkingResult).toBe(true);
+      } else {
+        await terminal();
+        expect(state().detailFetchError).toBe(message);
+      }
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      await act(async () => pending.resolve(detail()));
+      expect(state()).toMatchObject({
+        submission: { status: 'ACCEPTED' },
+        liveUpdateError: '',
+        detailFetchError: '',
+        checkingResult: false,
+      });
+      expect(view!.container.querySelectorAll('[role="alert"]')).toHaveLength(0);
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(invalidateProgress).toHaveBeenCalledTimes(1);
+      expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+    },
+  );
+
+  it.each(['submission', 'slug', 'logout', 'account'] as const)(
+    'ignores old connection recovery after a %s transition without hiding the current detail error',
+    async (transition) => {
+      await mount();
+      await click('Submit');
+      const previous = TestEventSource.instances[0];
+      await disconnect();
+      const warning = state().liveUpdateError;
+      if (transition === 'slug') {
+        observed.slug = 'another-problem';
+        await rerender();
+      } else if (transition === 'account' || transition === 'logout') {
+        if (transition === 'logout') {
+          observed.user = null;
+          await rerender();
+          await act(async () => previous.open());
+          expect(state().liveUpdateError).toBe(warning);
+          expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+        }
+        observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+        await rerender();
+      }
+      vi.mocked(submissionApi.create).mockResolvedValue(
+        created({ id: 42, problem_id: transition === 'slug' ? 2 : 1 }),
+      );
+      await click('Submit');
+      await disconnect();
+      const message = 'current lifecycle detail failure';
+      vi.mocked(submissionApi.get).mockRejectedValueOnce(new ApiError(message, 503, 50300));
+      await click('Check result');
+      await act(async () => {
+        previous.open();
+        previous.emit('submission.updated', event());
+      });
+      expect(state()).toMatchObject({
+        submission: { id: 42, status: 'PENDING' },
+        liveUpdateError: warning,
+        detailFetchError: message,
+      });
+      expect(view!.container.textContent).toContain(warning);
+      expect(view!.container.textContent).toContain(message);
+      await click('Reconnect');
+      await act(async () => previous.open());
+      expect(state().liveUpdateError).toBe(warning);
+      await act(async () => TestEventSource.instances.at(-1)!.open());
+      expect(state().liveUpdateError).toBe('');
+      expect(view!.container.textContent).not.toContain(warning);
+      expect(view!.container.textContent).toContain(message);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(3);
+      expect(invalidateProgress).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['resolve', 'reject'] as const)(
+    'preserves current DOM errors when an obsolete account detail request later %s',
+    async (outcome) => {
+      await mount();
+      await click('Submit');
+      await disconnect();
+      const previous = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(previous.promise);
+      await click('Check result');
+      observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+      await rerender();
+      vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
+      await click('Submit');
+      await disconnect();
+      const warning = state().liveUpdateError;
+      const message = 'current account detail failure';
+      vi.mocked(submissionApi.get).mockRejectedValueOnce(new ApiError(message, 503, 50300));
+      await click('Check result');
+      await act(async () => {
+        if (outcome === 'resolve') previous.resolve(detail({ status: 'WRONG_ANSWER' }));
+        else previous.reject(new ApiError('obsolete account error', 503, 50300));
+      });
+      expect(state()).toMatchObject({
+        submission: { id: 42, status: 'PENDING' },
+        liveUpdateError: warning,
+        detailFetchError: message,
+      });
+      expect(view!.container.textContent).toContain(warning);
+      expect(view!.container.textContent).toContain(message);
+      expect(view!.container.textContent).not.toContain('obsolete account error');
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(invalidateProgress).not.toHaveBeenCalled();
+      expect(observed.problem!.historyRefreshKey).toBe(0);
+      expect(observed.toast).not.toHaveBeenCalled();
+    },
+  );
 });

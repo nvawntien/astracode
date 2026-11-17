@@ -6,13 +6,7 @@ import { isTerminalSubmissionStatus } from './format';
 import type { SubmissionStreamEvent, SubmissionStatus } from './types';
 
 export type SubmissionStreamState =
-  | 'idle'
-  | 'requesting_ticket'
-  | 'connecting'
-  | 'open'
-  | 'reconnecting'
-  | 'completed'
-  | 'error';
+  'idle' | 'requesting_ticket' | 'connecting' | 'open' | 'reconnecting' | 'completed' | 'error';
 
 export interface SubmissionStreamError {
   kind: 'ticket' | 'stream' | 'malformed_event';
@@ -26,6 +20,8 @@ interface UseSubmissionStreamOptions {
   onStatus: (event: SubmissionStreamEvent) => void;
   onTerminal: (event: SubmissionStreamEvent) => void;
   onError?: (error: SubmissionStreamError) => void;
+  /** Fired only when the current EventSource opens for this submission. */
+  onConnected?: (submissionId: number) => void;
 }
 
 interface UseSubmissionStreamResult {
@@ -76,7 +72,10 @@ function isKnownSubmissionStatus(value: string): value is SubmissionStatus {
 }
 
 function reconnectDelay(attempt: number): number {
-  const base = Math.min(MAX_RECONNECT_DELAY_MS, BASE_RECONNECT_DELAY_MS * 2 ** Math.max(0, attempt - 1));
+  const base = Math.min(
+    MAX_RECONNECT_DELAY_MS,
+    BASE_RECONNECT_DELAY_MS * 2 ** Math.max(0, attempt - 1),
+  );
   const jitter = Math.floor(Math.random() * 250);
   return base + jitter;
 }
@@ -88,6 +87,7 @@ export function useSubmissionStream({
   onStatus,
   onTerminal,
   onError,
+  onConnected,
 }: UseSubmissionStreamOptions): UseSubmissionStreamResult {
   const [state, setState] = useState<SubmissionStreamState>('idle');
   const [error, setError] = useState<SubmissionStreamError | null>(null);
@@ -102,6 +102,7 @@ export function useSubmissionStream({
   const onStatusRef = useRef(onStatus);
   const onTerminalRef = useRef(onTerminal);
   const onErrorRef = useRef(onError);
+  const onConnectedRef = useRef(onConnected);
 
   useEffect(() => {
     onStatusRef.current = onStatus;
@@ -114,6 +115,10 @@ export function useSubmissionStream({
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    onConnectedRef.current = onConnected;
+  }, [onConnected]);
 
   const reconnect = useCallback(() => {
     setReconnectNonce((current) => current + 1);
@@ -187,14 +192,20 @@ export function useSubmissionStream({
       } catch {
         closeEventSource();
         setState('error');
-        reportError({ kind: 'malformed_event', message: 'Live update payload was not valid JSON.' });
+        reportError({
+          kind: 'malformed_event',
+          message: 'Live update payload was not valid JSON.',
+        });
         return;
       }
 
       if (!isSubmissionStreamEvent(parsed)) {
         closeEventSource();
         setState('error');
-        reportError({ kind: 'malformed_event', message: 'Live update payload did not match the contract.' });
+        reportError({
+          kind: 'malformed_event',
+          message: 'Live update payload did not match the contract.',
+        });
         return;
       }
 
@@ -222,9 +233,12 @@ export function useSubmissionStream({
       } catch (err) {
         if (controller.signal.aborted || generationRef.current !== generation) return;
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
-          reconnectTimerRef.current = setTimeout(() => {
-            void connect(attempt + 1);
-          }, reconnectDelay(attempt + 1));
+          reconnectTimerRef.current = setTimeout(
+            () => {
+              void connect(attempt + 1);
+            },
+            reconnectDelay(attempt + 1),
+          );
           return;
         }
         setState('error');
@@ -241,8 +255,14 @@ export function useSubmissionStream({
       eventSourceRef.current = source;
 
       source.onopen = () => {
-        if (generationRef.current !== generation || terminalHandledRef.current) return;
+        if (
+          generationRef.current !== generation ||
+          terminalHandledRef.current ||
+          eventSourceRef.current !== source
+        )
+          return;
         setState('open');
+        onConnectedRef.current?.(submissionId);
       };
 
       source.onerror = () => {
@@ -255,9 +275,12 @@ export function useSubmissionStream({
 
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
           setState('reconnecting');
-          reconnectTimerRef.current = setTimeout(() => {
-            void connect(attempt + 1);
-          }, reconnectDelay(attempt + 1));
+          reconnectTimerRef.current = setTimeout(
+            () => {
+              void connect(attempt + 1);
+            },
+            reconnectDelay(attempt + 1),
+          );
           return;
         }
 

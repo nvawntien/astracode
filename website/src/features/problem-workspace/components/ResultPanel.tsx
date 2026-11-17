@@ -58,11 +58,14 @@ export function ResultPanel({
     );
   }
 
-  if (submission && isPendingStatus(submission.status) && (submitting || liveUpdateError)) {
+  if (
+    submission &&
+    isPendingStatus(submission.status) &&
+    (submitting || liveUpdateError || detailFetchError || streamState !== 'idle')
+  ) {
     const queued = submission.status === 'PENDING';
     const reconnecting = streamState === 'reconnecting';
-    const connecting =
-      streamState === 'requesting_ticket' || streamState === 'connecting' || streamState === 'open';
+    const connecting = streamState === 'requesting_ticket' || streamState === 'connecting';
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div
@@ -83,7 +86,7 @@ export function ResultPanel({
           </span>
         </div>
 
-        {liveUpdateError && (
+        {(liveUpdateError || detailFetchError) && (
           <div
             role="alert"
             style={{
@@ -98,16 +101,27 @@ export function ResultPanel({
             }}
           >
             <span style={{ flex: 1, minWidth: 200, fontSize: 12.5 }}>
-              {liveUpdateError} You can reconnect live updates or check the result once.
+              {detailFetchError && (
+                <span style={{ display: 'block', marginBottom: liveUpdateError ? 4 : 0 }}>
+                  {detailFetchError}
+                </span>
+              )}
+              {liveUpdateError && (
+                <span>
+                  {liveUpdateError} You can reconnect live updates or check the result once.
+                </span>
+              )}
             </span>
-            <button
-              type="button"
-              onClick={onReconnectStream}
-              className="ac-hover-surface2"
-              style={smallActionButton}
-            >
-              Reconnect
-            </button>
+            {liveUpdateError && (
+              <button
+                type="button"
+                onClick={onReconnectStream}
+                className="ac-hover-surface2"
+                style={smallActionButton}
+              >
+                Reconnect
+              </button>
+            )}
             <button
               type="button"
               onClick={onCheckResult}
@@ -115,16 +129,18 @@ export function ResultPanel({
               className="ac-hover-surface2"
               style={{ ...smallActionButton, opacity: checkingResult ? 0.6 : 1 }}
             >
-              {checkingResult ? 'Checking…' : 'Check result'}
+              {checkingResult ? 'Checking…' : detailFetchError ? 'Retry detail' : 'Check result'}
             </button>
-            <button
-              type="button"
-              onClick={onOpenSubmissions}
-              className="ac-hover-surface2"
-              style={smallActionButton}
-            >
-              View submissions
-            </button>
+            {liveUpdateError && (
+              <button
+                type="button"
+                onClick={onOpenSubmissions}
+                className="ac-hover-surface2"
+                style={smallActionButton}
+              >
+                View submissions
+              </button>
+            )}
           </div>
         )}
       </div>

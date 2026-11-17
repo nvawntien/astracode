@@ -65,6 +65,64 @@ afterEach(async () => {
 });
 
 describe('real React submission stream lifecycle', () => {
+  it('does not report open from a closed source during an automatic retry', async () => {
+    const onConnected = vi.fn();
+    const props = options({ onConnected });
+    await mount(props);
+    const previous = TestEventSource.instances[0];
+    await act(async () => previous.fail());
+    expect(latest.state).toBe('reconnecting');
+    await act(async () => previous.open());
+    expect(latest.state).toBe('reconnecting');
+    expect(onConnected).not.toHaveBeenCalled();
+    await advance(1000);
+    expect(TestEventSource.instances).toHaveLength(2);
+    await act(async () => previous.open());
+    expect(latest.state).toBe('connecting');
+    expect(onConnected).not.toHaveBeenCalled();
+    await act(async () => TestEventSource.instances[1].open());
+    expect(latest.state).toBe('open');
+    expect(onConnected).toHaveBeenCalledExactlyOnceWith(41);
+  });
+
+  it('reports the current connected ID with a fresh callback and ignores obsolete opens', async () => {
+    const pending = deferred<SubmissionStreamTicketResponse>();
+    vi.mocked(submissionApi.issueStreamTicket).mockReturnValueOnce(pending.promise);
+    const initial = vi.fn();
+    const current = vi.fn();
+    const props = options({ onConnected: initial });
+    await mount(props);
+    expect(latest.state).toBe('requesting_ticket');
+    expect(initial).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(ticket));
+    expect(latest.state).toBe('connecting');
+    expect(initial).not.toHaveBeenCalled();
+    await view!.rerender(createElement(Probe, { ...props, onConnected: current }));
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    const previous = TestEventSource.instances[0];
+    await act(async () => previous.open());
+    expect(initial).not.toHaveBeenCalled();
+    expect(current).toHaveBeenCalledExactlyOnceWith(41);
+    await view!.rerender(
+      createElement(Probe, { ...props, submissionId: 42, onConnected: current }),
+    );
+    const source = TestEventSource.instances[1];
+    await act(async () => previous.open());
+    expect(current).toHaveBeenCalledTimes(1);
+    await act(async () => source.open());
+    expect(current).toHaveBeenCalledTimes(2);
+    expect(current).toHaveBeenLastCalledWith(42);
+    await act(async () =>
+      source.emit('submission.completed', { ...event, submission_id: 42, status: 'ACCEPTED' }),
+    );
+    await act(async () => source.open());
+    expect(latest.state).toBe('completed');
+    expect(current).toHaveBeenCalledTimes(2);
+    await view!.unmount();
+    await act(async () => source.open());
+    expect(current).toHaveBeenCalledTimes(2);
+  });
+
   it('stays idle when disabled and connects to the ticket URL when enabled', async () => {
     const props = options({ enabled: false });
     await mount(props);

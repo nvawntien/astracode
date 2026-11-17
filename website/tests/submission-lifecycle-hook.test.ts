@@ -205,16 +205,25 @@ async function deliverTerminal(id = 41) {
   );
 }
 
-type Invalidation = 'slug' | 'logout' | 'unmount';
+type Invalidation = 'slug' | 'logout' | 'unmount' | 'account' | 'relogin';
 async function invalidateContext(kind: Invalidation, props: Options) {
-  if (kind === 'unmount') await view!.unmount();
-  else
-    await view!.rerender(
-      createElement(Probe, {
-        ...props,
-        ...(kind === 'slug' ? { slug: 'another-problem', problem: { id: 2 } } : { user: null }),
-      }),
-    );
+  if (kind === 'unmount') {
+    await view!.unmount();
+    return;
+  }
+  if (kind === 'relogin') {
+    await view!.rerender(createElement(Probe, { ...props, user: null }));
+  }
+  await view!.rerender(
+    createElement(Probe, {
+      ...props,
+      ...(kind === 'slug'
+        ? { slug: 'another-problem', problem: { id: 2 } }
+        : kind === 'logout'
+          ? { user: null }
+          : { user: { id: 'fixture-user-b', username: 'fixture-user-b' } }),
+    }),
+  );
 }
 
 describe('submission async ownership and completion races', () => {
@@ -260,7 +269,7 @@ describe('submission async ownership and completion races', () => {
     },
   );
 
-  it.each<Invalidation>(['slug', 'logout', 'unmount'])(
+  it.each<Invalidation>(['slug', 'logout', 'unmount', 'account', 'relogin'])(
     'ignores terminal create responses after %s, including StrictMode unmount',
     async (kind) => {
       const props = options();
@@ -284,7 +293,7 @@ describe('submission async ownership and completion races', () => {
     },
   );
 
-  it.each<Invalidation>(['slug', 'logout', 'unmount'])(
+  it.each<Invalidation>(['slug', 'logout', 'unmount', 'account', 'relogin'])(
     'ignores create rejection after %s without stale errors or toasts',
     async (kind) => {
       const props = options();
@@ -379,7 +388,7 @@ describe('submission async ownership and completion races', () => {
     expect(TestEventSource.instances[0].closed).toBe(true);
   });
 
-  it.each<Invalidation>(['slug', 'logout', 'unmount'])(
+  it.each<Invalidation>(['slug', 'logout', 'unmount', 'account', 'relogin'])(
     'aborts manual GET on %s and rejects its late success even when abort is ignored',
     async (kind) => {
       const props = options();
@@ -566,8 +575,211 @@ describe('submission async ownership and completion races', () => {
   });
 });
 
-describe('authenticated account identity characterization', () => {
-  it('currently applies account A create responses after a direct truthy switch to account B', async () => {
+describe('authenticated account identity isolation', () => {
+  it.each(['resolve', 'reject'] as const)(
+    'ignores A create %s while B create is pending and lets B complete once',
+    async (outcome) => {
+      const props = options();
+      const nextProps = {
+        ...props,
+        user: { id: 'fixture-user-b', username: 'fixture-user-b' },
+        onCompleted: vi.fn(),
+      };
+      const previous = deferred<CreateSubmissionResponse>();
+      const current = deferred<CreateSubmissionResponse>();
+      vi.mocked(submissionApi.create)
+        .mockReturnValueOnce(previous.promise)
+        .mockReturnValueOnce(current.promise);
+      await mountHook(props);
+      const oldRequest = await startSubmit();
+      await view!.rerender(createElement(Probe, nextProps));
+      const newRequest = await startSubmit();
+      await act(async () => {
+        if (outcome === 'resolve') previous.resolve({ ...created, status: 'ACCEPTED' });
+        else previous.reject(new NetworkError());
+        await oldRequest.done;
+      });
+      expect(latest.submitting).toBe(true);
+      expect(latest.submission).toBeNull();
+      expect(props.showToast).not.toHaveBeenCalled();
+      expect(submissionApi.get).not.toHaveBeenCalled();
+      expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+      await act(async () => {
+        current.resolve({ ...created, id: 42 });
+        await newRequest.done;
+      });
+      expect(latest.submission).toMatchObject({ id: 42, user_id: nextProps.user.id });
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledExactlyOnceWith(
+        42,
+        expect.any(AbortSignal),
+      );
+      const nextDetail = {
+        ...detail,
+        id: 42,
+        user_id: nextProps.user.id,
+        username: nextProps.user.username,
+      };
+      vi.mocked(submissionApi.get).mockResolvedValue(nextDetail);
+      await deliverTerminal(42);
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(nextProps.onCompleted).toHaveBeenCalledExactlyOnceWith(nextDetail);
+    },
+  );
+
+  it.each([
+    ['resolve', 'busy'],
+    ['reject', 'busy'],
+    ['resolve', 'error'],
+    ['reject', 'error'],
+  ] as const)('ignores A manual %s while B recovery is %s', async (outcome, stage) => {
+    const props = options();
+    const nextProps = {
+      ...props,
+      user: { id: 'fixture-user-b', username: 'fixture-user-b' },
+      onCompleted: vi.fn(),
+    };
+    await mountHook(props);
+    await pendingRecovery();
+    const previous = deferred<Submission>();
+    const current = deferred<Submission>();
+    vi.mocked(submissionApi.get)
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(current.promise);
+    const oldRequest = await startCheck();
+    const oldSignal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    await view!.rerender(createElement(Probe, nextProps));
+    expect(oldSignal.aborted).toBe(true);
+    vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
+    await pendingRecovery();
+    const newRequest = await startCheck();
+    const newSignal = vi.mocked(submissionApi.get).mock.calls[1][1]!;
+    if (stage === 'error') {
+      await act(async () => {
+        current.reject(new ApiError('account B recovery error', 503, 50300));
+        await newRequest.done;
+      });
+    }
+    await act(async () => {
+      if (outcome === 'resolve') previous.resolve(detail);
+      else previous.reject(new NetworkError('account A obsolete error'));
+      await oldRequest.done;
+    });
+    expect(latest.submission).toMatchObject({ id: 42, user_id: nextProps.user.id });
+    expect(latest.checkingResult).toBe(stage === 'busy');
+    expect(latest.detailFetchError).toBe(stage === 'error' ? 'account B recovery error' : '');
+    expect(newSignal.aborted).toBe(false);
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(nextProps.onCompleted).not.toHaveBeenCalled();
+    expect(props.showToast).not.toHaveBeenCalled();
+    const nextDetail = {
+      ...detail,
+      id: 42,
+      user_id: nextProps.user.id,
+      username: nextProps.user.username,
+    };
+    if (stage === 'busy') {
+      await act(async () => {
+        current.resolve(nextDetail);
+        await newRequest.done;
+      });
+    } else {
+      vi.mocked(submissionApi.get).mockResolvedValue(nextDetail);
+      await act(async () => latest.checkResultOnce());
+    }
+    expect(nextProps.onCompleted).toHaveBeenCalledExactlyOnceWith(nextDetail);
+    expect(props.onCompleted).not.toHaveBeenCalled();
+  });
+
+  it.each(['manual', 'terminal'] as const)(
+    'keeps a pending %s GET valid across a same-ID user refresh',
+    async (kind) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+      let request: { done: Promise<void> } | undefined;
+      if (kind === 'manual') request = await startCheck();
+      else await deliverTerminal();
+      const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+      await view!.rerender(
+        createElement(Probe, { ...props, user: { ...props.user!, username: 'refreshed-name' } }),
+      );
+      expect(signal.aborted).toBe(false);
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+      expect(TestEventSource.instances).toHaveLength(1);
+      await act(async () => {
+        pending.resolve(detail);
+        await request?.done;
+      });
+      expect(latest.submission).toEqual(detail);
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    },
+  );
+
+  it.each(['resolve', 'reject'] as const)(
+    'aborts an A ticket request and ignores its late %s after B has a stream',
+    async (outcome) => {
+      const props = options();
+      const previous = deferred<Awaited<ReturnType<typeof submissionApi.issueStreamTicket>>>();
+      vi.mocked(submissionApi.issueStreamTicket).mockReturnValueOnce(previous.promise);
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const signal = vi.mocked(submissionApi.issueStreamTicket).mock.calls[0][1]!;
+      expect(TestEventSource.instances).toHaveLength(0);
+      await invalidateContext('account', props);
+      expect(signal.aborted).toBe(true);
+      expect(latest.stream.state).toBe('idle');
+      vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
+      await act(async () => latest.submit());
+      expect(TestEventSource.instances).toHaveLength(1);
+      const source = TestEventSource.instances[0];
+      expect(source.url).toContain('/events/submissions/42?');
+      await act(async () => {
+        source.open();
+        if (outcome === 'resolve') previous.resolve({ ticket: 'obsolete-fixture', expires_at: '' });
+        else previous.reject(new NetworkError());
+      });
+      expect(TestEventSource.instances).toHaveLength(1);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+      expect(latest.stream.state).toBe('open');
+      expect(latest.submission?.id).toBe(42);
+      expect(source.closed).toBe(false);
+      expect(props.showToast).not.toHaveBeenCalled();
+      expect(submissionApi.get).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the B terminal controller owned after a late A finally, including StrictMode cleanup', async () => {
+    const props = options();
+    const nextProps = { ...props, user: { id: 'fixture-user-b', username: 'fixture-user-b' } };
+    const previous = deferred<Submission>();
+    const current = deferred<Submission>();
+    vi.mocked(submissionApi.get)
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(current.promise);
+    await mountHook(props, true);
+    await act(async () => latest.submit());
+    await deliverTerminal();
+    const oldSignal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    await view!.rerender(createElement(StrictMode, null, createElement(Probe, nextProps)));
+    expect(oldSignal.aborted).toBe(true);
+    vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
+    await act(async () => latest.submit());
+    await deliverTerminal(42);
+    const newSignal = vi.mocked(submissionApi.get).mock.calls[1][1]!;
+    await act(async () => previous.resolve(detail));
+    expect(newSignal.aborted).toBe(false);
+    expect(latest.submission?.id).toBe(42);
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    await view!.unmount();
+    expect(newSignal.aborted).toBe(true);
+    await act(async () => current.resolve({ ...detail, id: 42 }));
+    expect(props.onCompleted).not.toHaveBeenCalled();
+  });
+
+  it('ignores account A create responses after a direct switch to account B', async () => {
     const props = options();
     const pending = deferred<CreateSubmissionResponse>();
     vi.mocked(submissionApi.create).mockReturnValue(pending.promise);
@@ -583,15 +795,15 @@ describe('authenticated account identity characterization', () => {
       pending.resolve(created);
       await request.done;
     });
-    // Existing ownership tracks authenticated truthiness, not the account ID.
-    expect(latest.submission).toMatchObject({ id: 41, user_id: 'fixture-user' });
-    expect(submissionApi.issueStreamTicket).toHaveBeenCalledExactlyOnceWith(
-      41,
-      expect.any(AbortSignal),
-    );
+    expect(latest.submission).toBeNull();
+    expect(latest.submitting).toBe(false);
+    expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+    expect(submissionApi.get).not.toHaveBeenCalled();
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(props.showToast).not.toHaveBeenCalled();
   });
 
-  it('currently keeps account A manual GET valid across a direct truthy switch to account B', async () => {
+  it('cancels account A manual GET across a direct switch to account B', async () => {
     const props = options();
     await mountHook(props);
     await pendingRecovery();
@@ -607,14 +819,14 @@ describe('authenticated account identity characterization', () => {
         onCompleted,
       }),
     );
-    expect(signal.aborted).toBe(false);
-    expect(latest.checkingResult).toBe(true);
+    expect(signal.aborted).toBe(true);
+    expect(latest.checkingResult).toBe(false);
     await act(async () => {
       pending.resolve(detail);
       await request.done;
     });
-    expect(latest.submission).toEqual(detail);
-    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(latest.submission).toBeNull();
+    expect(props.onCompleted).not.toHaveBeenCalled();
     expect(onCompleted).not.toHaveBeenCalled();
   });
 });
