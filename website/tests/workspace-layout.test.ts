@@ -409,7 +409,7 @@ describe('workspace geometry and session persistence', () => {
   });
 
   it.each<Mode>(['h', 'v'])(
-    'characterizes %s double-click reset changing the UI but retaining the old stored dimension',
+    'persists the %s double-click default immediately without changing the other dimension',
     async (mode) => {
       sessionStorage.setItem('astra-split', '60');
       sessionStorage.setItem('astra-bottom', '333');
@@ -423,16 +423,16 @@ describe('workspace geometry and session persistence', () => {
       expect(mode === 'h' ? problemPane()?.style.width : bottomPanel().style.height).toBe(
         mode === 'h' ? '52%' : '235px',
       );
-      expect(sessionStorage.getItem('astra-split')).toBe('60');
-      expect(sessionStorage.getItem('astra-bottom')).toBe('333');
+      expect(sessionStorage.getItem('astra-split')).toBe(mode === 'h' ? '52' : '60');
+      expect(sessionStorage.getItem('astra-bottom')).toBe(mode === 'v' ? '235' : '333');
       await view!.unmount();
       await mount();
-      expect(problemPane()?.style.width).toBe('60%');
-      expect(bottomPanel().style.height).toBe('333px');
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '52%' : '60%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '235px' : '333px');
     },
   );
 
-  it('characterizes a same-batch move/release persisting the previous render geometry', async () => {
+  it('persists the latest split when move and release share one React batch', async () => {
     await mount();
     await start('h');
     await act(async () => {
@@ -440,7 +440,7 @@ describe('workspace geometry and session persistence', () => {
       window.dispatchEvent(new MouseEvent('mouseup', { buttons: 0 }));
     });
     expect(problemPane()?.style.width).toBe('60%');
-    expect(sessionStorage.getItem('astra-split')).toBe('52');
+    expect(sessionStorage.getItem('astra-split')).toBe('60');
     expect(document.body.style.userSelect).toBe('');
   });
 
@@ -467,6 +467,276 @@ describe('workspace geometry and session persistence', () => {
     await release();
     expect(problemPane()?.style.width).toBe('60%');
     expect(observed.editor?.value).toBe(sourceCode);
+  });
+});
+
+describe('workspace geometry drag correctness', () => {
+  it.each([false, true])(
+    'restores the original inline selection across rerenders, repeated starts and unmount (StrictMode=%s)',
+    async (strict) => {
+      document.body.style.userSelect = 'text';
+      const listeners = trackListeners();
+      await mount(1280, strict);
+      await start('h');
+      await move(700);
+      await start('h');
+      const page = createElement(WorkspacePage);
+      await view!.rerender(strict ? createElement(StrictMode, null, page) : page);
+      expect(document.body.style.userSelect).toBe('none');
+      await move(600);
+      expect(problemPane()?.style.width).toBe('50%');
+      await release();
+      expect(document.body.style.userSelect).toBe('text');
+      await start('v');
+      await move(0, 450);
+      expect(document.body.style.userSelect).toBe('none');
+      await release();
+      expect(document.body.style.userSelect).toBe('text');
+      await start('v');
+      await view!.unmount();
+      expect(document.body.style.userSelect).toBe('text');
+      for (const type of ['mousemove', 'mouseup', 'blur'])
+        expect(listeners.active(type).size).toBe(0);
+      await move(500);
+      await release();
+      expect(document.body.style.userSelect).toBe('text');
+    },
+  );
+
+  it('captures the current inline selection separately for each new drag session', async () => {
+    document.body.style.userSelect = 'text';
+    await mount();
+    await start('h');
+    await release();
+    expect(document.body.style.userSelect).toBe('text');
+    document.body.style.userSelect = 'all';
+    await start('v');
+    await release();
+    expect(document.body.style.userSelect).toBe('all');
+  });
+
+  it('persists the latest bottom height when move and release share one React batch', async () => {
+    await mount();
+    await start('v');
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientY: 450, buttons: 1 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { buttons: 0 }));
+    });
+    expect(bottomPanel().style.height).toBe('350px');
+    expect(sessionStorage.getItem('astra-bottom')).toBe('350');
+    expect(sessionStorage.getItem('astra-split')).toBe('52');
+  });
+
+  it.each([
+    { mode: 'h' as const, positions: [700, -1000, 5000], expected: 68 },
+    { mode: 'h' as const, positions: [700, 5000, -1000], expected: 30 },
+    { mode: 'v' as const, positions: [450, 1000, -1000], expected: 520 },
+    { mode: 'v' as const, positions: [450, -1000, 1000], expected: 120 },
+  ])(
+    'persists the final clamped $mode value $expected after multiple batched moves',
+    async ({ mode, positions, expected }) => {
+      sessionStorage.setItem('astra-split', '60');
+      sessionStorage.setItem('astra-bottom', '333');
+      await mount();
+      await start(mode);
+      await act(async () => {
+        for (const position of positions) {
+          window.dispatchEvent(
+            new MouseEvent('mousemove', {
+              clientX: mode === 'h' ? position : 0,
+              clientY: mode === 'v' ? position : 450,
+              buttons: 1,
+            }),
+          );
+        }
+        window.dispatchEvent(new MouseEvent('mouseup', { buttons: 0 }));
+      });
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? `${expected}%` : '60%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? `${expected}px` : '333px');
+      expect(sessionStorage.getItem('astra-split')).toBe(mode === 'h' ? String(expected) : '60');
+      expect(sessionStorage.getItem('astra-bottom')).toBe(mode === 'v' ? String(expected) : '333');
+    },
+  );
+
+  it('keeps both dimensions current across sequential drag sessions within one batch', async () => {
+    await mount();
+    await act(async () => {
+      separator('h').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 700, buttons: 1 }));
+      window.dispatchEvent(new MouseEvent('mouseup'));
+      separator('v').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      window.dispatchEvent(new MouseEvent('mousemove', { clientY: 450, buttons: 1 }));
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
+    expect(problemPane()?.style.width).toBe('60%');
+    expect(bottomPanel().style.height).toBe('350px');
+    expect(sessionStorage.getItem('astra-split')).toBe('60');
+    expect(sessionStorage.getItem('astra-bottom')).toBe('350');
+  });
+
+  it('writes geometry only on active completion or reset, never on unrelated rerenders or idle events', async () => {
+    await mount();
+    const write = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, 'setItem');
+    const writes = () =>
+      write.mock.calls.filter(
+        ([key]) => key.startsWith('astra-split') || key.startsWith('astra-bottom'),
+      );
+    await start('h');
+    await move(700);
+    await view!.rerender(createElement(WorkspacePage));
+    expect(writes()).toEqual([]);
+    await release();
+    expect(writes()).toEqual([
+      ['astra-split', '60'],
+      ['astra-bottom', '235'],
+    ]);
+    await release();
+    await act(async () => window.dispatchEvent(new Event('blur')));
+    await view!.rerender(createElement(WorkspacePage));
+    expect(writes()).toHaveLength(2);
+    await reset('h');
+    expect(writes()).toEqual([
+      ['astra-split', '60'],
+      ['astra-bottom', '235'],
+      ['astra-split', '52'],
+    ]);
+    await view!.unmount();
+    expect(writes()).toHaveLength(3);
+  });
+
+  it.each<Mode>(['h', 'v'])(
+    'keeps the %s reset authoritative over queued move/release callbacks',
+    async (mode) => {
+      sessionStorage.setItem('astra-split', '60');
+      sessionStorage.setItem('astra-bottom', '333');
+      document.body.style.userSelect = 'all';
+      await mount();
+      const write = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, 'setItem');
+      await start(mode);
+      await act(async () => {
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 780, clientY: 280, buttons: 1 }),
+        );
+        separator(mode).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 400, clientY: 450, buttons: 1 }),
+        );
+        window.dispatchEvent(new MouseEvent('mouseup'));
+      });
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '52%' : '60%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '235px' : '333px');
+      expect(sessionStorage.getItem('astra-split')).toBe(mode === 'h' ? '52' : '60');
+      expect(sessionStorage.getItem('astra-bottom')).toBe(mode === 'v' ? '235' : '333');
+      expect(
+        write.mock.calls.filter(([key]) => key === 'astra-split' || key === 'astra-bottom'),
+      ).toEqual([mode === 'h' ? ['astra-split', '52'] : ['astra-bottom', '235']]);
+      expect(document.body.style.userSelect).toBe('all');
+      // A new drag must retain the reset value in the independent dimension.
+      await start(mode === 'h' ? 'v' : 'h');
+      await move(700, 450);
+      await release();
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '52%' : '60%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '235px' : '350px');
+      expect(sessionStorage.getItem('astra-split')).toBe(mode === 'h' ? '52' : '60');
+      expect(sessionStorage.getItem('astra-bottom')).toBe(mode === 'v' ? '235' : '350');
+    },
+  );
+
+  it.each<Mode>(['h', 'v'])(
+    'visually resets %s even when sessionStorage writes fail',
+    async (mode) => {
+      sessionStorage.setItem('astra-split', '60');
+      sessionStorage.setItem('astra-bottom', '333');
+      await mount();
+      const prototype = Object.getPrototypeOf(sessionStorage) as Storage;
+      const write = prototype.setItem;
+      vi.spyOn(prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (this === sessionStorage) throw new Error('fixture storage unavailable');
+        return write.call(this, key, value);
+      });
+      await start(mode);
+      await reset(mode);
+      await release();
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '52%' : '60%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '235px' : '333px');
+      expect(document.body.style.userSelect).toBe('');
+    },
+  );
+
+  it.each<Mode>(['h', 'v'])(
+    'ends %s drag on blur, persists once and permits a new session',
+    async (mode) => {
+      document.body.style.userSelect = 'all';
+      await mount();
+      const write = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, 'setItem');
+      const writes = () =>
+        write.mock.calls.filter(([key]) => key === 'astra-split' || key === 'astra-bottom');
+      await start(mode);
+      await act(async () => {
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 700, clientY: 450, buttons: 1 }),
+        );
+        window.dispatchEvent(new Event('blur'));
+      });
+      expect(document.body.style.userSelect).toBe('all');
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '60%' : '52%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '350px' : '235px');
+      expect(writes()).toEqual([
+        ['astra-split', mode === 'h' ? '60' : '52'],
+        ['astra-bottom', mode === 'v' ? '350' : '235'],
+      ]);
+      await move(400, 600, 0);
+      await release();
+      await act(async () => window.dispatchEvent(new Event('blur')));
+      expect(problemPane()?.style.width).toBe(mode === 'h' ? '60%' : '52%');
+      expect(bottomPanel().style.height).toBe(mode === 'v' ? '350px' : '235px');
+      expect(writes()).toHaveLength(2);
+      await start(mode);
+      await move(600, 500);
+      await release();
+      expect(document.body.style.userSelect).toBe('all');
+      expect(sessionStorage.getItem('astra-split')).toBe(mode === 'h' ? '50' : '52');
+      expect(sessionStorage.getItem('astra-bottom')).toBe(mode === 'v' ? '300' : '235');
+      await view!.unmount();
+      expect(writes()).toHaveLength(4);
+    },
+  );
+
+  it('leaves selection and storage unchanged when the window blurs without an active drag', async () => {
+    document.body.style.userSelect = 'text';
+    await mount();
+    const write = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, 'setItem');
+    await act(async () => window.dispatchEvent(new Event('blur')));
+    expect(document.body.style.userSelect).toBe('text');
+    expect(sessionStorage.getItem('astra-split')).toBeNull();
+    expect(sessionStorage.getItem('astra-bottom')).toBeNull();
+    expect(write).not.toHaveBeenCalled();
+    expect(problemPane()?.style.width).toBe('52%');
+  });
+
+  it('ends drag and restores selection on blur even when persistence fails', async () => {
+    document.body.style.userSelect = 'text';
+    await mount();
+    const prototype = Object.getPrototypeOf(sessionStorage) as Storage;
+    const write = prototype.setItem;
+    vi.spyOn(prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (this === sessionStorage) throw new Error('fixture storage unavailable');
+      return write.call(this, key, value);
+    });
+    await start('h');
+    await move(700);
+    await act(async () => window.dispatchEvent(new Event('blur')));
+    expect(document.body.style.userSelect).toBe('text');
+    await move(400);
+    expect(problemPane()?.style.width).toBe('60%');
   });
 });
 
@@ -711,7 +981,7 @@ describe('workspace resize lifecycle and existing limitations', () => {
     async (strict) => {
       const listeners = trackListeners();
       const { measure } = await mount(1280, strict);
-      for (const type of ['mousemove', 'mouseup', 'resize'])
+      for (const type of ['mousemove', 'mouseup', 'blur', 'resize'])
         expect(listeners.active(type).size).toBe(1);
       await start('h');
       await move(700);
@@ -719,11 +989,11 @@ describe('workspace resize lifecycle and existing limitations', () => {
       await release();
       if (!strict) await view!.rerender(createElement(WorkspacePage));
       await resize(1100);
-      for (const type of ['mousemove', 'mouseup', 'resize'])
+      for (const type of ['mousemove', 'mouseup', 'blur', 'resize'])
         expect(listeners.active(type).size).toBe(1);
       expect(measure).toHaveBeenCalledTimes(2);
       await view!.unmount();
-      for (const type of ['mousemove', 'mouseup', 'resize'])
+      for (const type of ['mousemove', 'mouseup', 'blur', 'resize'])
         expect(listeners.active(type).size).toBe(0);
       const stored = sessionStorage.getItem('astra-split');
       await move(500);
@@ -735,7 +1005,7 @@ describe('workspace resize lifecycle and existing limitations', () => {
     },
   );
 
-  it('characterizes unmount during drag leaving body userSelect disabled despite listener cleanup', async () => {
+  it('restores selection on unmount during drag and removes all drag listeners', async () => {
     const listeners = trackListeners();
     const { measure } = await mount();
     await start('h');
@@ -746,16 +1016,17 @@ describe('workspace resize lifecycle and existing limitations', () => {
     await release();
     expect(measure).not.toHaveBeenCalled();
     expect(sessionStorage.getItem('astra-split')).toBeNull();
-    expect(document.body.style.userSelect).toBe('none');
+    expect(document.body.style.userSelect).toBe('');
   });
 
-  it('characterizes blur not cancelling drag, including a subsequent move with no pressed buttons', async () => {
+  it('ends drag on blur and ignores subsequent movement with no pressed buttons', async () => {
     await mount();
     await start('h');
     await act(async () => window.dispatchEvent(new Event('blur')));
     await move(700, 450, 0);
-    expect(problemPane()?.style.width).toBe('60%');
-    expect(document.body.style.userSelect).toBe('none');
+    expect(problemPane()?.style.width).toBe('52%');
+    expect(sessionStorage.getItem('astra-split')).toBe('52');
+    expect(document.body.style.userSelect).toBe('');
     await release();
     expect(document.body.style.userSelect).toBe('');
   });
