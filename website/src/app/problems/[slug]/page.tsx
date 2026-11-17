@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Header } from '@/components/Header';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
@@ -36,6 +36,7 @@ import { useEditorPreferences } from '@/features/problem-workspace/hooks/useEdit
 import { useTestcases } from '@/features/problem-workspace/hooks/useTestcases';
 import { useRunCode } from '@/features/problem-workspace/hooks/useRunCode';
 import { useSubmissionLifecycle } from '@/features/problem-workspace/hooks/useSubmissionLifecycle';
+import { useWorkspaceGeometry } from '@/features/problem-workspace/hooks/useWorkspaceGeometry';
 
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
@@ -289,62 +290,8 @@ export default function WorkspacePage() {
 
   /* ---------------------------------------------------------------- split */
 
-  const [splitPct, setSplitPct] = useState(52);
-  const [bottomPx, setBottomPx] = useState(235);
-  const draggingRef = useRef<'h' | 'v' | null>(null);
-  const shellRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    try {
-      const stored = Number(sessionStorage.getItem('astra-split'));
-      if (stored >= 30 && stored <= 68) setSplitPct(stored);
-      const storedBottom = Number(sessionStorage.getItem('astra-bottom'));
-      if (storedBottom >= 120 && storedBottom <= 520) setBottomPx(storedBottom);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    const onMove = (event: MouseEvent) => {
-      const mode = draggingRef.current;
-      if (!mode || !shellRef.current) return;
-      const rect = shellRef.current.getBoundingClientRect();
-
-      if (mode === 'h') {
-        const pct = Math.min(68, Math.max(30, ((event.clientX - rect.left) / rect.width) * 100));
-        setSplitPct(pct);
-      } else {
-        const px = Math.min(520, Math.max(120, rect.bottom - event.clientY));
-        setBottomPx(px);
-      }
-    };
-
-    const onUp = () => {
-      if (!draggingRef.current) return;
-      draggingRef.current = null;
-      document.body.style.userSelect = '';
-      try {
-        sessionStorage.setItem('astra-split', String(splitPct));
-        sessionStorage.setItem('astra-bottom', String(bottomPx));
-      } catch {
-        /* ignore */
-      }
-    };
-
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [splitPct, bottomPx]);
-
-  const startDrag = (mode: 'h' | 'v') => (event: React.MouseEvent) => {
-    event.preventDefault();
-    draggingRef.current = mode;
-    document.body.style.userSelect = 'none';
-  };
+  const { shellRef, splitPct, bottomPx, startDrag, resetSplit, resetBottom } =
+    useWorkspaceGeometry();
 
   /* -------------------------------------------------------------- derived */
 
@@ -511,7 +458,7 @@ export default function WorkspacePage() {
           {!stacked && !fullscreen && (
             <div
               onMouseDown={startDrag('h')}
-              onDoubleClick={() => setSplitPct(52)}
+              onDoubleClick={resetSplit}
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize panels — drag, or double-click to reset"
@@ -609,7 +556,7 @@ export default function WorkspacePage() {
 
               <div
                 onMouseDown={startDrag('v')}
-                onDoubleClick={() => setBottomPx(235)}
+                onDoubleClick={resetBottom}
                 role="separator"
                 aria-orientation="horizontal"
                 aria-label="Resize result panel — drag, or double-click to reset"
