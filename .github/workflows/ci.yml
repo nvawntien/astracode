@@ -81,6 +81,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint (existing warning budget)
+        run: npm run lint -- --max-warnings 6
+
+      - name: Check tooling and test formatting
+        run: npm run format:check:tooling
+
+      - name: Unit tests
+        run: npm test
+
       - name: Gateway client contract
         run: node --test ../envoy/tests/frontend.mjs
 

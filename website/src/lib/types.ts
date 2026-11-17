@@ -217,7 +217,7 @@ export interface AdminProblemDetail extends Required<Omit<Problem, 'tags' | 'exa
   testcase: AdminTestCaseMetadata;
 }
 
-export interface AdminListProblemsParams extends ListProblemsParams {}
+export type AdminListProblemsParams = ListProblemsParams;
 
 export interface AdminListProblemsResponse {
   items: Problem[];
