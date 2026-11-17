@@ -1,0 +1,165 @@
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useSubmissionLifecycle } from '../src/features/problem-workspace/hooks/useSubmissionLifecycle';
+import { submissionApi } from '../src/lib/api';
+import type { Submission } from '../src/lib/types';
+import { TestEventSource } from './helpers/event-source';
+import { deferred, renderReact } from './helpers/react-dom';
+
+type Options = Parameters<typeof useSubmissionLifecycle>[0];
+let latest: ReturnType<typeof useSubmissionLifecycle>;
+let view: Awaited<ReturnType<typeof renderReact>> | undefined;
+const created = {
+  id: 41,
+  problem_id: 1,
+  problem_title: 'Fixture problem',
+  language: 'CPP',
+  status: 'PENDING' as const,
+  created_at: '2026-11-17T01:00:00Z',
+};
+const detail: Submission = {
+  ...created,
+  user_id: 'fixture-user',
+  username: 'fixture-user',
+  source_code: 'fixture source',
+  status: 'ACCEPTED',
+  execution_time_ms: 1,
+  memory_used_kb: 100,
+  passed_testcases: 1,
+  total_testcases: 1,
+  compile_output: null,
+  error_message: null,
+  updated_at: '2026-11-17T01:01:00Z',
+};
+
+function Probe(options: Options) {
+  latest = useSubmissionLifecycle(options);
+  return null;
+}
+
+function options(): Options {
+  return {
+    slug: 'fixture-problem',
+    user: { id: 'fixture-user', username: 'fixture-user' },
+    problem: { id: 1 },
+    language: 'CPP',
+    code: 'fixture source',
+    online: true,
+    isRunning: vi.fn(() => false),
+    requireAuth: vi.fn(() => true),
+    showToast: vi.fn(),
+    onSubmitStart: vi.fn(),
+    onCompleted: vi.fn(),
+  };
+}
+
+async function terminal() {
+  await act(async () => {
+    TestEventSource.instances[0].emit('submission.completed', {
+      submission_id: 41,
+      attempt_id: 'fixture-attempt',
+      status: 'ACCEPTED',
+      updated_at: detail.updated_at,
+    });
+  });
+}
+
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('EventSource', TestEventSource);
+  TestEventSource.instances = [];
+  vi.spyOn(submissionApi, 'create').mockResolvedValue(created);
+  vi.spyOn(submissionApi, 'get').mockResolvedValue(detail);
+  vi.spyOn(submissionApi, 'issueStreamTicket').mockResolvedValue({
+    ticket: 'fixture-ticket',
+    expires_at: '2026-11-17T02:00:00Z',
+  });
+});
+
+afterEach(async () => {
+  await view?.unmount();
+  view = undefined;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe('submission hook callback boundaries with real React', () => {
+  it('uses a new completion callback before terminal delivery without reconnecting on rerender', async () => {
+    const props = options();
+    view = await renderReact(createElement(Probe, props));
+    await act(async () => latest.submit());
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+    const onCompleted = vi.fn();
+    await view.rerender(
+      createElement(Probe, {
+        ...props,
+        onCompleted,
+        onSubmitStart: vi.fn(),
+        isRunning: () => false,
+      }),
+    );
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    expect(TestEventSource.instances).toHaveLength(1);
+    expect(TestEventSource.instances[0].closed).toBe(false);
+    await terminal();
+    await act(async () => pending.resolve(detail));
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+    expect(latest.submission).toEqual(detail);
+    expect(latest.submitting).toBe(false);
+  });
+
+  it('preserves the captured completion callback for an already running terminal GET', async () => {
+    const props = options();
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+    view = await renderReact(createElement(Probe, props));
+    await act(async () => latest.submit());
+    await terminal();
+    const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    const onCompleted = vi.fn();
+    await view.rerender(createElement(Probe, { ...props, onCompleted }));
+    expect(signal.aborted).toBe(false);
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve(detail));
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(onCompleted).not.toHaveBeenCalled();
+  });
+
+  it('uses the current render prerequisites and keeps Run/auth guard ordering', async () => {
+    const props = options();
+    view = await renderReact(createElement(Probe, props));
+    const isRunning = vi.fn(() => true);
+    await view.rerender(createElement(Probe, { ...props, isRunning }));
+    await act(async () => latest.submit());
+    expect(isRunning).toHaveBeenCalledTimes(1);
+    expect(props.requireAuth).not.toHaveBeenCalled();
+    expect(submissionApi.create).not.toHaveBeenCalled();
+    const requireAuth = vi.fn(() => false);
+    await view.rerender(createElement(Probe, { ...props, requireAuth }));
+    await act(async () => latest.submit());
+    expect(requireAuth).toHaveBeenCalledExactlyOnceWith('submit');
+    expect(submissionApi.create).not.toHaveBeenCalled();
+    const onSubmitStart = vi.fn(() => expect(submissionApi.create).not.toHaveBeenCalled());
+    await view.rerender(
+      createElement(Probe, {
+        ...props,
+        problem: { id: 2 },
+        language: 'JAVA',
+        code: 'new source\n',
+        onSubmitStart,
+      }),
+    );
+    await act(async () => latest.submit());
+    expect(onSubmitStart).toHaveBeenCalledTimes(1);
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
+      problem_id: 2,
+      language: 'JAVA',
+      source_code: 'new source\n',
+    });
+  });
+});

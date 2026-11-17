@@ -14,25 +14,16 @@ import {
   type ProblemTab,
 } from '@/components/workspace/ProblemPanel';
 import { Icon } from '@/components/ui';
-import { ApiError, NetworkError, problemApi, submissionApi } from '@/lib/api';
-import {
-  LANGUAGES,
-  formatDateTime,
-  isPendingStatus,
-  isTerminalSubmissionStatus,
-  languageMeta,
-  verdictMeta,
-} from '@/lib/format';
+import { ApiError, NetworkError, problemApi } from '@/lib/api';
+import { LANGUAGES, formatDateTime, languageMeta, verdictMeta } from '@/lib/format';
 import { useDismissable, useOnline, useViewportWidth } from '@/lib/hooks';
 import { fetchProgress, invalidateProgress } from '@/lib/progress';
-import { useSubmissionStream } from '@/lib/submission-stream';
 import type {
   CodeDiagnostic,
   LanguageCode,
   Problem,
   Submission,
   SubmissionDetail,
-  SubmissionStreamEvent,
 } from '@/lib/types';
 
 import { EditorToolbar } from '@/features/problem-workspace/components/EditorToolbar';
@@ -44,6 +35,7 @@ import { useEditorDraft } from '@/features/problem-workspace/hooks/useEditorDraf
 import { useEditorPreferences } from '@/features/problem-workspace/hooks/useEditorPreferences';
 import { useTestcases } from '@/features/problem-workspace/hooks/useTestcases';
 import { useRunCode } from '@/features/problem-workspace/hooks/useRunCode';
+import { useSubmissionLifecycle } from '@/features/problem-workspace/hooks/useSubmissionLifecycle';
 
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
@@ -211,48 +203,55 @@ export default function WorkspacePage() {
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('tests');
   const [bottomOpen, setBottomOpen] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [checkingResult, setCheckingResult] = useState(false);
-  const [submission, setSubmission] = useState<Submission | null>(null);
-  const [activeSubmissionId, setActiveSubmissionId] = useState<number | null>(null);
-  const [liveUpdateError, setLiveUpdateError] = useState('');
-  const [detailFetchError, setDetailFetchError] = useState('');
-  const terminalDetailHandledRef = useRef(false);
-  const terminalDetailAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(
-    () => () => {
-      terminalDetailAbortRef.current?.abort();
-    },
-    [],
-  );
-
-  useEffect(() => {
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
-    setActiveSubmissionId(null);
-    setSubmitting(false);
-    setCheckingResult(false);
-    setSubmission(null);
-    setLiveUpdateError('');
-    setDetailFetchError('');
-  }, [slug]);
-
-  useEffect(() => {
-    if (user) return;
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
-    setActiveSubmissionId(null);
-    setSubmitting(false);
-    setCheckingResult(false);
-  }, [user]);
-
   const requireAuth = (action: string): boolean => {
     if (user) return true;
     showToast(`Sign in to ${action}`, 'error');
     router.push(`/login?next=/problems/${slug}`);
     return false;
   };
+
+  const handleSubmissionCompleted = useCallback(
+    (detail: Submission) => {
+      setHistoryRefreshKey((current) => current + 1);
+      const verdict = verdictMeta(detail.status);
+      showToast(
+        detail.status === 'ACCEPTED' ? 'Accepted' : `Verdict: ${verdict.label}`,
+        detail.status === 'ACCEPTED' ? 'success' : 'error',
+      );
+      invalidateProgress();
+      void syncProgress(true);
+    },
+    [showToast, syncProgress],
+  );
+
+  const {
+    submitting,
+    checkingResult,
+    submission,
+    liveUpdateError,
+    detailFetchError,
+    stream,
+    submit,
+    checkResultOnce,
+  } = useSubmissionLifecycle({
+    slug,
+    user,
+    problem,
+    language,
+    code,
+    online,
+    isRunning: () => running,
+    requireAuth,
+    showToast,
+    onSubmitStart: () => {
+      setRunResult(null);
+      setCodeDiagnostics([]);
+      setJumpLine(null);
+      setBottomTab('result');
+      setBottomOpen(true);
+    },
+    onCompleted: handleSubmissionCompleted,
+  });
 
   const { running, runResult, consoleLines, run, setRunResult } = useRunCode({
     problem,
@@ -275,199 +274,6 @@ export default function WorkspacePage() {
     },
     onUnavailable: () => setBottomTab('console'),
   });
-
-  const applyStreamStatus = useCallback((event: SubmissionStreamEvent) => {
-    setSubmission((current) => {
-      if (!current || current.id !== event.submission_id) return current;
-      return {
-        ...current,
-        status: event.status,
-        updated_at: event.updated_at,
-      };
-    });
-  }, []);
-
-  const finishSubmissionFromDetail = useCallback(
-    (detail: Submission) => {
-      setSubmission(detail);
-      setSubmitting(false);
-      setActiveSubmissionId(null);
-      setLiveUpdateError('');
-      setDetailFetchError('');
-      setHistoryRefreshKey((current) => current + 1);
-      const verdict = verdictMeta(detail.status);
-      showToast(
-        detail.status === 'ACCEPTED' ? 'Accepted' : `Verdict: ${verdict.label}`,
-        detail.status === 'ACCEPTED' ? 'success' : 'error',
-      );
-      invalidateProgress();
-      void syncProgress(true);
-    },
-    [showToast, syncProgress],
-  );
-
-  const fetchTerminalSubmissionDetail = useCallback(
-    async (id: number, terminalEvent?: SubmissionStreamEvent) => {
-      if (terminalDetailHandledRef.current) return;
-      terminalDetailHandledRef.current = true;
-      terminalDetailAbortRef.current?.abort();
-      const controller = new AbortController();
-      terminalDetailAbortRef.current = controller;
-
-      if (terminalEvent) {
-        setSubmission((current) => {
-          if (!current || current.id !== terminalEvent.submission_id) return current;
-          return {
-            ...current,
-            status: terminalEvent.status,
-            updated_at: terminalEvent.updated_at,
-          };
-        });
-      }
-
-      try {
-        const detail = await submissionApi.get(id, controller.signal);
-        if (controller.signal.aborted) return;
-        finishSubmissionFromDetail(detail);
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setSubmitting(false);
-        setActiveSubmissionId(null);
-        setDetailFetchError(
-          err instanceof NetworkError
-            ? 'Verdict received, but submission details could not be loaded. Check your connection and try again.'
-            : err instanceof ApiError
-              ? err.message || 'Verdict received, but submission detail could not be loaded.'
-              : 'Verdict received, but submission detail could not be loaded.',
-        );
-      } finally {
-        if (terminalDetailAbortRef.current === controller) {
-          terminalDetailAbortRef.current = null;
-        }
-      }
-    },
-    [finishSubmissionFromDetail],
-  );
-
-  const checkResultOnce = useCallback(async () => {
-    if (!submission || checkingResult) return;
-    setCheckingResult(true);
-    setDetailFetchError('');
-    try {
-      const latest = await submissionApi.get(submission.id);
-      setSubmission(latest);
-      if (isTerminalSubmissionStatus(latest.status)) {
-        finishSubmissionFromDetail(latest);
-      } else {
-        showToast(
-          `Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`,
-          'success',
-        );
-      }
-    } catch (err) {
-      if (err instanceof NetworkError) {
-        setDetailFetchError(
-          'AstraCode is temporarily unreachable. Check your connection and try again.',
-        );
-      } else if (err instanceof ApiError) {
-        setDetailFetchError(err.message || 'Could not read the submission.');
-      } else {
-        setDetailFetchError('Could not read the submission.');
-      }
-    } finally {
-      setCheckingResult(false);
-    }
-  }, [checkingResult, finishSubmissionFromDetail, showToast, submission]);
-
-  const handleStreamTerminal = useCallback(
-    (event: SubmissionStreamEvent) => {
-      applyStreamStatus(event);
-      void fetchTerminalSubmissionDetail(event.submission_id, event);
-    },
-    [applyStreamStatus, fetchTerminalSubmissionDetail],
-  );
-
-  const handleStreamError = useCallback((error: { message: string }) => {
-    setLiveUpdateError(error.message);
-    setSubmitting(false);
-  }, []);
-
-  const stream = useSubmissionStream({
-    submissionId: activeSubmissionId,
-    enabled: Boolean(activeSubmissionId && submission && isPendingStatus(submission.status)),
-    onStatus: applyStreamStatus,
-    onTerminal: handleStreamTerminal,
-    onError: handleStreamError,
-  });
-
-  const submit = async () => {
-    if (!problem || submitting || running) return;
-    if (!requireAuth('submit')) return;
-    if (!online) {
-      showToast('You appear to be offline', 'error');
-      return;
-    }
-    if (!code.trim()) {
-      showToast('Write some code before submitting', 'error');
-      return;
-    }
-
-    setSubmitting(true);
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
-    setActiveSubmissionId(null);
-    setLiveUpdateError('');
-    setDetailFetchError('');
-    setSubmission(null);
-    setRunResult(null);
-    setCodeDiagnostics([]);
-    setJumpLine(null);
-    setBottomTab('result');
-    setBottomOpen(true);
-
-    try {
-      const created = await submissionApi.create({
-        problem_id: problem.id,
-        language,
-        source_code: code,
-      });
-      setSubmission({
-        id: created.id,
-        problem_id: created.problem_id,
-        problem_title: created.problem_title,
-        user_id: user?.id ?? '',
-        username: user?.username ?? '',
-        language: created.language,
-        source_code: code,
-        status: created.status,
-        execution_time_ms: null,
-        memory_used_kb: null,
-        passed_testcases: null,
-        total_testcases: null,
-        compile_output: null,
-        error_message: null,
-        created_at: created.created_at,
-        updated_at: created.created_at,
-      });
-      if (isTerminalSubmissionStatus(created.status)) {
-        void fetchTerminalSubmissionDetail(created.id);
-      } else {
-        setActiveSubmissionId(created.id);
-      }
-    } catch (err) {
-      setSubmitting(false);
-      if (err instanceof NetworkError) {
-        showToast(
-          'AstraCode is temporarily unreachable. Check your connection and try again.',
-          'error',
-        );
-      } else if (err instanceof ApiError) {
-        showToast(err.message || 'Submission rejected', 'error');
-      } else {
-        showToast('Submission failed', 'error');
-      }
-    }
-  };
 
   // Ctrl/Cmd+Enter runs, Ctrl/Cmd+Shift+Enter submits.
   useEffect(() => {
