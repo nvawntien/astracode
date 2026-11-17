@@ -12,6 +12,7 @@ import type {
   Submission,
   SubmissionStreamEvent,
 } from '../../../lib/types';
+import { nextSubmissionStatus, type SubmissionStatusSnapshot } from '../submissionStatus';
 
 interface SubmissionLifecycleOptions {
   slug: string;
@@ -36,6 +37,7 @@ interface SubmissionOperations {
   terminalHandled: boolean;
   terminalRequest: AbortController | null;
   manualRequest: AbortController | null;
+  statusOrder: SubmissionStatusSnapshot | null;
 }
 
 function abortDetailRequests(operations: SubmissionOperations) {
@@ -73,6 +75,7 @@ export function useSubmissionLifecycle({
     terminalHandled: false,
     terminalRequest: null,
     manualRequest: null,
+    statusOrder: null,
   });
 
   const invalidateOperations = useCallback(() => {
@@ -81,6 +84,7 @@ export function useSubmissionLifecycle({
     operations.submissionId = null;
     operations.completed = false;
     operations.terminalHandled = false;
+    operations.statusOrder = null;
     // Cancellation saves work. Generation/request identity protects state even
     // when the transport ignores abort and its promise still resolves/rejects.
     abortDetailRequests(operations);
@@ -129,16 +133,35 @@ export function useSubmissionLifecycle({
     setDetailFetchError('');
   }, [accountId]);
 
-  const applyStreamStatus = useCallback((event: SubmissionStreamEvent) => {
-    setSubmission((current) => {
-      if (!current || current.id !== event.submission_id) return current;
-      return {
-        ...current,
-        status: event.status,
-        updated_at: event.updated_at,
-      };
-    });
-  }, []);
+  const applyStreamStatus = useCallback(
+    (event: SubmissionStreamEvent) => {
+      const operations = operationsRef.current;
+      const generation = operations.generation;
+      if (!isCurrent(generation, event.submission_id) || operations.completed) return false;
+      const next = nextSubmissionStatus(operations.statusOrder, event);
+      if (!next) {
+        // Even a duplicate initial snapshot can establish the attempt identity.
+        if (operations.statusOrder?.attemptId === null) {
+          operations.statusOrder.attemptId = event.attempt_id;
+        }
+        return false;
+      }
+      operations.statusOrder = next;
+      setSubmission((current) => {
+        if (
+          !isCurrent(generation, event.submission_id) ||
+          operationsRef.current.completed ||
+          !current ||
+          current.id !== event.submission_id
+        )
+          return current;
+        if (current.status === next.status && current.updated_at === next.updatedAt) return current;
+        return { ...current, status: next.status, updated_at: next.updatedAt };
+      });
+      return true;
+    },
+    [isCurrent],
+  );
 
   const finishSubmissionFromDetail = useCallback(
     (detail: Submission, generation: number) => {
@@ -160,7 +183,7 @@ export function useSubmissionLifecycle({
   );
 
   const fetchTerminalSubmissionDetail = useCallback(
-    async (id: number, terminalEvent?: SubmissionStreamEvent) => {
+    async (id: number) => {
       const operations = operationsRef.current;
       const generation = operations.generation;
       if (!isCurrent(generation, id) || operations.completed || operations.terminalHandled) return;
@@ -173,17 +196,6 @@ export function useSubmissionLifecycle({
         operationsRef.current.terminalRequest === controller &&
         !controller.signal.aborted &&
         !operationsRef.current.completed;
-
-      if (terminalEvent) {
-        setSubmission((current) => {
-          if (!current || current.id !== terminalEvent.submission_id) return current;
-          return {
-            ...current,
-            status: terminalEvent.status,
-            updated_at: terminalEvent.updated_at,
-          };
-        });
-      }
 
       try {
         const detail = await submissionApi.get(id, controller.signal);
@@ -231,6 +243,11 @@ export function useSubmissionLifecycle({
       if (isTerminalSubmissionStatus(latest.status)) {
         finishSubmissionFromDetail(latest, generation);
       } else {
+        operations.statusOrder = {
+          attemptId: operations.statusOrder?.attemptId ?? null,
+          status: latest.status,
+          updatedAt: latest.updated_at,
+        };
         setSubmission(latest);
         showToast(
           `Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`,
@@ -258,10 +275,9 @@ export function useSubmissionLifecycle({
 
   const handleStreamTerminal = useCallback(
     (event: SubmissionStreamEvent) => {
-      applyStreamStatus(event);
-      void fetchTerminalSubmissionDetail(event.submission_id, event);
+      void fetchTerminalSubmissionDetail(event.submission_id);
     },
-    [applyStreamStatus, fetchTerminalSubmissionDetail],
+    [fetchTerminalSubmissionDetail],
   );
 
   const handleStreamError = useCallback((error: { message: string }) => {
@@ -322,6 +338,11 @@ export function useSubmissionLifecycle({
       });
       if (!isCurrent(generation)) return;
       operationsRef.current.submissionId = created.id;
+      operationsRef.current.statusOrder = {
+        attemptId: null,
+        status: created.status,
+        updatedAt: created.created_at,
+      };
       setSubmission({
         id: created.id,
         problem_id: created.problem_id,

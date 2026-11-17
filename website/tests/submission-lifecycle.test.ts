@@ -411,8 +411,7 @@ describe('official submission guards, creation and completion with real React', 
     expect(state().submission).toMatchObject({ status: 'JUDGING', updated_at: event().updated_at });
     const older = event({ status: 'PENDING', updated_at: '2026-11-17T00:59:00Z' });
     await act(async () => source.emit('submission.updated', older));
-    // Matching events follow arrival order; there is no timestamp monotonicity guard.
-    expect(state().submission).toMatchObject({ status: 'PENDING', updated_at: older.updated_at });
+    expect(state().submission).toMatchObject({ status: 'JUDGING', updated_at: event().updated_at });
     const pending = deferred<Submission>();
     vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
     const terminalCallback = observed.stream!.onTerminal;
@@ -1143,4 +1142,256 @@ describe('SSE recovery and independent detail errors', () => {
       expect(observed.toast).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('SSE status ordering', () => {
+  it('ignores duplicate and older same-status metadata without replacing the React submission object', async () => {
+    await mount();
+    await click('Submit');
+    const source = TestEventSource.instances[0];
+    await act(async () => source.emit('submission.updated', event()));
+    const accepted = state().submission;
+    await act(async () => {
+      source.emit('submission.updated', event());
+      source.emit('submission.updated', event());
+      source.emit('submission.snapshot', event({ updated_at: '2026-11-17T00:59:00Z' }));
+    });
+    expect(state().submission).toBe(accepted);
+    expect(submissionApi.get).not.toHaveBeenCalled();
+  });
+
+  it('accepts equal-timestamp phase advances while refusing equal-timestamp backwards updates', async () => {
+    await mount();
+    await click('Submit');
+    const source = TestEventSource.instances[0];
+    const updated_at = created().created_at;
+    await act(async () =>
+      source.emit('submission.snapshot', event({ status: 'PENDING', updated_at })),
+    );
+    await act(async () =>
+      source.emit('submission.updated', event({ status: 'JUDGING', updated_at })),
+    );
+    expect(state().submission?.status).toBe('JUDGING');
+    await act(async () =>
+      source.emit('submission.updated', event({ status: 'PENDING', updated_at })),
+    );
+    expect(state().submission?.status).toBe('JUDGING');
+    await act(async () =>
+      source.emit('submission.completed', event({ status: 'ACCEPTED', updated_at })),
+    );
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+    expect(state().submission).toEqual(detail());
+  });
+
+  it.each(['', 'invalid-time'])(
+    'allows a real phase advance with timestamp %j while retaining valid display metadata',
+    async (updated_at) => {
+      await mount();
+      await click('Submit');
+      const source = TestEventSource.instances[0];
+      await act(async () => source.emit('submission.updated', event({ updated_at })));
+      expect(state().submission).toMatchObject({
+        status: 'JUDGING',
+        updated_at: created().created_at,
+      });
+      await act(async () =>
+        source.emit('submission.completed', event({ status: 'ACCEPTED', updated_at })),
+      );
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      expect(state().submission).toEqual(detail());
+    },
+  );
+
+  it.each(['manual', 'automatic'] as const)(
+    'keeps ordering across %s reconnect replay and same-account refresh without dropping a clock-skewed terminal',
+    async (reconnect) => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      await mount();
+      await click('Submit');
+      await act(async () => TestEventSource.instances[0].emit('submission.snapshot', event()));
+      if (reconnect === 'manual') {
+        await disconnect();
+        await click('Reconnect');
+      } else {
+        await act(async () => TestEventSource.instances[0].fail());
+        await act(async () => vi.advanceTimersByTimeAsync(1000));
+      }
+      const source = TestEventSource.instances[1];
+      const accepted = state().submission;
+      await act(async () => {
+        source.open();
+        source.emit(
+          'submission.snapshot',
+          event({ status: 'PENDING', updated_at: '2026-11-17T01:00:00Z' }),
+        );
+        source.emit('submission.updated', event());
+      });
+      expect(state().submission).toBe(accepted);
+      observed.user = { ...user, username: 'refreshed-name' };
+      await rerender();
+      await act(async () =>
+        source.emit(
+          'submission.updated',
+          event({ status: 'PENDING', updated_at: '2026-11-17T04:00:00Z' }),
+        ),
+      );
+      expect(state().submission).toBe(accepted);
+      await act(async () =>
+        source.emit(
+          'submission.completed',
+          event({ status: 'ACCEPTED', updated_at: '2026-11-17T00:59:00Z' }),
+        ),
+      );
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(['PENDING', 'ACCEPTED'] as const)(
+    'adopts a fresh connection snapshot for attempt B in %s and rejects attempt A events',
+    async (status) => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await mount();
+      await click('Submit');
+      await act(async () => TestEventSource.instances[0].emit('submission.snapshot', event()));
+      await act(async () => TestEventSource.instances[0].fail());
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      const source = TestEventSource.instances[1];
+      const next = event({
+        attempt_id: 'fixture-attempt-b',
+        status,
+        updated_at: '2026-11-17T00:59:00Z',
+      });
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+      await act(async () =>
+        source.emit(status === 'ACCEPTED' ? 'submission.completed' : 'submission.snapshot', next),
+      );
+      expect(state().submission?.status).toBe(status);
+      await act(async () =>
+        source.emit('submission.updated', event({ updated_at: '2026-11-17T04:00:00Z' })),
+      );
+      expect(state().submission?.status).toBe(status);
+      if (status === 'PENDING') {
+        await act(async () => source.emit('submission.completed', { ...next, status: 'ACCEPTED' }));
+      }
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      await act(async () => pending.resolve(detail()));
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(invalidateProgress).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['submission', 'slug', 'account'] as const)(
+    'starts independent ordering after a %s transition from a completed submission',
+    async (transition) => {
+      await mount();
+      await click('Submit');
+      const previous = TestEventSource.instances[0];
+      await terminal();
+      if (transition === 'slug') observed.slug = 'another-problem';
+      if (transition === 'account')
+        observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+      if (transition !== 'submission') await rerender();
+      vi.mocked(submissionApi.create).mockResolvedValue(
+        created({ id: 42, problem_id: transition === 'slug' ? 2 : 1 }),
+      );
+      await click('Submit');
+      const source = TestEventSource.instances[1];
+      await act(async () => {
+        previous.emit('submission.updated', event());
+        source.emit(
+          'submission.snapshot',
+          event({ submission_id: 42, attempt_id: 'fixture-next', status: 'PENDING' }),
+        );
+        source.emit(
+          'submission.updated',
+          event({ submission_id: 42, attempt_id: 'fixture-next', status: 'JUDGING' }),
+        );
+      });
+      expect(state().submission).toMatchObject({ id: 42, status: 'JUDGING' });
+      vi.mocked(submissionApi.get).mockResolvedValue(detail({ id: 42 }));
+      await act(async () =>
+        source.emit(
+          'submission.completed',
+          event({ submission_id: 42, attempt_id: 'fixture-next', status: 'ACCEPTED' }),
+        ),
+      );
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(observed.problem!.historyRefreshKey).toBe(2);
+    },
+  );
+
+  it('keeps authoritative terminal HTTP detail even when its verdict/time differ from SSE under StrictMode', async () => {
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+    await mount(true);
+    await click('Submit');
+    const source = TestEventSource.instances[0];
+    const queuedStatus = observed.stream!.onStatus;
+    await act(async () => {
+      source.emit('submission.snapshot', event());
+      source.emit('submission.updated', event({ status: 'PENDING' }));
+      source.emit(
+        'submission.completed',
+        event({ status: 'ACCEPTED', updated_at: '2026-11-17T04:00:00Z' }),
+      );
+      source.emit(
+        'submission.completed',
+        event({ status: 'ACCEPTED', updated_at: '2026-11-17T04:00:00Z' }),
+      );
+    });
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+    const final = detail({ status: 'WRONG_ANSWER' });
+    await act(async () => {
+      pending.resolve(final);
+      await pending.promise;
+      queuedStatus(event({ status: 'JUDGING', updated_at: '2026-11-17T05:00:00Z' }));
+    });
+    expect(state().submission).toEqual(final);
+    expect(submissionApi.create).toHaveBeenCalledTimes(1);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    expect(invalidateProgress).toHaveBeenCalledTimes(1);
+    expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Verdict: Wrong Answer', 'error');
+  });
+
+  it.each(['PENDING', 'JUDGING'] as const)(
+    'keeps a terminal event while detail is pending despite queued %s with a later timestamp',
+    async (status) => {
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+      await mount();
+      await click('Submit');
+      const source = TestEventSource.instances[0];
+      await act(async () => {
+        source.emit('submission.completed', event({ status: 'ACCEPTED' }));
+        source.emit('submission.updated', event({ status, updated_at: '2026-11-17T03:00:00Z' }));
+      });
+      expect(state().submission?.status).toBe('ACCEPTED');
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      await act(async () => pending.resolve(detail()));
+      expect(state().submission).toEqual(detail());
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+    },
+  );
+
+  it('keeps manual terminal detail authoritative against an already queued status callback', async () => {
+    await mount();
+    await click('Submit');
+    await disconnect();
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+    await click('Check result');
+    const queuedStatus = observed.stream!.onStatus;
+    await act(async () => {
+      pending.resolve(detail());
+      await pending.promise;
+      queuedStatus(event({ status: 'JUDGING', updated_at: '2026-11-17T03:00:00Z' }));
+    });
+    expect(state().submission).toEqual(detail());
+    expect(invalidateProgress).toHaveBeenCalledTimes(1);
+    expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+  });
 });

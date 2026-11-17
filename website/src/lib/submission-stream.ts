@@ -17,7 +17,8 @@ interface UseSubmissionStreamOptions {
   submissionId: number | null;
   initialAttemptId?: string | null;
   enabled: boolean;
-  onStatus: (event: SubmissionStreamEvent) => void;
+  // false rejects a status before it can trigger terminal processing.
+  onStatus: (event: SubmissionStreamEvent) => boolean | void;
   onTerminal: (event: SubmissionStreamEvent) => void;
   onError?: (error: SubmissionStreamError) => void;
   /** Fired only when the current EventSource opens for this submission. */
@@ -184,7 +185,7 @@ export function useSubmissionStream({
       onTerminalRef.current(event);
     };
 
-    const handleRawEvent = (message: MessageEvent<string>) => {
+    const handleRawEvent = (message: MessageEvent<string>, snapshot: boolean) => {
       if (generationRef.current !== generation) return;
       let parsed: unknown;
       try {
@@ -209,8 +210,13 @@ export function useSubmissionStream({
         return;
       }
 
+      // The backend pins one attempt per HTTP connection and sends its DB
+      // snapshot first. Only that boundary can adopt a rejudge's new attempt.
+      if (snapshot && parsed.submission_id === submissionId && initialAttemptId === null) {
+        activeAttemptRef.current = parsed.attempt_id;
+      }
       if (!validateEvent(parsed)) return;
-      onStatusRef.current(parsed);
+      if (onStatusRef.current(parsed) === false) return;
       if (isTerminalSubmissionStatus(parsed.status)) complete(parsed);
     };
 
@@ -288,8 +294,22 @@ export function useSubmissionStream({
         reportError({ kind: 'stream', message: 'Live updates are unavailable.' });
       };
 
+      let firstEvent = true;
+      const handleSourceEvent = (message: MessageEvent<string>) => {
+        if (
+          generationRef.current !== generation ||
+          terminalHandledRef.current ||
+          eventSourceRef.current !== source
+        )
+          return;
+        const snapshot =
+          firstEvent &&
+          (message.type === 'submission.snapshot' || message.type === 'submission.completed');
+        firstEvent = false;
+        handleRawEvent(message, snapshot);
+      };
       for (const eventName of SUBMISSION_STREAM_EVENTS) {
-        source.addEventListener(eventName, handleRawEvent as EventListener);
+        source.addEventListener(eventName, handleSourceEvent as EventListener);
       }
     };
 

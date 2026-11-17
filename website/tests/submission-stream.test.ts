@@ -173,8 +173,7 @@ describe('real React submission stream lifecycle', () => {
       source.fail();
     });
     expect(props.onTerminal).toHaveBeenCalledExactlyOnceWith(terminal);
-    // The existing raw handler still forwards duplicate status callbacks before complete() dedupes.
-    expect(props.onStatus).toHaveBeenCalledTimes(2);
+    expect(props.onStatus).toHaveBeenCalledTimes(1);
     expect(latest.state).toBe('completed');
     expect(source.closed).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
@@ -298,4 +297,71 @@ describe('real React submission stream lifecycle', () => {
     );
     expect(props.onTerminal).toHaveBeenCalledTimes(1);
   });
+
+  it('accepts a new attempt only from the first snapshot on a new connection', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const props = options();
+    await mount(props);
+    await act(async () => TestEventSource.instances[0].emit('submission.snapshot', event));
+    await act(async () => TestEventSource.instances[0].fail());
+    await advance(1000);
+    const source = TestEventSource.instances[1];
+    const next = { ...event, attempt_id: 'fixture-attempt-b', status: 'PENDING' };
+    await act(async () => source.emit('submission.snapshot', next));
+    expect(props.onStatus).toHaveBeenCalledTimes(2);
+    expect(props.onStatus).toHaveBeenLastCalledWith(next);
+    await act(async () => source.emit('submission.updated', event));
+    expect(props.onStatus).toHaveBeenCalledTimes(2);
+    const final = { ...next, status: 'ACCEPTED' };
+    await act(async () => source.emit('submission.completed', final));
+    expect(props.onTerminal).toHaveBeenCalledExactlyOnceWith(final);
+  });
+
+  it('honors a status rejection without closing the transport or suppressing a later accepted terminal', async () => {
+    const onStatus = vi.fn(() => false);
+    const props = options({ onStatus });
+    await mount(props);
+    const source = TestEventSource.instances[0];
+    const terminal = { ...event, status: 'ACCEPTED' };
+    await act(async () => source.emit('submission.completed', terminal));
+    expect(props.onTerminal).not.toHaveBeenCalled();
+    expect(source.closed).toBe(false);
+    onStatus.mockReturnValue(true);
+    await act(async () => source.emit('submission.completed', terminal));
+    expect(props.onTerminal).toHaveBeenCalledExactlyOnceWith(terminal);
+    expect(source.closed).toBe(true);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not change an explicitly pinned attempt until its owner supplies a new attempt ID', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const props = options({ initialAttemptId: event.attempt_id });
+    await mount(props);
+    const next = { ...event, attempt_id: 'fixture-attempt-b', status: 'PENDING' };
+    await act(async () => TestEventSource.instances[0].emit('submission.snapshot', next));
+    expect(props.onStatus).not.toHaveBeenCalled();
+    await view!.rerender(createElement(Probe, { ...props, initialAttemptId: 'fixture-attempt-b' }));
+    await act(async () => TestEventSource.instances[1].emit('submission.snapshot', next));
+    expect(props.onStatus).toHaveBeenCalledExactlyOnceWith(next);
+    await act(async () => TestEventSource.instances[1].emit('submission.updated', event));
+    expect(props.onStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, null, 123])(
+    'keeps rejecting non-string or missing timestamps %s at the parser',
+    async (updated_at) => {
+      const props = options();
+      await mount(props);
+      await act(async () =>
+        TestEventSource.instances[0].emit('submission.updated', { ...event, updated_at }),
+      );
+      expect(props.onStatus).not.toHaveBeenCalled();
+      expect(props.onError).toHaveBeenCalledExactlyOnceWith({
+        kind: 'malformed_event',
+        message: 'Live update payload did not match the contract.',
+      });
+      expect(latest.state).toBe('error');
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });
