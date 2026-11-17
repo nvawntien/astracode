@@ -459,7 +459,7 @@ describe('submission recovery and cancellation', () => {
     vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
     await click('Check result');
     expect(state().checkingResult).toBe(true);
-    expect(submissionApi.get).toHaveBeenCalledExactlyOnceWith(41);
+    expect(submissionApi.get).toHaveBeenCalledExactlyOnceWith(41, expect.any(AbortSignal));
     // The actual callback also guards repeated checks independently of its disabled button.
     await act(async () => {
       await state().onCheckResult();
@@ -520,7 +520,7 @@ describe('submission recovery and cancellation', () => {
       expect(submissionApi.get).toHaveBeenCalledTimes(1); // ref stays latched after failure
       vi.mocked(submissionApi.get).mockResolvedValue(detail({ status: 'WRONG_ANSWER' }));
       await click('Retry detail');
-      expect(vi.mocked(submissionApi.get).mock.calls[1]).toEqual([41]);
+      expect(vi.mocked(submissionApi.get).mock.calls[1]).toEqual([41, expect.any(AbortSignal)]);
       expect(state()).toMatchObject({
         submitting: false,
         checkingResult: false,
@@ -678,8 +678,8 @@ describe('submission recovery and cancellation', () => {
   });
 });
 
-describe('existing late-response and competing-request behavior', () => {
-  it('characterizes creation completing after a slug change and attaching the old submission to the new workspace', async () => {
+describe('async lifecycle response validity', () => {
+  it('ignores creation completing after a slug change', async () => {
     const pending = deferred<CreateSubmissionResponse>();
     vi.mocked(submissionApi.create).mockReturnValue(pending.promise);
     await mount();
@@ -690,12 +690,14 @@ describe('existing late-response and competing-request behavior', () => {
     expect(state().submitting).toBe(false);
     await act(async () => pending.resolve(created()));
     expect(observed.problem!.problem.id).toBe(2);
-    expect(state().submission).toMatchObject({ id: 41, problem_id: 1 });
+    expect(state().submission).toBeNull();
     expect(state().submitting).toBe(false);
-    expect(observed.stream).toMatchObject({ submissionId: 41, enabled: true });
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+    expect(submissionApi.get).not.toHaveBeenCalled();
   });
 
-  it('characterizes creation completing after logout and reactivating tracking from the captured user', async () => {
+  it('ignores creation completing after logout', async () => {
     const pending = deferred<CreateSubmissionResponse>();
     vi.mocked(submissionApi.create).mockReturnValue(pending.promise);
     await mount();
@@ -705,31 +707,34 @@ describe('existing late-response and competing-request behavior', () => {
     await act(async () => pending.resolve(created()));
     expect(state()).toMatchObject({
       submitting: false,
-      submission: { id: 41, user_id: user.id, username: user.username },
+      submission: null,
     });
-    expect(observed.stream).toMatchObject({ submissionId: 41, enabled: true });
-    // This characterizes client state only; real backend authorization is not bypassed by the test.
+    expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
+    expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+    expect(submissionApi.get).not.toHaveBeenCalled();
   });
 
-  it('characterizes manual checking surviving slug reset and repopulating the previous submission', async () => {
+  it('ignores manual checking that resolves after slug reset', async () => {
     await mount();
     await click('Submit');
     await disconnect();
     const pending = deferred<Submission>();
     vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
     await click('Check result');
-    expect(vi.mocked(submissionApi.get).mock.calls[0]).toEqual([41]); // no AbortSignal
+    const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    expect(signal).toBeInstanceOf(AbortSignal);
     observed.slug = 'another-problem';
     await rerender();
+    expect(signal.aborted).toBe(true);
     expect(state()).toMatchObject({ checkingResult: false, submission: null });
     await act(async () => pending.resolve(detail()));
     expect(observed.problem!.problem.id).toBe(2);
-    expect(state().submission).toMatchObject({ id: 41, problem_id: 1, status: 'ACCEPTED' });
-    expect(invalidateProgress).toHaveBeenCalledTimes(1);
-    expect(observed.problem!.historyRefreshKey).toBe(1);
+    expect(state().submission).toBeNull();
+    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(observed.problem!.historyRefreshKey).toBe(0);
   });
 
-  it('characterizes keyboard Submit during manual checking and an old result overwriting the newer submission', async () => {
+  it('preserves keyboard Submit during manual checking while ignoring the old result', async () => {
     await mount();
     await click('Submit');
     await disconnect();
@@ -745,13 +750,14 @@ describe('existing late-response and competing-request behavior', () => {
     await act(async () => pending.resolve(detail()));
     expect(state()).toMatchObject({
       checkingResult: false,
-      submitting: false,
-      submission: { id: 41, status: 'ACCEPTED' },
+      submitting: true,
+      submission: { id: 42, status: 'PENDING' },
     });
-    expect(observed.stream!.submissionId).toBeNull();
+    expect(observed.stream!.submissionId).toBe(42);
+    expect(invalidateProgress).not.toHaveBeenCalled();
   });
 
-  it('characterizes manual and terminal detail requests finishing the same submission twice', async () => {
+  it('completes once when terminal detail wins over an older manual GET', async () => {
     await mount();
     await click('Submit');
     await disconnect();
@@ -766,9 +772,9 @@ describe('existing late-response and competing-request behavior', () => {
     expect(submissionApi.get).toHaveBeenCalledTimes(2);
     await act(async () => terminalDetail.resolve(detail()));
     expect(observed.problem!.historyRefreshKey).toBe(1);
-    expect(state().checkingResult).toBe(true);
+    expect(state().checkingResult).toBe(false);
     await act(async () => manual.resolve(detail()));
-    expect(observed.problem!.historyRefreshKey).toBe(2);
-    expect(invalidateProgress).toHaveBeenCalledTimes(2);
+    expect(observed.problem!.historyRefreshKey).toBe(1);
+    expect(invalidateProgress).toHaveBeenCalledTimes(1);
   });
 });

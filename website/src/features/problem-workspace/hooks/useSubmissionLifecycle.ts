@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ToastKind } from '../../../components/ToastProvider';
 import { ApiError, NetworkError, submissionApi } from '../../../lib/api';
 import { isPendingStatus, isTerminalSubmissionStatus, verdictMeta } from '../../../lib/format';
@@ -28,6 +28,24 @@ interface SubmissionLifecycleOptions {
   onCompleted: (detail: Submission) => void;
 }
 
+interface SubmissionOperations {
+  generation: number;
+  mounted: boolean;
+  submissionId: number | null;
+  completed: boolean;
+  terminalHandled: boolean;
+  terminalRequest: AbortController | null;
+  manualRequest: AbortController | null;
+}
+
+function abortDetailRequests(operations: SubmissionOperations) {
+  const { terminalRequest, manualRequest } = operations;
+  operations.terminalRequest = null;
+  operations.manualRequest = null;
+  terminalRequest?.abort();
+  manualRequest?.abort();
+}
+
 export function useSubmissionLifecycle({
   slug,
   user,
@@ -47,19 +65,50 @@ export function useSubmissionLifecycle({
   const [activeSubmissionId, setActiveSubmissionId] = useState<number | null>(null);
   const [liveUpdateError, setLiveUpdateError] = useState('');
   const [detailFetchError, setDetailFetchError] = useState('');
-  const terminalDetailHandledRef = useRef(false);
-  const terminalDetailAbortRef = useRef<AbortController | null>(null);
+  const operationsRef = useRef<SubmissionOperations>({
+    generation: 0,
+    mounted: false,
+    submissionId: null,
+    completed: false,
+    terminalHandled: false,
+    terminalRequest: null,
+    manualRequest: null,
+  });
 
-  useEffect(
-    () => () => {
-      terminalDetailAbortRef.current?.abort();
-    },
-    [],
-  );
+  const invalidateOperations = useCallback(() => {
+    const operations = operationsRef.current;
+    operations.generation += 1;
+    operations.submissionId = null;
+    operations.completed = false;
+    operations.terminalHandled = false;
+    // Cancellation saves work. Generation/request identity protects state even
+    // when the transport ignores abort and its promise still resolves/rejects.
+    abortDetailRequests(operations);
+    return operations.generation;
+  }, []);
+
+  const isCurrent = useCallback((generation: number, submissionId?: number) => {
+    const operations = operationsRef.current;
+    return (
+      operations.mounted &&
+      operations.generation === generation &&
+      (submissionId === undefined || operations.submissionId === submissionId)
+    );
+  }, []);
+
+  const authenticated = Boolean(user);
+  useLayoutEffect(() => {
+    const operations = operationsRef.current;
+    operations.mounted = true;
+    return () => {
+      // Invalidate at commit/unmount, before passive reset effects or late
+      // promise continuations. Truthy user-object refreshes keep this scope.
+      operations.mounted = false;
+      invalidateOperations();
+    };
+  }, [slug, authenticated, invalidateOperations]);
 
   useEffect(() => {
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
     setActiveSubmissionId(null);
     setSubmitting(false);
     setCheckingResult(false);
@@ -70,8 +119,6 @@ export function useSubmissionLifecycle({
 
   useEffect(() => {
     if (user) return;
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
     setActiveSubmissionId(null);
     setSubmitting(false);
     setCheckingResult(false);
@@ -89,24 +136,38 @@ export function useSubmissionLifecycle({
   }, []);
 
   const finishSubmissionFromDetail = useCallback(
-    (detail: Submission) => {
+    (detail: Submission, generation: number) => {
+      const operations = operationsRef.current;
+      if (!isCurrent(generation, detail.id) || operations.completed) return;
+      // This latch belongs to one generation and its bound submission ID.
+      // Set it before callbacks so concurrent GETs cannot finish twice.
+      operations.completed = true;
+      abortDetailRequests(operations);
       setSubmission(detail);
       setSubmitting(false);
+      setCheckingResult(false);
       setActiveSubmissionId(null);
       setLiveUpdateError('');
       setDetailFetchError('');
       onCompleted(detail);
     },
-    [onCompleted],
+    [isCurrent, onCompleted],
   );
 
   const fetchTerminalSubmissionDetail = useCallback(
     async (id: number, terminalEvent?: SubmissionStreamEvent) => {
-      if (terminalDetailHandledRef.current) return;
-      terminalDetailHandledRef.current = true;
-      terminalDetailAbortRef.current?.abort();
+      const operations = operationsRef.current;
+      const generation = operations.generation;
+      if (!isCurrent(generation, id) || operations.completed || operations.terminalHandled) return;
+      operations.terminalHandled = true;
+      operations.terminalRequest?.abort();
       const controller = new AbortController();
-      terminalDetailAbortRef.current = controller;
+      operations.terminalRequest = controller;
+      const ownsRequest = () =>
+        isCurrent(generation, id) &&
+        operationsRef.current.terminalRequest === controller &&
+        !controller.signal.aborted &&
+        !operationsRef.current.completed;
 
       if (terminalEvent) {
         setSubmission((current) => {
@@ -121,10 +182,10 @@ export function useSubmissionLifecycle({
 
       try {
         const detail = await submissionApi.get(id, controller.signal);
-        if (controller.signal.aborted) return;
-        finishSubmissionFromDetail(detail);
+        if (!ownsRequest()) return;
+        finishSubmissionFromDetail(detail, generation);
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (!ownsRequest()) return;
         setSubmitting(false);
         setActiveSubmissionId(null);
         setDetailFetchError(
@@ -135,30 +196,44 @@ export function useSubmissionLifecycle({
               : 'Verdict received, but submission detail could not be loaded.',
         );
       } finally {
-        if (terminalDetailAbortRef.current === controller) {
-          terminalDetailAbortRef.current = null;
+        if (ownsRequest()) {
+          operationsRef.current.terminalRequest = null;
         }
       }
     },
-    [finishSubmissionFromDetail],
+    [finishSubmissionFromDetail, isCurrent],
   );
 
   const checkResultOnce = useCallback(async () => {
     if (!submission || checkingResult) return;
+    const operations = operationsRef.current;
+    const generation = operations.generation;
+    const id = submission.id;
+    if (!isCurrent(generation, id) || operations.completed) return;
+    operations.manualRequest?.abort();
+    const controller = new AbortController();
+    operations.manualRequest = controller;
+    const ownsRequest = () =>
+      isCurrent(generation, id) &&
+      operationsRef.current.manualRequest === controller &&
+      !controller.signal.aborted &&
+      !operationsRef.current.completed;
     setCheckingResult(true);
     setDetailFetchError('');
     try {
-      const latest = await submissionApi.get(submission.id);
-      setSubmission(latest);
+      const latest = await submissionApi.get(id, controller.signal);
+      if (!ownsRequest()) return;
       if (isTerminalSubmissionStatus(latest.status)) {
-        finishSubmissionFromDetail(latest);
+        finishSubmissionFromDetail(latest, generation);
       } else {
+        setSubmission(latest);
         showToast(
           `Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`,
           'success',
         );
       }
     } catch (err) {
+      if (!ownsRequest()) return;
       if (err instanceof NetworkError) {
         setDetailFetchError(
           'AstraCode is temporarily unreachable. Check your connection and try again.',
@@ -169,9 +244,12 @@ export function useSubmissionLifecycle({
         setDetailFetchError('Could not read the submission.');
       }
     } finally {
-      setCheckingResult(false);
+      if (ownsRequest()) {
+        operationsRef.current.manualRequest = null;
+        setCheckingResult(false);
+      }
     }
-  }, [checkingResult, finishSubmissionFromDetail, showToast, submission]);
+  }, [checkingResult, finishSubmissionFromDetail, isCurrent, showToast, submission]);
 
   const handleStreamTerminal = useCallback(
     (event: SubmissionStreamEvent) => {
@@ -205,10 +283,11 @@ export function useSubmissionLifecycle({
       showToast('Write some code before submitting', 'error');
       return;
     }
+    if (!operationsRef.current.mounted) return;
 
     setSubmitting(true);
-    terminalDetailAbortRef.current?.abort();
-    terminalDetailHandledRef.current = false;
+    const generation = invalidateOperations();
+    setCheckingResult(false);
     setActiveSubmissionId(null);
     setLiveUpdateError('');
     setDetailFetchError('');
@@ -221,6 +300,8 @@ export function useSubmissionLifecycle({
         language,
         source_code: code,
       });
+      if (!isCurrent(generation)) return;
+      operationsRef.current.submissionId = created.id;
       setSubmission({
         id: created.id,
         problem_id: created.problem_id,
@@ -245,6 +326,7 @@ export function useSubmissionLifecycle({
         setActiveSubmissionId(created.id);
       }
     } catch (err) {
+      if (!isCurrent(generation)) return;
       setSubmitting(false);
       if (err instanceof NetworkError) {
         showToast(
