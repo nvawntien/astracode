@@ -273,7 +273,7 @@ export function useSubmissionLifecycle({
   });
 
   const submit = async () => {
-    if (!problem || submitting || isRunning()) return;
+    if (!problem || submitting || checkingResult || isRunning()) return;
     if (!requireAuth('submit')) return;
     if (!online) {
       showToast('You appear to be offline', 'error');

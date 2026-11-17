@@ -165,12 +165,13 @@ async function click(text: string) {
   expect(button, `button ${text}`).toBeDefined();
   await act(async () => button!.click());
 }
-async function shortcut(submit = true) {
+async function shortcut(submit = true, modifier: 'ctrl' | 'meta' = 'ctrl') {
   await act(async () => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: 'Enter',
-        ctrlKey: true,
+        ctrlKey: modifier === 'ctrl',
+        metaKey: modifier === 'meta',
         shiftKey: submit,
         bubbles: true,
       }),
@@ -734,28 +735,54 @@ describe('async lifecycle response validity', () => {
     expect(observed.problem!.historyRefreshKey).toBe(0);
   });
 
-  it('preserves keyboard Submit during manual checking while ignoring the old result', async () => {
-    await mount();
-    await click('Submit');
-    await disconnect();
-    const pending = deferred<Submission>();
-    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
-    await click('Check result');
-    expect(state().checkingResult).toBe(true);
-    vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
-    // Buttons are disabled by busy, but the existing keyboard guard omits checkingResult.
-    await shortcut();
-    expect(submissionApi.create).toHaveBeenCalledTimes(2);
-    expect(observed.stream!.submissionId).toBe(42);
-    await act(async () => pending.resolve(detail()));
-    expect(state()).toMatchObject({
-      checkingResult: false,
-      submitting: true,
-      submission: { id: 42, status: 'PENDING' },
-    });
-    expect(observed.stream!.submissionId).toBe(42);
-    expect(invalidateProgress).not.toHaveBeenCalled();
-  });
+  it.each(['ctrl', 'meta'] as const)(
+    'blocks button and %s keyboard Submit during manual checking, then permits one keyboard POST',
+    async (modifier) => {
+      await mount();
+      await click('Submit');
+      await disconnect();
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+      await click('Check result');
+      const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+      const submitButton = [...view!.container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Submit',
+      )!;
+      expect(submitButton.disabled).toBe(true);
+      expect(state().checkingResult).toBe(true);
+      await click('Submit');
+      await shortcut(true, modifier);
+      expect(submissionApi.create).toHaveBeenCalledTimes(1);
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      expect(signal.aborted).toBe(false);
+      expect(state()).toMatchObject({
+        checkingResult: true,
+        submitting: false,
+        submission: { id: 41, status: 'PENDING' },
+      });
+      await act(async () => pending.resolve(detail({ status: 'JUDGING' })));
+      expect(state().checkingResult).toBe(false);
+      expect(submitButton.disabled).toBe(false);
+      vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
+      await shortcut(true, modifier);
+      expect(submissionApi.create).toHaveBeenCalledTimes(2);
+      expect(submissionApi.create).toHaveBeenNthCalledWith(2, {
+        problem_id: 1,
+        language: 'CPP',
+        source_code: sourceCode,
+      });
+      expect(state()).toMatchObject({
+        checkingResult: false,
+        submitting: true,
+        submission: { id: 42, status: 'PENDING' },
+      });
+      expect(observed.stream!.submissionId).toBe(42);
+      await shortcut(true, modifier);
+      await click('Submit');
+      expect(submissionApi.create).toHaveBeenCalledTimes(2);
+      expect(invalidateProgress).not.toHaveBeenCalled();
+    },
+  );
 
   it('completes once when terminal detail wins over an older manual GET', async () => {
     await mount();

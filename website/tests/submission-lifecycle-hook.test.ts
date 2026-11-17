@@ -218,6 +218,48 @@ async function invalidateContext(kind: Invalidation, props: Options) {
 }
 
 describe('submission async ownership and completion races', () => {
+  it.each(['pending', 'error'] as const)(
+    'blocks direct Submit until a manual check finishes with %s',
+    async (outcome) => {
+      const props = options();
+      await mountHook(props);
+      await pendingRecovery();
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+      const request = await startCheck();
+      const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+      vi.mocked(props.requireAuth).mockClear();
+      vi.mocked(props.onSubmitStart).mockClear();
+      await act(async () => latest.submit());
+      expect(submissionApi.create).toHaveBeenCalledTimes(1);
+      expect(props.requireAuth).not.toHaveBeenCalled();
+      expect(props.onSubmitStart).not.toHaveBeenCalled();
+      expect(props.showToast).not.toHaveBeenCalled();
+      expect(signal.aborted).toBe(false);
+      expect(latest.checkingResult).toBe(true);
+      expect(latest.submission?.id).toBe(41);
+      await act(async () => {
+        if (outcome === 'pending') pending.resolve({ ...detail, status: 'JUDGING' });
+        else pending.reject(new NetworkError());
+        await request.done;
+      });
+      expect(latest.checkingResult).toBe(false);
+      vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
+      await act(async () => latest.submit());
+      expect(submissionApi.create).toHaveBeenCalledTimes(2);
+      expect(submissionApi.create).toHaveBeenNthCalledWith(2, {
+        problem_id: 1,
+        language: 'CPP',
+        source_code: 'fixture source',
+      });
+      expect(props.requireAuth).toHaveBeenCalledExactlyOnceWith('submit');
+      expect(props.onSubmitStart).toHaveBeenCalledTimes(1);
+      expect(latest.submission?.id).toBe(42);
+      await act(async () => latest.submit());
+      expect(submissionApi.create).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it.each<Invalidation>(['slug', 'logout', 'unmount'])(
     'ignores terminal create responses after %s, including StrictMode unmount',
     async (kind) => {
@@ -376,8 +418,9 @@ describe('submission async ownership and completion races', () => {
       .mockReturnValueOnce(current.promise);
     const oldRequest = await startCheck();
     const oldSignal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
-    vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
-    // Preserve the existing ability to Submit while a manual check is pending.
+    // A route reset supersedes the check; Submit itself now honors its busy state.
+    await invalidateContext('slug', props);
+    vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42, problem_id: 2 });
     await act(async () => latest.submit());
     expect(oldSignal.aborted).toBe(true);
     expect(latest.checkingResult).toBe(false);
@@ -392,7 +435,7 @@ describe('submission async ownership and completion races', () => {
     expect(latest.detailFetchError).toBe('');
     expect(latest.submission?.id).toBe(42);
     await act(async () => {
-      current.resolve({ ...detail, id: 42, status: 'JUDGING' });
+      current.resolve({ ...detail, id: 42, problem_id: 2, status: 'JUDGING' });
       await newRequest.done;
     });
     expect(latest.checkingResult).toBe(false);
@@ -408,7 +451,8 @@ describe('submission async ownership and completion races', () => {
       const previous = deferred<Submission>();
       vi.mocked(submissionApi.get).mockReturnValueOnce(previous.promise);
       const oldRequest = await startCheck();
-      vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
+      await invalidateContext('slug', props);
+      vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42, problem_id: 2 });
       await act(async () => latest.submit());
       await disconnectStream();
       vi.mocked(submissionApi.get).mockRejectedValueOnce(
@@ -519,5 +563,58 @@ describe('submission async ownership and completion races', () => {
     });
     expect(props.onCompleted).toHaveBeenCalledTimes(2);
     expect(latest.submission).toEqual(nextDetail);
+  });
+});
+
+describe('authenticated account identity characterization', () => {
+  it('currently applies account A create responses after a direct truthy switch to account B', async () => {
+    const props = options();
+    const pending = deferred<CreateSubmissionResponse>();
+    vi.mocked(submissionApi.create).mockReturnValue(pending.promise);
+    await mountHook(props);
+    const request = await startSubmit();
+    await view!.rerender(
+      createElement(Probe, {
+        ...props,
+        user: { id: 'fixture-user-b', username: 'fixture-user-b' },
+      }),
+    );
+    await act(async () => {
+      pending.resolve(created);
+      await request.done;
+    });
+    // Existing ownership tracks authenticated truthiness, not the account ID.
+    expect(latest.submission).toMatchObject({ id: 41, user_id: 'fixture-user' });
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledExactlyOnceWith(
+      41,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('currently keeps account A manual GET valid across a direct truthy switch to account B', async () => {
+    const props = options();
+    await mountHook(props);
+    await pendingRecovery();
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
+    const request = await startCheck();
+    const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    const onCompleted = vi.fn();
+    await view!.rerender(
+      createElement(Probe, {
+        ...props,
+        user: { id: 'fixture-user-b', username: 'fixture-user-b' },
+        onCompleted,
+      }),
+    );
+    expect(signal.aborted).toBe(false);
+    expect(latest.checkingResult).toBe(true);
+    await act(async () => {
+      pending.resolve(detail);
+      await request.done;
+    });
+    expect(latest.submission).toEqual(detail);
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(onCompleted).not.toHaveBeenCalled();
   });
 });
