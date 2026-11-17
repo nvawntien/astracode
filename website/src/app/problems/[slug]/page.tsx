@@ -26,7 +26,6 @@ import {
 import { useDismissable, useOnline, useViewportWidth } from '@/lib/hooks';
 import { fetchProgress, invalidateProgress } from '@/lib/progress';
 import { useSubmissionStream } from '@/lib/submission-stream';
-import { CODE_TEMPLATES, draftKey } from '@/lib/templates';
 import type {
   CodeDiagnostic,
   LanguageCode,
@@ -44,6 +43,8 @@ import { ResultPanel } from '@/features/problem-workspace/components/ResultPanel
 import { iconButton } from '@/features/problem-workspace/components/workspaceStyles';
 import { isRunFailure } from '@/features/problem-workspace/runResult';
 import type { TestCase } from '@/features/problem-workspace/types';
+import { useEditorDraft } from '@/features/problem-workspace/hooks/useEditorDraft';
+import { useEditorPreferences } from '@/features/problem-workspace/hooks/useEditorPreferences';
 
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
@@ -121,13 +122,8 @@ export default function WorkspacePage() {
 
   /* --------------------------------------------------------------- editor */
 
-  const [language, setLanguage] = useState<LanguageCode>('GO');
-  const [code, setCode] = useState<string>(CODE_TEMPLATES.GO);
-  const [fontSize, setFontSize] = useState(13);
-  const [tabSize, setTabSize] = useState(4);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
-  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [jumpLine, setJumpLine] = useState<number | null>(null);
   const [codeDiagnostics, setCodeDiagnostics] = useState<CodeDiagnostic[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
@@ -136,83 +132,33 @@ export default function WorkspacePage() {
 
   const settingsRef = useDismissable<HTMLDivElement>(settingsOpen, () => setSettingsOpen(false));
 
-  // Editor preferences are global; the language is remembered too.
-  useEffect(() => {
-    try {
-      const storedLang = localStorage.getItem('astra-lang');
-      if (storedLang && LANGUAGES.some((l) => l.code === storedLang)) {
-        setLanguage(storedLang as LanguageCode);
-      }
-      const storedFont = Number(localStorage.getItem('astra-font'));
-      if (storedFont >= 11 && storedFont <= 18) setFontSize(storedFont);
-      const storedTab = Number(localStorage.getItem('astra-tab'));
-      if ([2, 4, 8].includes(storedTab)) setTabSize(storedTab);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const {
+    language,
+    setLanguage,
+    changeLanguage: changeEditorLanguage,
+    fontSize,
+    tabSize,
+    changeFontSize,
+    changeTabSize,
+  } = useEditorPreferences();
 
-  // Load the draft (or template) whenever the problem/language pair changes.
+  // Diagnostics belong to execution; only draft/preferences state moves into hooks.
   useEffect(() => {
     if (!problem) return;
     setCodeDiagnostics([]);
     setJumpLine(null);
-    try {
-      const draft = localStorage.getItem(draftKey(problem.id, language));
-      if (draft) {
-        setCode(draft);
-      } else {
-        setCode(CODE_TEMPLATES[language]);
-      }
-    } catch {
-      setCode(CODE_TEMPLATES[language]);
-    }
-    setDraftSavedAt(null);
   }, [problem, language]);
 
-  // Debounced draft persistence.
-  useEffect(() => {
-    if (!problem) return;
-    const id = setTimeout(() => {
-      try {
-        localStorage.setItem(draftKey(problem.id, language), code);
-        setDraftSavedAt(Date.now());
-      } catch {
-        /* quota exceeded — the editor still works, just without a draft */
-      }
-    }, 600);
-    return () => clearTimeout(id);
-  }, [code, problem, language]);
+  const { code, setCode, draftSavedAt, resetCode, restoreDraft } = useEditorDraft({
+    problem,
+    language,
+    setLanguage,
+  });
 
   const changeLanguage = (next: LanguageCode) => {
-    setLanguage(next);
+    changeEditorLanguage(next);
     setCodeDiagnostics([]);
     setJumpLine(null);
-    try {
-      localStorage.setItem('astra-lang', next);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const changeFontSize = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const next = Number(event.target.value);
-    setFontSize(next);
-    try {
-      localStorage.setItem('astra-font', String(next));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const changeTabSize = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = Number(event.target.value);
-    setTabSize(next);
-    try {
-      localStorage.setItem('astra-tab', String(next));
-    } catch {
-      /* ignore */
-    }
   };
 
   const restoreSubmissionCode = useCallback(
@@ -224,17 +170,8 @@ export default function WorkspacePage() {
         return;
       }
 
-      try {
-        localStorage.setItem('astra-lang', nextLanguage);
-        localStorage.setItem(draftKey(problem.id, nextLanguage), detail.source_code);
-      } catch {
-        /* editor still updates even if local draft persistence is unavailable */
-      }
-
-      setLanguage(nextLanguage);
-      setCode(detail.source_code);
+      restoreDraft(nextLanguage, detail.source_code);
       setCodeDiagnostics([]);
-      setDraftSavedAt(Date.now());
       setJumpLine(null);
       setRestoreSubmission(null);
       setBottomOpen(true);
@@ -242,7 +179,7 @@ export default function WorkspacePage() {
       if (stacked) setMobileView('editor');
       showToast(`Submission #${detail.id} restored to the editor`, 'success');
     },
-    [problem, showToast, stacked],
+    [problem, restoreDraft, showToast, stacked],
   );
 
   const requestRestoreSubmissionCode = useCallback(
@@ -1235,7 +1172,7 @@ export default function WorkspacePage() {
               <button
                 type="button"
                 onClick={() => {
-                  setCode(CODE_TEMPLATES[language]);
+                  resetCode();
                   setResetDialog(false);
                   showToast('Code reset to the template', 'info');
                 }}
