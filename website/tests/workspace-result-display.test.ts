@@ -19,6 +19,7 @@ import type {
   Problem,
   RunResponse,
   Submission,
+  SubmissionDetail,
   SubmissionStreamEvent,
 } from '../src/lib/types';
 import { TestEventSource } from './helpers/event-source';
@@ -92,8 +93,9 @@ const created: CreateSubmissionResponse = {
   status: 'PENDING',
   created_at: user.created_at,
 };
-const official: Submission = {
+const official: SubmissionDetail = {
   ...created,
+  attempt_id: 'result-attempt',
   user_id: user.id,
   username: user.username,
   source_code: '// official source',
@@ -444,6 +446,57 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     expect(text()).toContain(official.compile_output);
     expect(text()).not.toContain('Verdict received');
     expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+  });
+
+  it('keeps a same-verdict attempt mismatch separate from Run and opens current history detail', async () => {
+    const pending = deferred<SubmissionDetail>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    await mount();
+    await click('Submit');
+    const source = TestEventSource.instances.at(-1)!;
+    await act(async () => source.emit('submission.completed', event()));
+    const current = {
+      ...official,
+      attempt_id: 'rejudge-attempt',
+      compile_output: 'current attempt diagnostics',
+    };
+    await act(async () => pending.resolve(current));
+    expect(panel().querySelector('[role="alert"]')?.textContent).toContain('another attempt');
+    expect(text()).not.toContain('current attempt diagnostics');
+    expect(observed.toast).not.toHaveBeenCalled();
+    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(fetchProgress).not.toHaveBeenCalledWith(user.id, true);
+    expect(submissionApi.listMine).not.toHaveBeenCalled();
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+
+    await click('Run');
+    expect(text()).toContain('All test cases passed');
+    expect(text()).not.toContain('another attempt');
+    await click('View submission result');
+    expect(text()).toContain('another attempt');
+    await click('View submissions');
+    expect(submissionApi.listMine).toHaveBeenCalledTimes(1);
+    vi.mocked(submissionApi.get).mockResolvedValueOnce(current);
+    const row = [...view!.container.querySelectorAll('button')].find((item) =>
+      item.textContent?.includes('#41'),
+    );
+    expect(row).toBeDefined();
+    await act(async () => row!.click());
+    expect(submissionApi.get).toHaveBeenLastCalledWith(41, expect.any(AbortSignal));
+    expect(
+      view!.container.querySelector('[aria-label="Submission detail"]')?.textContent,
+    ).toContain('current attempt diagnostics');
+    expect(text()).toContain('another attempt');
+    expect(invalidateProgress).not.toHaveBeenCalled();
+
+    await click('Retry detail');
+    expect(text()).toContain(official.compile_output);
+    expect(text()).not.toContain('another attempt');
+    expect(observed.toast).toHaveBeenCalledTimes(1);
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+    expect(fetchProgress).toHaveBeenLastCalledWith(user.id, true);
+    expect(submissionApi.listMine).toHaveBeenCalledTimes(2);
+    expect(submissionApi.get).toHaveBeenCalledTimes(3);
   });
 
   it.each(['network', 'unavailable'] as const)(

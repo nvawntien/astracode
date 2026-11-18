@@ -10,6 +10,7 @@ import type {
   Me,
   Problem,
   Submission,
+  SubmissionDetail,
   SubmissionStreamEvent,
 } from '../../../lib/types';
 import { nextSubmissionStatus, type SubmissionStatusSnapshot } from '../submissionStatus';
@@ -38,6 +39,28 @@ interface SubmissionOperations {
   terminalRequest: AbortController | null;
   manualRequest: AbortController | null;
   statusOrder: SubmissionStatusSnapshot | null;
+}
+
+const detailNotConfirmed = 'Submission details could not confirm a final result. Try again.';
+const attemptNotVerified =
+  'Submission details could not verify the judging attempt. Open Submissions for the current result.';
+const attemptMismatch =
+  'The latest submission details belong to another attempt. Open Submissions for the current result.';
+
+function readAttemptId(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function detailIdentityError(
+  id: number,
+  detailId: number,
+  expectedAttempt: string | null,
+  detailAttempt: string | null,
+): string {
+  if (detailId !== id) return detailNotConfirmed;
+  if (!detailAttempt) return attemptNotVerified;
+  if (expectedAttempt !== null && detailAttempt !== expectedAttempt) return attemptMismatch;
+  return '';
 }
 
 function abortDetailRequests(operations: SubmissionOperations) {
@@ -101,6 +124,7 @@ export function useSubmissionLifecycle({
   }, []);
 
   const accountId = user?.id ?? null;
+  const problemId = problem?.id;
   useLayoutEffect(() => {
     const operations = operationsRef.current;
     operations.mounted = true;
@@ -110,7 +134,7 @@ export function useSubmissionLifecycle({
       operations.mounted = false;
       invalidateOperations();
     };
-  }, [slug, accountId, invalidateOperations]);
+  }, [slug, problemId, accountId, invalidateOperations]);
 
   useEffect(() => {
     setActiveSubmissionId(null);
@@ -119,7 +143,7 @@ export function useSubmissionLifecycle({
     setSubmission(null);
     setLiveUpdateError('');
     setDetailFetchError('');
-  }, [slug]);
+  }, [slug, problemId]);
 
   useLayoutEffect(() => {
     setActiveSubmissionId(null);
@@ -137,8 +161,14 @@ export function useSubmissionLifecycle({
     (event: SubmissionStreamEvent) => {
       const operations = operationsRef.current;
       const generation = operations.generation;
-      if (!isCurrent(generation, event.submission_id) || operations.completed) return false;
-      const next = nextSubmissionStatus(operations.statusOrder, event);
+      if (
+        !isCurrent(generation, event.submission_id) ||
+        operations.completed ||
+        !readAttemptId(event.attempt_id)
+      )
+        return false;
+      const previous = operations.statusOrder;
+      const next = nextSubmissionStatus(previous, event);
       if (!next) {
         // Even a duplicate initial snapshot can establish the attempt identity.
         if (operations.statusOrder?.attemptId === null) {
@@ -146,15 +176,37 @@ export function useSubmissionLifecycle({
         }
         return false;
       }
+      const changedAttempt = previous?.attemptId != null && previous.attemptId !== next.attemptId;
       operations.statusOrder = next;
+      if (changedAttempt) {
+        abortDetailRequests(operations);
+        operations.terminalHandled = false;
+        setCheckingResult(false);
+        setDetailFetchError('');
+      }
       setSubmission((current) => {
         if (
           !isCurrent(generation, event.submission_id) ||
           operationsRef.current.completed ||
+          operationsRef.current.statusOrder?.attemptId !== next.attemptId ||
           !current ||
           current.id !== event.submission_id
         )
           return current;
+        if (changedAttempt) {
+          return {
+            ...current,
+            attempt_id: event.attempt_id,
+            status: next.status,
+            updated_at: next.updatedAt,
+            execution_time_ms: null,
+            memory_used_kb: null,
+            passed_testcases: null,
+            total_testcases: null,
+            compile_output: null,
+            error_message: null,
+          };
+        }
         if (current.status === next.status && current.updated_at === next.updatedAt) return current;
         return { ...current, status: next.status, updated_at: next.updatedAt };
       });
@@ -164,11 +216,13 @@ export function useSubmissionLifecycle({
   );
 
   const finishSubmissionFromDetail = useCallback(
-    (detail: Submission, generation: number) => {
+    (detail: SubmissionDetail, generation: number, attemptId: string) => {
       const operations = operationsRef.current;
       if (
         !isCurrent(generation, detail.id) ||
         operations.completed ||
+        operations.statusOrder?.attemptId !== attemptId ||
+        detail.attempt_id !== attemptId ||
         !isTerminalSubmissionStatus(detail.status)
       )
         return false;
@@ -189,16 +243,23 @@ export function useSubmissionLifecycle({
   );
 
   const fetchTerminalSubmissionDetail = useCallback(
-    async (id: number) => {
+    async (id: number, expectedAttempt: string) => {
       const operations = operationsRef.current;
       const generation = operations.generation;
-      if (!isCurrent(generation, id) || operations.completed || operations.terminalHandled) return;
+      if (
+        !isCurrent(generation, id) ||
+        operations.statusOrder?.attemptId !== expectedAttempt ||
+        operations.completed ||
+        operations.terminalHandled
+      )
+        return;
       operations.terminalHandled = true;
       operations.terminalRequest?.abort();
       const controller = new AbortController();
       operations.terminalRequest = controller;
       const ownsRequest = () =>
         isCurrent(generation, id) &&
+        operationsRef.current.statusOrder?.attemptId === expectedAttempt &&
         operationsRef.current.terminalRequest === controller &&
         !controller.signal.aborted &&
         !operationsRef.current.completed;
@@ -206,12 +267,18 @@ export function useSubmissionLifecycle({
       try {
         const detail = await submissionApi.get(id, controller.signal);
         if (!ownsRequest()) return;
-        if (!finishSubmissionFromDetail(detail, generation)) {
-          // HTTP detail has no attempt ID. Keep the SSE status/order and let an
-          // explicit retry check the result without consuming the completion latch.
+        const error = detailIdentityError(
+          id,
+          detail.id,
+          expectedAttempt,
+          readAttemptId(detail.attempt_id),
+        );
+        if (error || !finishSubmissionFromDetail(detail, generation, expectedAttempt)) {
+          // A rejected snapshot is recoverable without replacing the SSE order
+          // or consuming the completion latch.
           setSubmitting(false);
           setActiveSubmissionId(null);
-          setDetailFetchError('Submission details could not confirm a final result. Try again.');
+          setDetailFetchError(error || detailNotConfirmed);
         }
       } catch (err) {
         if (!ownsRequest()) return;
@@ -239,11 +306,14 @@ export function useSubmissionLifecycle({
     const generation = operations.generation;
     const id = submission.id;
     if (!isCurrent(generation, id) || operations.completed) return;
+    const expectedAtStart = operations.statusOrder?.attemptId ?? null;
     operations.manualRequest?.abort();
     const controller = new AbortController();
     operations.manualRequest = controller;
     const ownsRequest = () =>
       isCurrent(generation, id) &&
+      (expectedAtStart === null ||
+        operationsRef.current.statusOrder?.attemptId === expectedAtStart) &&
       operationsRef.current.manualRequest === controller &&
       !controller.signal.aborted &&
       !operationsRef.current.completed;
@@ -254,15 +324,27 @@ export function useSubmissionLifecycle({
     try {
       const latest = await submissionApi.get(id, controller.signal);
       if (!ownsRequest()) return;
+      const attemptId = readAttemptId(latest.attempt_id);
+      const currentAttempt = operations.statusOrder?.attemptId ?? null;
+      const error = detailIdentityError(id, latest.id, currentAttempt, attemptId);
+      if (error || !attemptId) {
+        setDetailFetchError(error || attemptNotVerified);
+        return;
+      }
+      // A manual read before SSE has pinned an attempt establishes a baseline
+      // for the current detail. If SSE pinned one while awaiting, it must match.
+      if (currentAttempt === null && operations.statusOrder) {
+        operations.statusOrder = { ...operations.statusOrder, attemptId };
+      }
       if (isTerminalSubmissionStatus(latest.status)) {
-        finishSubmissionFromDetail(latest, generation);
+        finishSubmissionFromDetail(latest, generation, attemptId);
       } else {
         // Reconcile against the synchronous latest order, not the submission
-        // captured when GET began. HTTP supplies no attempt ID, so it cannot
-        // establish a rejudge; terminal detail above retains its authority.
+        // captured when GET began. HTTP cannot switch a pinned attempt.
         const next = nextSubmissionStatus(operations.statusOrder, {
           status: latest.status,
           updated_at: latest.updated_at,
+          attempt_id: attemptId,
         });
         if (!next) return;
         operations.statusOrder = next;
@@ -293,7 +375,7 @@ export function useSubmissionLifecycle({
 
   const handleStreamTerminal = useCallback(
     (event: SubmissionStreamEvent) => {
-      void fetchTerminalSubmissionDetail(event.submission_id);
+      void fetchTerminalSubmissionDetail(event.submission_id, event.attempt_id);
     },
     [fetchTerminalSubmissionDetail],
   );
@@ -380,7 +462,10 @@ export function useSubmissionLifecycle({
         updated_at: created.created_at,
       });
       if (isTerminalSubmissionStatus(created.status)) {
-        void fetchTerminalSubmissionDetail(created.id);
+        // The create response supplies no attempt identity. Only an explicit
+        // current-detail check can establish a baseline for this fallback.
+        setSubmitting(false);
+        setDetailFetchError(attemptNotVerified);
       } else {
         setActiveSubmissionId(created.id);
       }

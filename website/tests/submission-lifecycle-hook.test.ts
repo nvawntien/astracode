@@ -4,7 +4,12 @@ import { act, createElement, StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSubmissionLifecycle } from '../src/features/problem-workspace/hooks/useSubmissionLifecycle';
 import { ApiError, NetworkError, submissionApi } from '../src/lib/api';
-import type { CreateSubmissionResponse, Submission, SubmissionStreamEvent } from '../src/lib/types';
+import type {
+  CreateSubmissionResponse,
+  Submission,
+  SubmissionDetail,
+  SubmissionStreamEvent,
+} from '../src/lib/types';
 import { TestEventSource } from './helpers/event-source';
 import { deferred, renderReact } from './helpers/react-dom';
 
@@ -19,8 +24,9 @@ const created = {
   status: 'PENDING' as const,
   created_at: '2026-11-17T01:00:00Z',
 };
-const detail: Submission = {
+const detail: SubmissionDetail = {
   ...created,
+  attempt_id: 'fixture-attempt',
   user_id: 'fixture-user',
   username: 'fixture-user',
   source_code: 'fixture source',
@@ -161,6 +167,164 @@ describe('submission hook callback boundaries with real React', () => {
       language: 'JAVA',
       source_code: 'new source\n',
     });
+  });
+});
+
+describe('attempt-correlated completion', () => {
+  it.each([
+    ['pending B', { attempt_id: 'attempt-b', status: 'PENDING' }, 'another attempt'],
+    ['terminal B with same verdict', { attempt_id: 'attempt-b' }, 'another attempt'],
+    [
+      'terminal B with different verdict',
+      { attempt_id: 'attempt-b', status: 'WRONG_ANSWER' },
+      'another attempt',
+    ],
+    ['old backend', {}, 'could not verify'],
+    ['legacy null', { attempt_id: null }, 'could not verify'],
+    ['empty identity', { attempt_id: '' }, 'could not verify'],
+    ['blank identity', { attempt_id: '  ' }, 'could not verify'],
+    ['wrong identity type', { attempt_id: 99 }, 'could not verify'],
+    [
+      'wrong submission',
+      { attempt_id: 'fixture-attempt', id: 99 },
+      'could not confirm a final result',
+    ],
+  ] as const)(
+    'rejects %s and allows one matching manual completion',
+    async (_name, patch, message) => {
+      const props = options();
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await mountHook(props, true);
+      await act(async () => latest.submit());
+      await deliverTerminal();
+      const notified = latest.submission;
+      const unverified: SubmissionDetail = { ...detail };
+      delete unverified.attempt_id;
+      await act(async () => pending.resolve({ ...unverified, ...patch }));
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(props.showToast).not.toHaveBeenCalled();
+      expect(latest.submission).toBe(notified);
+      expect(latest.submitting).toBe(false);
+      expect(latest.detailFetchError).toContain(message);
+
+      const matching = { ...detail, attempt_id: 'fixture-attempt' };
+      vi.mocked(submissionApi.get).mockResolvedValueOnce(matching);
+      await act(async () => latest.checkResultOnce());
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(matching);
+      expect(latest.submission).toEqual(matching);
+      expect(latest.detailFetchError).toBe('');
+      await act(async () => latest.checkResultOnce());
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(TestEventSource.instances).toHaveLength(1);
+    },
+  );
+
+  it('does not let a hand-checked terminal B complete a pinned attempt A', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const source = TestEventSource.instances[0];
+    await act(async () =>
+      source.emit('submission.snapshot', {
+        submission_id: 41,
+        attempt_id: 'fixture-attempt',
+        status: 'JUDGING',
+        updated_at: detail.updated_at,
+      }),
+    );
+    const current = latest.submission;
+    const mismatched = { ...detail, attempt_id: 'attempt-b' };
+    vi.mocked(submissionApi.get).mockResolvedValueOnce(mismatched);
+    await act(async () => latest.checkResultOnce());
+    expect(latest.submission).toBe(current);
+    expect(latest.detailFetchError).toContain('another attempt');
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(source.closed).toBe(false);
+  });
+
+  it('uses an owned manual terminal read as current detail before SSE has delivered an attempt', async () => {
+    const props = options();
+    await mountHook(props);
+    await pendingRecovery();
+    await act(async () => latest.checkResultOnce());
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(latest.submission).toEqual(detail);
+  });
+
+  it('pins even duplicate pending HTTP status as the baseline and refuses a later HTTP attempt switch', async () => {
+    const props = options();
+    await mountHook(props);
+    await pendingRecovery();
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({
+      ...detail,
+      status: 'PENDING',
+      updated_at: created.created_at,
+    });
+    await act(async () => latest.checkResultOnce());
+    const pending = latest.submission;
+    expect(pending?.status).toBe('PENDING');
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, attempt_id: 'attempt-b' });
+    await act(async () => latest.checkResultOnce());
+    expect(latest.submission).toBe(pending);
+    expect(latest.detailFetchError).toContain('another attempt');
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    await act(async () => latest.checkResultOnce());
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+  });
+
+  it.each([true, false])(
+    'checks an unbound GET against the first SSE pin (match=%s)',
+    async (match) => {
+      const props = options();
+      const pending = deferred<SubmissionDetail>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const check = await startCheck();
+      const source = TestEventSource.instances[0];
+      await act(async () =>
+        source.emit('submission.snapshot', {
+          submission_id: 41,
+          attempt_id: 'fixture-attempt',
+          status: 'PENDING',
+          updated_at: created.created_at,
+        }),
+      );
+      const response = { ...detail, attempt_id: match ? 'fixture-attempt' : 'attempt-b' };
+      await act(async () => {
+        pending.resolve(response);
+        await check.done;
+      });
+      if (match) {
+        expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(response);
+        expect(latest.submission).toEqual(response);
+      } else {
+        expect(props.onCompleted).not.toHaveBeenCalled();
+        expect(latest.detailFetchError).toContain('another attempt');
+        expect(latest.submission?.status).toBe('PENDING');
+        expect(source.closed).toBe(false);
+      }
+    },
+  );
+
+  it('ignores a late terminal GET after a new Submit in the same account and problem', async () => {
+    const props = options();
+    const pending = deferred<SubmissionDetail>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    await mountHook(props);
+    await pendingRecovery();
+    await act(async () => latest.stream.reconnect());
+    await deliverTerminal();
+    const [, signal] = vi.mocked(submissionApi.get).mock.calls[0];
+    vi.mocked(submissionApi.create).mockResolvedValueOnce({ ...created, id: 42 });
+    await act(async () => latest.submit());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(detail));
+    expect(latest.submission).toMatchObject({ id: 42, status: 'PENDING' });
+    expect(latest.submitting).toBe(true);
+    expect(latest.detailFetchError).toBe('');
+    expect(props.onCompleted).not.toHaveBeenCalled();
   });
 });
 
@@ -497,7 +661,7 @@ describe('manual HTTP and SSE status reconciliation', () => {
     },
   );
 
-  it('uses the same terminal requirement after an immediate-terminal create response', async () => {
+  it('requires an explicit current-detail check after an unbound terminal create response', async () => {
     const props = options();
     vi.mocked(submissionApi.create).mockResolvedValueOnce({ ...created, status: 'ACCEPTED' });
     vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, status: 'PENDING' });
@@ -505,7 +669,11 @@ describe('manual HTTP and SSE status reconciliation', () => {
     await act(async () => latest.submit());
     expect(props.onCompleted).not.toHaveBeenCalled();
     expect(latest.submitting).toBe(false);
-    expect(latest.detailFetchError).toMatch(/could not confirm a final result/i);
+    expect(latest.detailFetchError).toContain('could not verify');
+    expect(submissionApi.get).not.toHaveBeenCalled();
+    await act(async () => latest.checkResultOnce());
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(latest.detailFetchError).toContain('could not verify');
     await act(async () => latest.checkResultOnce());
     expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
     expect(submissionApi.get).toHaveBeenCalledTimes(2);
@@ -526,7 +694,7 @@ describe('manual HTTP and SSE status reconciliation', () => {
     expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
   });
 
-  it.each(['account', 'slug', 'unmount'] as const)(
+  it.each(['account', 'slug', 'problem id', 'logout', 'unmount'] as const)(
     'ignores an obsolete nonterminal detail after %s even when HTTP resolves after abort',
     async (kind) => {
       const props = options();
@@ -536,58 +704,91 @@ describe('manual HTTP and SSE status reconciliation', () => {
       await act(async () => latest.submit());
       await deliverTerminal();
       const [, signal] = vi.mocked(submissionApi.get).mock.calls[0];
-      await invalidateContext(kind, props);
+      if (kind === 'problem id') {
+        await view!.rerender(createElement(Probe, { ...props, problem: { id: 2 } }));
+      } else {
+        await invalidateContext(kind, props);
+      }
       expect(signal?.aborted).toBe(true);
-      if (kind !== 'unmount') {
+      if (kind !== 'unmount' && kind !== 'logout') {
         vi.mocked(submissionApi.create).mockResolvedValueOnce({
           ...created,
           id: 42,
-          problem_id: kind === 'slug' ? 2 : 1,
+          problem_id: kind === 'slug' || kind === 'problem id' ? 2 : 1,
         });
         await act(async () => latest.submit());
       }
       await act(async () => pending.resolve({ ...detail, status: 'PENDING' }));
       expect(props.onCompleted).not.toHaveBeenCalled();
       expect(latest.detailFetchError).toBe('');
-      if (kind !== 'unmount') {
+      if (kind !== 'unmount' && kind !== 'logout') {
         expect(latest.submitting).toBe(true);
         expect(latest.submission).toMatchObject({ id: 42, status: 'PENDING' });
       }
     },
   );
 
-  it('cannot distinguish a late terminal HTTP snapshot from the attempt adopted on reconnect', async () => {
-    const props = options();
-    await mountHook(props);
-    await act(async () => latest.submit());
-    await act(async () =>
-      TestEventSource.instances[0].emit('submission.snapshot', statusEvent('JUDGING')),
-    );
-    expect(latest.submission?.status).toBe('JUDGING');
-    await disconnectStream();
-    const pending = deferred<Submission>();
-    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
-    const check = await startCheck();
-    await act(async () => latest.stream.reconnect());
-    const source = TestEventSource.instances.at(-1)!;
-    await act(async () =>
-      source.emit('submission.snapshot', {
-        ...statusEvent('PENDING', later),
-        attempt_id: 'attempt-b',
-      }),
-    );
-    expect(latest.submission).toMatchObject({ status: 'PENDING', updated_at: later });
+  it.each(['resolve', 'reject'] as const)(
+    'ignores a superseded A request that later %ss after reconnect adopts B',
+    async (outcome) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      await act(async () =>
+        TestEventSource.instances[0].emit('submission.snapshot', statusEvent('JUDGING')),
+      );
+      expect(latest.submission?.status).toBe('JUDGING');
+      await disconnectStream();
+      vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, status: 'JUDGING' });
+      await act(async () => latest.checkResultOnce());
+      expect(latest.submission?.execution_time_ms).toBe(detail.execution_time_ms);
+      const pending = deferred<SubmissionDetail>();
+      const pendingB = deferred<SubmissionDetail>();
+      vi.mocked(submissionApi.get)
+        .mockReturnValueOnce(pending.promise)
+        .mockReturnValueOnce(pendingB.promise);
+      const check = await startCheck();
+      const signalA = vi.mocked(submissionApi.get).mock.calls.at(-1)?.[1];
+      await act(async () => latest.stream.reconnect());
+      const source = TestEventSource.instances.at(-1)!;
+      await act(async () =>
+        source.emit('submission.snapshot', {
+          ...statusEvent('PENDING', later),
+          attempt_id: 'attempt-b',
+        }),
+      );
+      expect(latest.submission).toMatchObject({
+        status: 'PENDING',
+        updated_at: later,
+        execution_time_ms: null,
+        passed_testcases: null,
+      });
+      expect(signalA?.aborted).toBe(true);
+      expect(latest.checkingResult).toBe(false);
+      const checkB = await startCheck();
+      const signalB = vi.mocked(submissionApi.get).mock.calls.at(-1)?.[1];
 
-    // This DTO could be a delayed terminal read of A or a final read of B.
-    // The current policy accepts an owned terminal GET without proving its attempt.
-    await act(async () => {
-      pending.resolve(detail);
-      await check.done;
-    });
-    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
-    expect(latest.submission).toEqual(detail);
-    expect(source.closed).toBe(true);
-  });
+      await act(async () => {
+        if (outcome === 'resolve') pending.resolve(detail);
+        else pending.reject(new ApiError('old attempt A error', 503, 50300));
+        await check.done;
+      });
+      expect(latest.submission).toMatchObject({ status: 'PENDING', updated_at: later });
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(latest.detailFetchError).toBe('');
+      expect(latest.checkingResult).toBe(true);
+      expect(signalB?.aborted).toBe(false);
+      expect(source.closed).toBe(false);
+      const completed = { ...detail, attempt_id: 'attempt-b' };
+      await act(async () => {
+        pendingB.resolve(completed);
+        await checkB.done;
+      });
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(completed);
+      expect(latest.submission).toEqual(completed);
+      expect(source.closed).toBe(true);
+    },
+  );
 
   it('does not track a later rejudge automatically after completing the current lifecycle', async () => {
     const props = options();

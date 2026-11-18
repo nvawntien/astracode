@@ -18,6 +18,7 @@ import type {
   Me,
   Problem,
   Submission,
+  SubmissionDetail,
   SubmissionListItem,
 } from '../src/lib/types';
 import { TestEventSource } from './helpers/event-source';
@@ -100,6 +101,7 @@ function detail(status: Submission['status'] = 'ACCEPTED'): Submission {
     updated_at: accountA.updated_at,
   };
 }
+const currentDetail: SubmissionDetail = { ...detail(), attempt_id: 'progress-attempt' };
 function history(items: SubmissionListItem[] = []): ListSubmissionsResponse {
   return { items, pagination: { page: 1, limit: 100, total: items.length, total_pages: 1 } };
 }
@@ -189,7 +191,7 @@ beforeEach(async () => {
     ),
   );
   vi.spyOn(submissionApi, 'create').mockResolvedValue(detail('PENDING'));
-  vi.spyOn(submissionApi, 'get').mockResolvedValue(detail());
+  vi.spyOn(submissionApi, 'get').mockResolvedValue(currentDetail);
   vi.spyOn(submissionApi, 'issueStreamTicket').mockResolvedValue({
     ticket: 'fixture-ticket',
     expires_at: accountA.updated_at,
@@ -421,16 +423,18 @@ describe('submission completion with the real progress cache', () => {
         TestEventSource.instances.at(-1)!.raw('submission.updated', '{invalid'),
       );
       await click('Check result');
+      await click('Reconnect');
       await act(async () => {
         terminal();
         terminal();
       });
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
       observed.progressStatus = 'ACCEPTED';
       await act(async () => {
-        (order === 'manual first' ? manualDetail : terminalDetail).resolve(detail());
+        (order === 'manual first' ? manualDetail : terminalDetail).resolve(currentDetail);
       });
       await act(async () => {
-        (order === 'manual first' ? terminalDetail : manualDetail).resolve(detail());
+        (order === 'manual first' ? terminalDetail : manualDetail).resolve(currentDetail);
       });
       expect(request(accountA.id)).not.toBe(oldCache);
       expect(progressCalls()).toHaveLength(2);
@@ -452,7 +456,7 @@ describe('submission completion with the real progress cache', () => {
     await account(accountB);
     expect(progressCalls()).toHaveLength(2);
     const b = request(accountB.id);
-    await act(async () => terminalDetail.resolve(detail()));
+    await act(async () => terminalDetail.resolve(currentDetail));
     expect(request(accountB.id)).toBe(b);
     expect(status()).toBe('Not attempted');
     expect(progressCalls()).toHaveLength(2);

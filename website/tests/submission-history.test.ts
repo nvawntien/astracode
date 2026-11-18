@@ -20,6 +20,7 @@ import type {
   Submission,
   SubmissionListItem,
 } from '../src/lib/types';
+import { TestEventSource } from './helpers/event-source';
 import { deferred, renderReact } from './helpers/react-dom';
 
 // Keep the route, ProblemPanel, history, detail, polling and feature hooks real.
@@ -626,13 +627,39 @@ describe('current-account history/detail behavior', () => {
   });
 
   it('refreshes current-account history and clears selection after official completion', async () => {
+    TestEventSource.instances = [];
+    vi.stubGlobal('EventSource', TestEventSource);
+    vi.spyOn(submissionApi, 'issueStreamTicket').mockResolvedValue({
+      ticket: 'fixture-ticket',
+      expires_at: accountA.updated_at,
+    });
+    vi.mocked(submissionApi.create).mockResolvedValueOnce({
+      id: 103,
+      problem_id: 1,
+      problem_title: problem.title,
+      language: 'CPP',
+      status: 'PENDING',
+      created_at: accountA.created_at,
+    });
     vi.mocked(submissionApi.listMine).mockImplementation(async (params) =>
       history([detail(params?.page === 2 ? 102 : 101)], params?.page, 2),
     );
     await mount();
     await click('Next');
     await openDetail(102);
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({
+      ...detail(103),
+      attempt_id: 'history-attempt',
+    });
     await click('Submit');
+    await act(async () =>
+      TestEventSource.instances[0].emit('submission.completed', {
+        submission_id: 103,
+        attempt_id: 'history-attempt',
+        status: 'ACCEPTED',
+        updated_at: accountA.updated_at,
+      }),
+    );
     expect(historyPane().textContent).toContain('Page 1 / 2');
     expect(historyPane().querySelector('[aria-label="Submission detail"]')).toBeNull();
     expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({

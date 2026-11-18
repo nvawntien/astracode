@@ -22,6 +22,7 @@ import type {
   Problem,
   RunResponse,
   Submission,
+  SubmissionDetail,
   SubmissionStreamEvent,
 } from '../src/lib/types';
 import { TestEventSource } from './helpers/event-source';
@@ -130,9 +131,10 @@ function created(overrides: Partial<CreateSubmissionResponse> = {}): CreateSubmi
     ...overrides,
   };
 }
-function detail(overrides: Partial<Submission> = {}): Submission {
+function detail(overrides: Partial<SubmissionDetail> = {}): SubmissionDetail {
   return {
     ...created(),
+    attempt_id: 'fixture-attempt',
     user_id: user.id,
     username: user.username,
     source_code: sourceCode,
@@ -383,17 +385,21 @@ describe('official submission guards, creation and completion with real React', 
     expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
   });
 
-  it('immediately fetches details for terminal creation without requesting an SSE ticket', async () => {
+  it('offers manual current-detail recovery for terminal creation without an attempt ID', async () => {
     vi.mocked(submissionApi.create).mockResolvedValue(created({ status: 'ACCEPTED' }));
     const pending = deferred<Submission>();
     vi.mocked(submissionApi.get).mockReturnValue(pending.promise);
     await mount();
     expect(observed.problem).toMatchObject({ solved: false, attempted: false });
     await click('Submit');
-    expect(state().submitting).toBe(true);
-    expect(submissionApi.get).toHaveBeenCalledExactlyOnceWith(41, expect.any(AbortSignal));
+    expect(state().submitting).toBe(false);
+    expect(submissionApi.get).not.toHaveBeenCalled();
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
     expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+    expect(observed.toast).not.toHaveBeenCalled();
+    expect(invalidateProgress).not.toHaveBeenCalled();
+    await click('Retry detail');
+    expect(submissionApi.get).toHaveBeenCalledExactlyOnceWith(41, expect.any(AbortSignal));
     await act(async () => pending.resolve(detail()));
     expect(state()).toMatchObject({
       submitting: false,
@@ -1363,7 +1369,7 @@ describe('SSE status ordering', () => {
         await act(async () => source.emit('submission.completed', { ...next, status: 'ACCEPTED' }));
       }
       expect(submissionApi.get).toHaveBeenCalledTimes(1);
-      await act(async () => pending.resolve(detail()));
+      await act(async () => pending.resolve(detail({ attempt_id: next.attempt_id })));
       expect(observed.problem!.historyRefreshKey).toBe(1);
       expect(invalidateProgress).toHaveBeenCalledTimes(1);
     },
@@ -1397,7 +1403,9 @@ describe('SSE status ordering', () => {
         );
       });
       expect(state().submission).toMatchObject({ id: 42, status: 'JUDGING' });
-      vi.mocked(submissionApi.get).mockResolvedValue(detail({ id: 42 }));
+      vi.mocked(submissionApi.get).mockResolvedValue(
+        detail({ id: 42, attempt_id: 'fixture-next' }),
+      );
       await act(async () =>
         source.emit(
           'submission.completed',

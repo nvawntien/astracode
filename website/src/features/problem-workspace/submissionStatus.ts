@@ -13,9 +13,8 @@ interface SubmissionStatusUpdate {
   attempt_id?: string;
 }
 
-// Only a transport-validated SSE identity can establish a different attempt.
-// HTTP detail lacks that identity: conservatively compare it with the current
-// progression. This cannot distinguish stale snapshots from a new rejudge.
+// The lifecycle validates attempt ownership before reconciliation. Only SSE
+// may switch a pinned attempt. An initial owned HTTP read may establish one.
 export function nextSubmissionStatus(
   current: SubmissionStatusSnapshot | null,
   event: SubmissionStatusUpdate,

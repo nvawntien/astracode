@@ -156,16 +156,14 @@ export function ResultPanel({
             >
               {checkingResult ? 'Checking…' : detailFetchError ? 'Retry detail' : 'Check result'}
             </button>
-            {liveUpdateError && (
-              <button
-                type="button"
-                onClick={onOpenSubmissions}
-                className="ac-hover-surface2"
-                style={smallActionButton}
-              >
-                View submissions
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onOpenSubmissions}
+              className="ac-hover-surface2"
+              style={smallActionButton}
+            >
+              View submissions
+            </button>
           </div>
         )}
       </div>
@@ -197,6 +195,14 @@ export function ResultPanel({
             style={{ ...smallActionButton, opacity: checkingResult ? 0.6 : 1 }}
           >
             {checkingResult ? 'Checking…' : 'Retry detail'}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenSubmissions}
+            className="ac-hover-surface2"
+            style={smallActionButton}
+          >
+            View submissions
           </button>
         </div>
       </div>

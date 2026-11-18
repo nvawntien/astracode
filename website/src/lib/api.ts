@@ -32,7 +32,7 @@ import type {
   RejudgeAdminSubmissionResponse,
   RunCodeRequest,
   RunResponse,
-  Submission,
+  SubmissionDetail,
   SubmissionStreamTicketResponse,
   UpdateAdminProblemRequest,
   UpdateAdminTagRequest,
@@ -441,7 +441,7 @@ export const submissionApi = {
     apiRequest<CreateSubmissionResponse>('/api/v1/submissions', { method: 'POST', body }),
 
   get: (id: number, signal?: AbortSignal) =>
-    apiRequest<Submission>(`/api/v1/submissions/${id}`, { signal }),
+    apiRequest<SubmissionDetail>(`/api/v1/submissions/${id}`, { signal }),
 
   issueStreamTicket: (id: number, signal?: AbortSignal) =>
     apiRequest<SubmissionStreamTicketResponse>(`/api/v1/submissions/${id}/events/ticket`, {

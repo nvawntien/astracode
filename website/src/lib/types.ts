@@ -438,7 +438,10 @@ export interface AdminUserListResponse {
   pagination: Pagination;
 }
 
-export type SubmissionDetail = Submission;
+export type SubmissionDetail = Submission & {
+  // Older servers may omit this. Legacy submissions can have no attempt ID.
+  attempt_id?: string | null;
+};
 
 export interface Pagination {
   page: number;

@@ -1364,9 +1364,11 @@ describe('workspace layout coordination with feature actions', () => {
 
   it('View submissions selects the problem history and stacked Problem view without route navigation', async () => {
     vi.mocked(submissionApi.create).mockResolvedValueOnce(created);
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, attempt_id: 'layout-attempt' });
     await mount(700);
     await click('Code');
     await click('Submit');
+    await click('Retry detail');
     await click('View all submissions');
     expectSelected('Problem');
     expect(problemPane()?.style.width).toBe('100%');
