@@ -45,7 +45,10 @@ import { useSubmissionLifecycle } from '@/features/problem-workspace/hooks/useSu
 import { useWorkspaceGeometry } from '@/features/problem-workspace/hooks/useWorkspaceGeometry';
 
 type BottomTab = 'tests' | 'console' | 'result';
-type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
+type ProblemLoadResult =
+  | { status: 'ready'; problem: Problem }
+  | { status: 'notfound' }
+  | { status: 'error'; message: string };
 type ResultSelection = { owner: string; source: ResultSource };
 
 export default function WorkspacePage() {
@@ -64,38 +67,50 @@ export default function WorkspacePage() {
 
   /* -------------------------------------------------------------- problem */
 
-  const [problem, setProblem] = useState<Problem | null>(null);
-  const [loadState, setLoadState] = useState<LoadState>('loading');
-  const [loadError, setLoadError] = useState<string>('');
+  // A return to an earlier slug starts a new visit, even if no other problem
+  // finished loading in between. Only this visit's result can drive the workspace.
+  const problemScope = useMemo(() => ({ slug }), [slug]);
+  const [problemLoad, setProblemLoad] = useState<{
+    scope: typeof problemScope;
+    result: ProblemLoadResult;
+  } | null>(null);
+  const problemResult = problemLoad?.scope === problemScope ? problemLoad.result : null;
+  const problem = problemResult?.status === 'ready' ? problemResult.problem : null;
   const [tab, setTab] = useState<ProblemTab>('description');
 
-  useEffect(() => {
-    if (!slug) return;
+  useLayoutEffect(() => {
+    if (!problemScope.slug) return;
     const controller = new AbortController();
-    setLoadState('loading');
+    let active = true;
+
+    const settle = (result: ProblemLoadResult) => {
+      if (!active) return;
+      // A response can queue a state update before navigation commits.
+      setProblemLoad((current) => (active ? { scope: problemScope, result } : current));
+    };
 
     problemApi
-      .bySlug(slug, controller.signal)
-      .then((res) => {
-        setProblem(res);
-        setLoadState('ready');
-      })
+      .bySlug(problemScope.slug, controller.signal)
+      .then((problem) => settle({ status: 'ready', problem }))
       .catch((err) => {
-        if (controller.signal.aborted) return;
         if (err instanceof ApiError && err.isNotFound) {
-          setLoadState('notfound');
+          settle({ status: 'notfound' });
         } else {
-          setLoadError(
-            err instanceof NetworkError
-              ? 'AstraCode is temporarily unreachable. Check your connection and try again.'
-              : 'This problem could not be loaded.',
-          );
-          setLoadState('error');
+          settle({
+            status: 'error',
+            message:
+              err instanceof NetworkError
+                ? 'AstraCode is temporarily unreachable. Check your connection and try again.'
+                : 'This problem could not be loaded.',
+          });
         }
       });
 
-    return () => controller.abort();
-  }, [slug]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [problemScope]);
 
   /* ------------------------------------------------------------- progress */
 
@@ -422,7 +437,7 @@ export default function WorkspacePage() {
 
   /* -------------------------------------------------------------- render */
 
-  if (loadState === 'loading' || (authLoading && !problem)) {
+  if (!problemResult || (authLoading && !problem)) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
         <Header />
@@ -431,7 +446,7 @@ export default function WorkspacePage() {
     );
   }
 
-  if (loadState === 'notfound') {
+  if (problemResult.status === 'notfound') {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
         <Header />
@@ -440,7 +455,7 @@ export default function WorkspacePage() {
     );
   }
 
-  if (loadState === 'error' || !problem) {
+  if (problemResult.status === 'error' || !problem) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
         <Header />
@@ -456,7 +471,7 @@ export default function WorkspacePage() {
               fontFamily: 'var(--font-mono)',
             }}
           >
-            {loadError}
+            {problemResult.status === 'error' ? problemResult.message : ''}
           </p>
           <Link href="/problems" style={{ fontSize: 13, fontWeight: 600 }}>
             ← Back to problems
