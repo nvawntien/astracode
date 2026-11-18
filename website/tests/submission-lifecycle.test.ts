@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, createElement, StrictMode, type ComponentProps, type ReactNode } from 'react';
+import {
+  act,
+  createElement,
+  StrictMode,
+  useLayoutEffect,
+  type ComponentProps,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspacePage from '../src/app/problems/[slug]/page';
 import { ApiError, NetworkError, problemApi, submissionApi } from '../src/lib/api';
@@ -1429,5 +1436,160 @@ describe('SSE status ordering', () => {
     expect(state().submission).toEqual(detail());
     expect(invalidateProgress).toHaveBeenCalledTimes(1);
     expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+  });
+});
+
+describe('Workspace Run ownership and action guards', () => {
+  const runOutput: RunResponse = {
+    status: 'completed',
+    compile_output: '',
+    diagnostics: [
+      {
+        kind: 'runtime',
+        severity: 'error',
+        message: 'obsolete Run diagnostic',
+        line: 4,
+        column: 1,
+      },
+    ],
+    tests: [
+      {
+        id: 'sample-1',
+        kind: 'sample',
+        status: 'runtime_error',
+        stdout: 'obsolete Run output',
+        stderr: 'old panic',
+        expected_output: '1',
+        execution_time_ms: 1,
+        memory_used_kb: 1,
+        diagnostics: [],
+      },
+    ],
+  };
+
+  it('ignores pending A output, diagnostics and testcase selection after a slug change', async () => {
+    const pending = deferred<RunResponse>();
+    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+    await mount();
+    await click('Run');
+    observed.slug = 'another-problem';
+    await rerender();
+    await click('Tests (1)');
+    await click('+ Add case');
+    const selected = view!.container.querySelector(
+      'textarea[aria-label="Test input for Custom 1"]',
+    );
+    expect(selected).not.toBeNull();
+    await act(async () => pending.resolve(runOutput));
+    expect(observed.editor!.diagnostics).toEqual([]);
+    expect(observed.editor!.highlightLine).toBeNull();
+    expect(view!.container.textContent).not.toContain('obsolete Run diagnostic');
+    // A stale first-failure callback would select the sample and hide this input.
+    expect(view!.container.querySelector('textarea[aria-label="Test input for Custom 1"]')).toBe(
+      selected,
+    );
+    await click('Result');
+    expect(state().runResult).toBeNull();
+    expect(state().running).toBe(false);
+    await click('Console');
+    expect(view!.container.textContent).not.toContain('obsolete Run output');
+    await click('Run');
+    expect(submissionApi.run).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides completed Run result and editor markers in B first commit while preserving the editor', async () => {
+    const commits: {
+      diagnostics: ComponentProps<typeof CodeEditor>['diagnostics'];
+      line: number | null | undefined;
+      run: RunResponse | null | undefined;
+    }[] = [];
+    function OutputObserver() {
+      useLayoutEffect(() => {
+        commits.push({
+          diagnostics: observed.editor?.diagnostics,
+          line: observed.editor?.highlightLine,
+          run: observed.result?.runResult,
+        });
+      });
+      return createElement(WorkspacePage);
+    }
+    vi.mocked(submissionApi.run).mockResolvedValue(runOutput);
+    view = await renderReact(createElement(OutputObserver));
+    await click('Run');
+    expect(observed.editor!.diagnostics).toEqual(runOutput.diagnostics);
+    expect(observed.editor!.highlightLine).toBe(4);
+    const editor = view.container.querySelector('textarea');
+    observed.user = { ...user, id: 'account-b', username: 'account-b' };
+    await view.rerender(createElement(OutputObserver));
+    expect(commits.at(-1)).toEqual({ diagnostics: [], line: null, run: null });
+    expect(view.container.querySelector('textarea')).toBe(editor);
+    expect(observed.editor!.value).toBe(sourceCode);
+    await click('Console');
+    expect(view.container.textContent).not.toContain('obsolete Run output');
+  });
+
+  it.each(['ctrl', 'meta'] as const)(
+    'blocks button and %s keyboard Run during manual checking, then permits one Run',
+    async (modifier) => {
+      await mount();
+      await click('Submit');
+      await disconnect();
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await click('Check result');
+      const runButton = [...view!.container.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Run',
+      )!;
+      expect(runButton.disabled).toBe(true);
+      await act(async () => runButton.click());
+      await shortcut(false, modifier);
+      expect(submissionApi.run).not.toHaveBeenCalled();
+      expect(state().checkingResult).toBe(true);
+      await act(async () => pending.resolve(detail({ status: 'JUDGING' })));
+      await shortcut(false, modifier);
+      expect(submissionApi.run).toHaveBeenCalledTimes(1);
+      expect(submissionApi.create).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('preserves authenticated current-scope Run diagnostics, first failure and language/source payload', async () => {
+    vi.mocked(submissionApi.run).mockResolvedValue(runOutput);
+    await mount();
+    await click('Tests (1)');
+    await click('+ Add case');
+    await act(async () => observed.editor!.onChange('current source\n'));
+    await shortcut(false);
+    expect(observed.editor!.diagnostics).toEqual(runOutput.diagnostics);
+    expect(observed.editor!.highlightLine).toBe(4);
+    expect(vi.mocked(submissionApi.run).mock.calls[0][0]).toMatchObject({
+      language: 'CPP',
+      source_code: 'current source\n',
+    });
+    await click('Tests (2)');
+    expect(
+      view!.container.querySelector('textarea[aria-label="Test input for Custom 1"]'),
+    ).toBeNull();
+    await click('Submit');
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
+      problem_id: 1,
+      language: 'CPP',
+      source_code: 'current source\n',
+    });
+    expect(observed.editor!.diagnostics).toEqual([]);
+  });
+
+  it('preserves guest login redirect and offline keyboard Run guards', async () => {
+    observed.user = null;
+    await mount();
+    await click('Run');
+    expect(submissionApi.run).not.toHaveBeenCalled();
+    expect(observed.push).toHaveBeenCalledExactlyOnceWith('/login?next=/problems/fixture-problem');
+    expect(observed.toast).toHaveBeenCalledWith('Sign in to run code', 'error');
+    observed.user = user;
+    await rerender();
+    await act(async () => window.dispatchEvent(new Event('offline')));
+    await shortcut(false);
+    expect(submissionApi.run).not.toHaveBeenCalled();
+    expect(observed.toast).toHaveBeenCalledWith('You appear to be offline', 'error');
   });
 });

@@ -468,6 +468,6 @@ export const submissionApi = {
     apiRequest<MyProfileStats>(`/api/v1/users/${encodeURIComponent(username)}/profile-stats`, { signal }),
 
   /** Custom-test execution through the submission-service synchronous run API. */
-  run: (body: RunCodeRequest) =>
-    apiRequest<RunResponse>(RUN_ENDPOINT, { method: 'POST', body }),
+  run: (body: RunCodeRequest, signal?: AbortSignal) =>
+    apiRequest<RunResponse>(RUN_ENDPOINT, { method: 'POST', body, signal }),
 };

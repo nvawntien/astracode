@@ -157,8 +157,14 @@ export default function WorkspacePage() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
-  const [jumpLine, setJumpLine] = useState<number | null>(null);
-  const [codeDiagnostics, setCodeDiagnostics] = useState<CodeDiagnostic[]>([]);
+  const runOwner = JSON.stringify([slug, problemId, accountId]);
+  const [jumpTarget, setJumpTarget] = useState<{ owner: string; line: number } | null>(null);
+  const [diagnosticSnapshot, setDiagnosticSnapshot] = useState<{
+    owner: string;
+    items: CodeDiagnostic[];
+  } | null>(null);
+  const jumpLine = jumpTarget?.owner === runOwner ? jumpTarget.line : null;
+  const codeDiagnostics = diagnosticSnapshot?.owner === runOwner ? diagnosticSnapshot.items : [];
   const [fullscreen, setFullscreen] = useState(false);
   const [restoreSubmissionCandidate, setRestoreSubmission] = useState<SubmissionDetail | null>(
     null,
@@ -188,11 +194,10 @@ export default function WorkspacePage() {
   } = useEditorPreferences();
 
   // Diagnostics belong to execution; only draft/preferences state moves into hooks.
-  useEffect(() => {
-    if (!problem) return;
-    setCodeDiagnostics([]);
-    setJumpLine(null);
-  }, [problem, language]);
+  useLayoutEffect(() => {
+    setDiagnosticSnapshot(null);
+    setJumpTarget(null);
+  }, [problem, language, runOwner]);
 
   const { code, setCode, draftSavedAt, resetCode, restoreDraft } = useEditorDraft({
     problem,
@@ -202,8 +207,8 @@ export default function WorkspacePage() {
 
   const changeLanguage = (next: LanguageCode) => {
     changeEditorLanguage(next);
-    setCodeDiagnostics([]);
-    setJumpLine(null);
+    setDiagnosticSnapshot(null);
+    setJumpTarget(null);
   };
 
   const restoreSubmissionCode = useCallback(
@@ -216,8 +221,8 @@ export default function WorkspacePage() {
       }
 
       restoreDraft(nextLanguage, detail.source_code);
-      setCodeDiagnostics([]);
-      setJumpLine(null);
+      setDiagnosticSnapshot(null);
+      setJumpTarget(null);
       setRestoreSubmission(null);
       setBottomOpen(true);
       setBottomTab('tests');
@@ -300,8 +305,8 @@ export default function WorkspacePage() {
     showToast,
     onSubmitStart: () => {
       setRunResult(null);
-      setCodeDiagnostics([]);
-      setJumpLine(null);
+      setDiagnosticSnapshot(null);
+      setJumpTarget(null);
       setBottomTab('result');
       setBottomOpen(true);
     },
@@ -309,6 +314,9 @@ export default function WorkspacePage() {
   });
 
   const { running, runResult, consoleLines, run, setRunResult } = useRunCode({
+    slug,
+    accountId,
+    checkingResult,
     problem,
     language,
     code,
@@ -318,13 +326,13 @@ export default function WorkspacePage() {
     requireAuth,
     showToast,
     onStart: () => {
-      setCodeDiagnostics([]);
-      setJumpLine(null);
+      setDiagnosticSnapshot(null);
+      setJumpTarget(null);
       setBottomTab('result');
     },
     onResult: (result, diagnostics) => {
-      setCodeDiagnostics(diagnostics);
-      if (diagnostics[0]?.line) setJumpLine(diagnostics[0].line);
+      setDiagnosticSnapshot({ owner: runOwner, items: diagnostics });
+      if (diagnostics[0]?.line) setJumpTarget({ owner: runOwner, line: diagnostics[0].line });
       selectRunResult(result);
     },
     onUnavailable: () => setBottomTab('console'),
@@ -612,8 +620,8 @@ export default function WorkspacePage() {
                 value={code}
                 onChange={(next) => {
                   setCode(next);
-                  setCodeDiagnostics([]);
-                  setJumpLine(null);
+                  setDiagnosticSnapshot(null);
+                  setJumpTarget(null);
                 }}
                 language={language}
                 fontSize={fontSize}
@@ -794,7 +802,7 @@ export default function WorkspacePage() {
                         onCheckResult={checkResultOnce}
                         onSelectDiagnostic={(diagnostic) => {
                           if (diagnostic.line > 0) {
-                            setJumpLine(diagnostic.line);
+                            setJumpTarget({ owner: runOwner, line: diagnostic.line });
                             if (stacked) setMobileView('editor');
                           }
                         }}

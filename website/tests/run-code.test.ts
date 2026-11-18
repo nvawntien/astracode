@@ -1,11 +1,12 @@
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRunCode as runCode } from '../src/features/problem-workspace/hooks/useRunCode';
 import { ApiError, NetworkError, RUN_ENDPOINT, buildApiUrl, submissionApi } from '../src/lib/api';
 import type { TestCase } from '../src/features/problem-workspace/types';
 import type { CodeDiagnostic, RunResponse, RunTestCaseResult } from '../src/lib/types';
-
-const react = vi.hoisted(() => ({ useState: vi.fn() }));
-vi.mock('react', () => react);
+import { deferred, renderReact } from './helpers/react-dom';
 
 const tests: TestCase[] = [
   {
@@ -50,20 +51,20 @@ const diagnostic: CodeDiagnostic = {
   column: 1,
 };
 type Options = Parameters<typeof runCode>[0];
-type ConsoleLine = { text: string; color: string };
+const previousConsole = [{ text: '[sample-1] stdout\nok\n', color: 'var(--code-fg)' }];
+const views: Awaited<ReturnType<typeof renderReact>>[] = [];
 
-// Runs the real async handler and state setters with explicit render snapshots.
-// This is orchestration unit coverage, not React scheduling or browser E2E.
-function fixture(overrides: Partial<Options> = {}, initialRunning = false) {
-  let running = initialRunning;
-  let runResult: RunResponse | null = completed;
-  let consoleLines: ConsoleLine[] = [{ text: 'previous console', color: 'var(--code-fg)' }];
+async function fixture(overrides: Partial<Options> = {}) {
+  let latest!: ReturnType<typeof runCode>;
   const options: Options = {
+    slug: 'fixture-problem',
+    accountId: 'fixture-user',
     problem: { id: 42 },
     language: 'CPP',
     code: 'source code\n',
     tests,
     submitting: false,
+    checkingResult: false,
     online: true,
     requireAuth: vi.fn(() => true),
     showToast: vi.fn(),
@@ -72,33 +73,61 @@ function fixture(overrides: Partial<Options> = {}, initialRunning = false) {
     onUnavailable: vi.fn(),
     ...overrides,
   };
-  const setRunning = (next: boolean) => {
-    running = next;
-  };
-  const setRunResult = (next: RunResponse | null) => {
-    runResult = next;
-  };
-  const setConsoleLines = (next: ConsoleLine[]) => {
-    consoleLines = next;
+  function Probe(props: Options) {
+    latest = runCode(props);
+    return null;
+  }
+  const view = await renderReact(createElement(Probe, options));
+  views.push(view);
+  const render = async (next: Partial<Options> = {}) =>
+    view.rerender(createElement(Probe, { ...options, ...next }));
+  const run = async (next?: Partial<Options>) => {
+    if (next) await render(next);
+    await act(async () => latest.run());
   };
   return {
     options,
-    read: () => ({ running, runResult, consoleLines }),
-    render(next: Partial<Options> = {}) {
-      react.useState
-        .mockReturnValueOnce([running, setRunning])
-        .mockReturnValueOnce([runResult, setRunResult])
-        .mockReturnValueOnce([consoleLines, setConsoleLines]);
-      return runCode({ ...options, ...next });
+    read: () => ({
+      running: latest.running,
+      runResult: latest.runResult,
+      consoleLines: latest.consoleLines,
+    }),
+    render,
+    run,
+    async start() {
+      let done!: Promise<void>;
+      await act(async () => {
+        done = latest.run();
+      });
+      return { done };
+    },
+    async seed() {
+      // Establish previous result/console through the actual public action,
+      // rather than injecting impossible React state snapshots.
+      vi.mocked(submissionApi.run).mockResolvedValueOnce(completed);
+      await run();
+      vi.mocked(submissionApi.run).mockClear();
+      for (const callback of [
+        options.onStart,
+        options.onResult,
+        options.showToast,
+        options.onUnavailable,
+      ])
+        vi.mocked(callback).mockClear();
+    },
+    async clearResult() {
+      await act(async () => latest.setRunResult(null));
     },
   };
 }
 
 beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.clearAllMocks();
   vi.spyOn(submissionApi, 'run').mockResolvedValue(completed);
 });
-afterEach(() => {
+afterEach(async () => {
+  for (const view of views.splice(0)) await view.unmount();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -113,8 +142,8 @@ describe('interactive Run Code orchestration', () => {
         new Response(JSON.stringify({ code: 0, msg: 'ok', data: completed }), { status: 200 }),
       );
     vi.stubGlobal('fetch', fetch);
-    const f = fixture();
-    await f.render().run();
+    const f = await fixture();
+    await f.run();
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, request] = fetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(buildApiUrl(RUN_ENDPOINT));
@@ -124,6 +153,7 @@ describe('interactive Run Code orchestration', () => {
       cache: 'no-store',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     });
+    expect(request.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(String(request.body))).toEqual({
       problem_id: 42,
       language: 'CPP',
@@ -139,16 +169,22 @@ describe('interactive Run Code orchestration', () => {
 
   it('does not start without a problem, authentication, connectivity or when Run/Submit is active', async () => {
     const deniedAuth = vi.fn(() => false);
+    const active = await fixture();
+    const pending = deferred<RunResponse>();
+    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+    const current = await active.start();
+    vi.mocked(submissionApi.run).mockClear();
+    vi.mocked(active.options.onStart).mockClear();
     const scenarios = [
-      fixture({ problem: null }),
-      fixture({ requireAuth: deniedAuth }),
-      fixture({ online: false }),
-      fixture({ submitting: true }),
-      fixture({}, true),
+      await fixture({ problem: null }),
+      await fixture({ requireAuth: deniedAuth }),
+      await fixture({ online: false }),
+      await fixture({ submitting: true }),
+      active,
     ];
     for (const f of scenarios) {
       const before = f.read();
-      await f.render().run();
+      await f.run();
       expect(f.read()).toEqual(before);
       expect(f.options.onStart).not.toHaveBeenCalled();
       expect(f.options.onResult).not.toHaveBeenCalled();
@@ -161,6 +197,10 @@ describe('interactive Run Code orchestration', () => {
     );
     expect(scenarios[0].options.requireAuth).not.toHaveBeenCalled();
     expect(scenarios[3].options.requireAuth).not.toHaveBeenCalled();
+    await act(async () => {
+      pending.resolve(completed);
+      await current.done;
+    });
   });
 
   it('sets running before the request and blocks another Run after the pending render', async () => {
@@ -171,16 +211,19 @@ describe('interactive Run Code orchestration', () => {
           finish = resolve;
         }),
     );
-    const f = fixture();
-    const pending = f.render().run();
+    const f = await fixture();
+    await f.seed();
+    const { done: pending } = await f.start();
     expect(f.read().running).toBe(true);
     expect(f.read().runResult).toBe(completed);
-    expect(f.read().consoleLines[0].text).toBe('previous console');
+    expect(f.read().consoleLines).toEqual(previousConsole);
     expect(f.options.onStart).toHaveBeenCalledTimes(1);
-    await f.render().run();
+    await f.run();
     expect(submissionApi.run).toHaveBeenCalledTimes(1);
-    finish(completed);
-    await pending;
+    await act(async () => {
+      finish(completed);
+      await pending;
+    });
     expect(f.read().running).toBe(false);
     expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(completed, []);
     expect(f.read().consoleLines).toEqual([
@@ -189,14 +232,17 @@ describe('interactive Run Code orchestration', () => {
   });
 
   it('uses the latest render language, source and testcases without an extra request', async () => {
-    const f = fixture();
-    await f.render({ language: 'JAVA', code: 'new source', tests: [tests[1]] }).run();
-    expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith({
-      problem_id: 42,
-      language: 'JAVA',
-      source_code: 'new source',
-      testcases: [{ id: 'custom-2', kind: 'custom', stdin: '2\n', expected_output: null }],
-    });
+    const f = await fixture();
+    await f.run({ language: 'JAVA', code: 'new source', tests: [tests[1]] });
+    expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith(
+      {
+        problem_id: 42,
+        language: 'JAVA',
+        source_code: 'new source',
+        testcases: [{ id: 'custom-2', kind: 'custom', stdin: '2\n', expected_output: null }],
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it('forwards compile failure diagnostics and produces the same compile console output', async () => {
@@ -207,8 +253,8 @@ describe('interactive Run Code orchestration', () => {
       tests: [],
     };
     vi.mocked(submissionApi.run).mockResolvedValue(result);
-    const f = fixture();
-    await f.render().run();
+    const f = await fixture();
+    await f.run();
     expect(f.read()).toEqual({
       running: false,
       runResult: result,
@@ -235,8 +281,8 @@ describe('interactive Run Code orchestration', () => {
       ],
     };
     vi.mocked(submissionApi.run).mockResolvedValue(result);
-    const f = fixture();
-    await f.render().run();
+    const f = await fixture();
+    await f.run();
     expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(result, [runtime]);
     expect(f.read().consoleLines).toEqual([
       { text: '[sample-1] stdout\nok\n', color: 'var(--code-fg)' },
@@ -249,8 +295,9 @@ describe('interactive Run Code orchestration', () => {
     vi.stubEnv('NEXT_PUBLIC_RUN_ENDPOINT', '/custom/run');
     for (const status of [404, 405, 501]) {
       vi.mocked(submissionApi.run).mockRejectedValue(new ApiError('missing', status, status * 100));
-      const f = fixture();
-      await f.render().run();
+      const f = await fixture();
+      await f.seed();
+      await f.run();
       expect(f.options.showToast).toHaveBeenCalledExactlyOnceWith(
         'Custom runs are unavailable right now — use Submit',
         'error',
@@ -280,9 +327,10 @@ describe('interactive Run Code orchestration', () => {
     ] as const;
     for (const [error, message] of errors) {
       vi.mocked(submissionApi.run).mockClear().mockRejectedValue(error);
-      const f = fixture();
+      const f = await fixture();
+      await f.seed();
       const before = f.read();
-      await f.render().run();
+      await f.run();
       expect(f.read()).toEqual(before);
       expect(f.options.showToast).toHaveBeenCalledExactlyOnceWith(message, 'error');
       expect(f.options.onResult).not.toHaveBeenCalled();
@@ -293,20 +341,21 @@ describe('interactive Run Code orchestration', () => {
 
   it('retains the existing silent unknown-error path while clearing running', async () => {
     vi.mocked(submissionApi.run).mockRejectedValue(new Error('unexpected'));
-    const f = fixture();
-    await f.render().run();
+    const f = await fixture();
+    await f.run();
     expect(f.read().running).toBe(false);
     expect(f.options.showToast).not.toHaveBeenCalled();
     expect(f.options.onResult).not.toHaveBeenCalled();
   });
 
-  it('allows Submit to clear only the Run result while retaining console state', () => {
-    const f = fixture();
-    f.render().setRunResult(null);
+  it('allows Submit to clear only the Run result while retaining console state', async () => {
+    const f = await fixture();
+    await f.seed();
+    await f.clearResult();
     expect(f.read()).toEqual({
       running: false,
       runResult: null,
-      consoleLines: [{ text: 'previous console', color: 'var(--code-fg)' }],
+      consoleLines: previousConsole,
     });
     expect(submissionApi.run).not.toHaveBeenCalled();
   });
