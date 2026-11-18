@@ -12,15 +12,16 @@ export default function SubmissionDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const accountId = user?.id;
   const rawID = Array.isArray(params.id) ? params.id[0] : params.id;
   const submissionID = parseSubmissionID(rawID);
   const returnPath = submissionID === null ? '/submissions' : `/submissions/${submissionID}`;
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (!authLoading && !accountId) {
       router.replace(`/login?next=${encodeURIComponent(returnPath)}`);
     }
-  }, [authLoading, returnPath, router, user]);
+  }, [authLoading, returnPath, router, accountId]);
 
   if (authLoading || !user) return null;
 
@@ -37,7 +38,7 @@ export default function SubmissionDetailPage() {
           <ErrorState title="Invalid submission" detail="The submission identifier must be a positive integer." />
         </section>
       ) : (
-        <SubmissionDetail id={submissionID} standalone />
+        <SubmissionDetail id={submissionID} accountId={user.id} role={user.role} standalone />
       )}
     </AppShell>
   );
