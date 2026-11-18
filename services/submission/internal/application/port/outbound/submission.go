@@ -17,6 +17,13 @@ type SubmissionRepository interface {
 	ResultSummaries(ctx context.Context, submissionIDs []int64) (map[int64]SubmissionResultSummary, error)
 }
 
+// CurrentSubmissionDetailRepository reads submission metadata and its current
+// attempt summary from the same snapshot. A nil ownerID allows a privileged
+// read. Missing and filtered submissions both return ErrSubmissionNotFound.
+type CurrentSubmissionDetailRepository interface {
+	GetCurrentDetail(ctx context.Context, id int64, ownerID *string) (*entity.Submission, SubmissionResultSummary, error)
+}
+
 // ProfileStatsRepository reads bounded, submission-owned aggregates for one
 // authenticated user's profile. It deliberately aggregates the mutable current
 // submission state rather than historical attempt/result rows.

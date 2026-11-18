@@ -244,6 +244,7 @@ var MiddlewareProviderSet = wire.NewSet(
 
 var OutboundProviderSet = wire.NewSet(
 	postgres.NewSubmissionRepository,
+	postgres.NewCurrentSubmissionDetailRepository,
 	postgres.NewProfileStatsRepository,
 	postgres.NewSubmissionStreamSnapshotRepository,
 	postgres.NewSubmissionResultRepository,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -89,7 +90,10 @@ func TestGetSubmissionHandlerSuccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			claims := auth.Claims{UserID: "actor", Username: "actor-name", Role: tt.role}
-			useCase := &fakeGetSubmissionUseCase{response: getSubmissionResponseFixture()}
+			want := getSubmissionResponseFixture()
+			attemptID := "attempt-123"
+			want.AttemptID = &attemptID
+			useCase := &fakeGetSubmissionUseCase{response: want}
 			recorder := performGetSubmissionRequest(t, "/api/v1/submissions/123", &claims, useCase)
 
 			if recorder.Code != http.StatusOK {
@@ -118,8 +122,8 @@ func TestGetSubmissionHandlerSuccess(t *testing.T) {
 			if responseBody.Status != "success" || responseBody.Code != response.CodeSuccess || responseBody.Msg != "" {
 				t.Fatalf("unexpected envelope: %+v", responseBody)
 			}
-			if responseBody.Data != getSubmissionResponseFixture() {
-				t.Fatalf("response data = %+v, want %+v", responseBody.Data, getSubmissionResponseFixture())
+			if !reflect.DeepEqual(responseBody.Data, want) {
+				t.Fatalf("response data = %+v, want %+v", responseBody.Data, want)
 			}
 		})
 	}
@@ -141,6 +145,24 @@ func TestGetSubmissionHandlerRejectsInvalidSubmissionID(t *testing.T) {
 				t.Fatalf("use case calls = %d, want 0", useCase.calls)
 			}
 		})
+	}
+}
+
+func TestGetSubmissionHandlerSerializesLegacyAttemptAsNull(t *testing.T) {
+	claims := auth.Claims{UserID: "owner", Role: rbac.RoleUser}
+	useCase := &fakeGetSubmissionUseCase{response: getSubmissionResponseFixture()}
+	recorder := performGetSubmissionRequest(t, "/api/v1/submissions/123", &claims, useCase)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	var envelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if field, present := envelope.Data["attempt_id"]; !present || string(field) != "null" {
+		t.Fatalf("attempt_id = %q (present=%t), want explicit null", []byte(field), present)
 	}
 }
 
@@ -224,15 +246,19 @@ func assertGetSubmissionError(
 	}
 
 	var responseBody struct {
-		Status string `json:"status"`
-		Code   int    `json:"code"`
-		Msg    string `json:"msg"`
+		Status string          `json:"status"`
+		Code   int             `json:"code"`
+		Msg    string          `json:"msg"`
+		Data   json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &responseBody); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if responseBody.Status != "error" || responseBody.Code != wantCode {
 		t.Fatalf("unexpected error envelope: %+v", responseBody)
+	}
+	if len(responseBody.Data) != 0 && string(responseBody.Data) != "null" {
+		t.Fatalf("error response exposed a data payload: %s", responseBody.Data)
 	}
 	if wantStatus == http.StatusInternalServerError && responseBody.Msg != "internal server error" {
 		t.Fatalf("internal response leaked details: %+v", responseBody)

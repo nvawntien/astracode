@@ -84,6 +84,7 @@ type IssueSubmissionStreamTicketResponse struct {
 
 type GetSubmissionResponse struct {
 	ID              int64     `json:"id"`
+	AttemptID       *string   `json:"attempt_id"`
 	ProblemID       int64     `json:"problem_id"`
 	ProblemTitle    string    `json:"problem_title"`
 	UserID          string    `json:"user_id"`
