@@ -56,12 +56,17 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await view?.unmount();
-  view = undefined;
-  expect(vi.getTimerCount()).toBe(0);
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  try {
+    await view?.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    // Keep teardown deterministic even when a RED case exposes orphan timers.
+    view = undefined;
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
 });
 
 describe('real React submission stream lifecycle', () => {
@@ -362,6 +367,242 @@ describe('real React submission stream lifecycle', () => {
       });
       expect(latest.state).toBe('error');
       expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+});
+
+describe('EventSource error callback ownership', () => {
+  function retainError(source: TestEventSource) {
+    const callback = source.onerror;
+    expect(callback).not.toBeNull();
+    // Retain the function itself: browsers may already have queued it before
+    // close/replacement, even if the source's handler property later changes.
+    return () => callback!.call(source, new Event('error'));
+  }
+
+  it.each(['connecting', 'open'] as const)(
+    'ignores a same-generation stale error while its replacement is %s',
+    async (replacementState) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const onConnected = vi.fn();
+      const props = options({ onConnected });
+      await mount(props);
+      const previous = TestEventSource.instances[0];
+      const queuedError = retainError(previous);
+      const closePrevious = vi.spyOn(previous, 'close');
+      await act(async () => {
+        previous.open();
+        previous.emit('submission.snapshot', event);
+        queuedError();
+      });
+      expect(previous.closed).toBe(true);
+      expect(vi.getTimerCount()).toBe(1);
+      await advance(1000);
+      const current = TestEventSource.instances[1];
+      const closeCurrent = vi.spyOn(current, 'close');
+      if (replacementState === 'open') await act(async () => current.open());
+      const closes = closePrevious.mock.calls.length;
+      const opens = onConnected.mock.calls.length;
+      await act(async () => {
+        queuedError();
+        previous.open();
+        previous.emit('submission.completed', { ...event, status: 'ACCEPTED' });
+      });
+      expect(latest.state).toBe(replacementState);
+      expect(closePrevious).toHaveBeenCalledTimes(closes);
+      expect(closeCurrent).not.toHaveBeenCalled();
+      expect(current.closed).toBe(false);
+      expect(onConnected).toHaveBeenCalledTimes(opens);
+      expect(props.onError).not.toHaveBeenCalled();
+      expect(props.onTerminal).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      await advance(20000);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+      expect(TestEventSource.instances).toHaveLength(2);
+      // The live replacement, not merely its state label, remains usable.
+      // Its first snapshot may adopt the backend's next judging attempt.
+      const next = { ...event, attempt_id: 'fixture-attempt-b', status: 'PENDING' };
+      await act(async () => {
+        current.open();
+        current.emit('submission.snapshot', next);
+        current.emit('submission.updated', event); // previous attempt stays rejected
+        current.emit('submission.completed', { ...next, status: 'ACCEPTED' });
+      });
+      expect(props.onStatus).toHaveBeenCalledTimes(3);
+      expect(props.onTerminal).toHaveBeenCalledExactlyOnceWith({ ...next, status: 'ACCEPTED' });
+      expect(latest.state).toBe('completed');
+    },
+  );
+
+  it.each([false, true])(
+    'handles repeated errors once per source and preserves the next retry delay (StrictMode=%s)',
+    async (strict) => {
+      const props = options();
+      await mount(props, strict);
+      const initialTickets = vi.mocked(submissionApi.issueStreamTicket).mock.calls.length;
+      const previous = TestEventSource.instances[0];
+      const queuedError = retainError(previous);
+      await act(async () => {
+        queuedError();
+        queuedError();
+        queuedError();
+      });
+      expect(latest.state).toBe('reconnecting');
+      expect(vi.getTimerCount()).toBe(1);
+      await advance(999);
+      expect(TestEventSource.instances).toHaveLength(1);
+      await advance(1);
+      expect(TestEventSource.instances).toHaveLength(2);
+      const currentError = retainError(TestEventSource.instances[1]);
+      await act(async () => {
+        currentError();
+        queuedError();
+        currentError();
+      });
+      expect(vi.getTimerCount()).toBe(1);
+      await advance(1999);
+      expect(TestEventSource.instances).toHaveLength(2);
+      await advance(1);
+      expect(TestEventSource.instances).toHaveLength(3);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(initialTickets + 2);
+      expect(props.onError).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('ignores a closed source error while its same-generation retry ticket is pending', async () => {
+    const props = options();
+    await mount(props);
+    const queuedError = retainError(TestEventSource.instances[0]);
+    await act(async () => queuedError());
+    const pending = deferred<SubmissionStreamTicketResponse>();
+    vi.mocked(submissionApi.issueStreamTicket).mockReturnValueOnce(pending.promise);
+    await advance(1000);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+    const signal = vi.mocked(submissionApi.issueStreamTicket).mock.calls[1][1]!;
+    await act(async () => queuedError());
+    expect(latest.state).toBe('reconnecting');
+    expect(vi.getTimerCount()).toBe(0);
+    expect(signal.aborted).toBe(false);
+    await act(async () => pending.resolve(ticket));
+    const current = TestEventSource.instances[1];
+    await act(async () => current.open());
+    await advance(20000);
+    expect(latest.state).toBe('open');
+    expect(current.closed).toBe(false);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a source already closed by a malformed event', async () => {
+    const props = options();
+    await mount(props);
+    const previous = TestEventSource.instances[0];
+    const queuedError = retainError(previous);
+    await act(async () => previous.raw('submission.updated', '{invalid'));
+    const error = latest.error;
+    const close = vi.spyOn(previous, 'close');
+    await act(async () => queuedError());
+    expect(latest.state).toBe('error');
+    expect(latest.error).toBe(error);
+    expect(close).not.toHaveBeenCalled();
+    expect(props.onError).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(20000);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports retry exhaustion once and ignores the exhausted source through manual recovery', async () => {
+    const onConnected = vi.fn();
+    const props = options({ onConnected });
+    await mount(props);
+    for (const [index, delay] of [1000, 2000, 4000, 8000, 10000].entries()) {
+      await act(async () => TestEventSource.instances[index].fail());
+      await advance(delay);
+    }
+    const previous = TestEventSource.instances[5];
+    const queuedError = retainError(previous);
+    await act(async () => queuedError());
+    expect(props.onError).toHaveBeenCalledExactlyOnceWith({
+      kind: 'stream',
+      message: 'Live updates are unavailable.',
+    });
+    const close = vi.spyOn(previous, 'close');
+    await act(async () => queuedError());
+    expect(props.onError).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => latest.reconnect());
+    const current = TestEventSource.instances[6];
+    await act(async () => queuedError());
+    expect(latest.state).toBe('connecting');
+    await act(async () => current.open());
+    await act(async () => queuedError());
+    expect(latest.state).toBe('open');
+    expect(latest.error).toBeNull();
+    expect(onConnected).toHaveBeenCalledExactlyOnceWith(41);
+    expect(close).not.toHaveBeenCalled();
+    expect(current.closed).toBe(false);
+    expect(props.onError).toHaveBeenCalledTimes(1);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(7);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores errors from a manually replaced source and preserves explicit attempt pinning', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const props = options({ initialAttemptId: event.attempt_id });
+    await mount(props);
+    const previous = TestEventSource.instances[0];
+    const queuedError = retainError(previous);
+    await act(async () => latest.reconnect());
+    const current = TestEventSource.instances[1];
+    const closePrevious = vi.spyOn(previous, 'close');
+    const next = { ...event, attempt_id: 'fixture-attempt-b', status: 'PENDING' };
+    await act(async () => {
+      current.open();
+      queuedError();
+      current.emit('submission.snapshot', next);
+    });
+    expect(latest.state).toBe('open');
+    expect(props.onStatus).not.toHaveBeenCalled();
+    expect(closePrevious).not.toHaveBeenCalled();
+    expect(current.closed).toBe(false);
+    await view!.rerender(createElement(Probe, { ...props, initialAttemptId: next.attempt_id }));
+    const pinned = TestEventSource.instances[2];
+    await act(async () => {
+      pinned.open();
+      queuedError();
+      retainError(current)();
+      pinned.emit('submission.snapshot', next);
+      pinned.emit('submission.completed', { ...next, status: 'ACCEPTED' });
+    });
+    expect(props.onTerminal).toHaveBeenCalledExactlyOnceWith({ ...next, status: 'ACCEPTED' });
+    expect(props.onError).not.toHaveBeenCalled();
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['terminal completion', 'unmount'] as const)(
+    'performs no side effects from an error delivered after %s',
+    async (end) => {
+      const props = options();
+      await mount(props);
+      const source = TestEventSource.instances[0];
+      const queuedError = retainError(source);
+      if (end === 'unmount') await view!.unmount();
+      else {
+        await act(async () =>
+          source.emit('submission.completed', { ...event, status: 'ACCEPTED' }),
+        );
+      }
+      expect(source.closed).toBe(true);
+      const close = vi.spyOn(source, 'close');
+      await act(async () => queuedError());
+      expect(close).not.toHaveBeenCalled();
+      expect(props.onError).not.toHaveBeenCalled();
+      expect(props.onTerminal).toHaveBeenCalledTimes(end === 'unmount' ? 0 : 1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
     },
   );
 });

@@ -1593,3 +1593,175 @@ describe('Workspace Run ownership and action guards', () => {
     expect(observed.toast).toHaveBeenCalledWith('You appear to be offline', 'error');
   });
 });
+
+describe('queued EventSource errors through the real Workspace lifecycle', () => {
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  function retainError(source: TestEventSource) {
+    const callback = source.onerror;
+    expect(callback).not.toBeNull();
+    return () => callback!.call(source, new Event('error'));
+  }
+
+  it.each(['normal', 'same-account refresh', 'StrictMode'] as const)(
+    'keeps a recovered Workspace connected and completes once after stale errors (%s)',
+    async (mode) => {
+      await mount(mode === 'StrictMode');
+      await click('Submit');
+      const previous = TestEventSource.instances[0];
+      const queuedError = retainError(previous);
+      await act(async () => previous.open());
+      if (mode === 'same-account refresh') {
+        observed.user = { ...user, username: 'refreshed-user' };
+        await rerender();
+        expect(TestEventSource.instances).toHaveLength(1);
+      }
+      await act(async () => queuedError());
+      expect(state().streamState).toBe('reconnecting');
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      const current = TestEventSource.instances[1];
+      await act(async () => current.open());
+      expect(state().streamState).toBe('open');
+      await act(async () => queuedError());
+      expect(state()).toMatchObject({
+        streamState: 'open',
+        liveUpdateError: '',
+        detailFetchError: '',
+        submission: { id: 41, status: 'PENDING' },
+      });
+      expect(current.closed).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      await act(async () => vi.advanceTimersByTimeAsync(20000));
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(2);
+      expect(TestEventSource.instances).toHaveLength(2);
+      expect(view!.container.textContent).toContain('queued — waiting for a judge worker');
+      await act(async () => {
+        current.emit('submission.completed', event({ status: 'ACCEPTED' }));
+        current.emit('submission.completed', event({ status: 'ACCEPTED' }));
+        queuedError();
+      });
+      expect(state().submission).toEqual(detail());
+      expect(state().liveUpdateError).toBe('');
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+      expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+    },
+  );
+
+  it('preserves detail recovery through stream exhaustion, recovery and a stale same-generation error', async () => {
+    await mount();
+    await click('Submit');
+    for (const [index, delay] of [1000, 2000, 4000, 8000, 10000].entries()) {
+      await act(async () => TestEventSource.instances[index].fail());
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+    }
+    const exhausted = retainError(TestEventSource.instances[5]);
+    await act(async () => exhausted());
+    const warning = 'Live updates are unavailable.';
+    expect(state().liveUpdateError).toBe(warning);
+    expect(view!.container.textContent).toContain(warning);
+    vi.mocked(submissionApi.get).mockRejectedValueOnce(
+      new ApiError('independent detail error', 503, 50300),
+    );
+    await click('Check result');
+    await click('Reconnect');
+    const previous = TestEventSource.instances[6];
+    await act(async () => exhausted());
+    expect(state().liveUpdateError).toBe(warning);
+    await act(async () => previous.open());
+    expect(state()).toMatchObject({
+      liveUpdateError: '',
+      detailFetchError: 'independent detail error',
+    });
+    const queuedError = retainError(previous);
+    await act(async () => queuedError());
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    const current = TestEventSource.instances[7];
+    await act(async () => current.open());
+    await act(async () => queuedError());
+    expect(state()).toMatchObject({
+      streamState: 'open',
+      liveUpdateError: '',
+      detailFetchError: 'independent detail error',
+    });
+    expect(view!.container.textContent).not.toContain(warning);
+    expect(view!.container.textContent).toContain('independent detail error');
+    expect(current.closed).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    await click('Retry detail');
+    expect(state().checkingResult).toBe(true);
+    await act(async () => pending.resolve(detail()));
+    expect(state()).toMatchObject({
+      submission: detail(),
+      liveUpdateError: '',
+      detailFetchError: '',
+      checkingResult: false,
+    });
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(8);
+    expect(submissionApi.get).toHaveBeenCalledTimes(2);
+    expect(observed.problem!.historyRefreshKey).toBe(1);
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+  });
+
+  it.each(['account', 'logout', 'slug', 'submission', 'unmount'] as const)(
+    'ignores queued errors after a %s transition without changing the current lifecycle',
+    async (transition) => {
+      await mount();
+      await click('Submit');
+      const previous = TestEventSource.instances[0];
+      const queuedError = retainError(previous);
+      if (transition === 'unmount') await view!.unmount();
+      else if (transition === 'logout') {
+        observed.user = null;
+        await rerender();
+      } else {
+        if (transition === 'account') {
+          observed.user = { ...user, id: 'fixture-user-b', username: 'fixture-user-b' };
+          await rerender();
+        } else if (transition === 'slug') {
+          observed.slug = 'another-problem';
+          await rerender();
+        } else await disconnect(); // existing recovery permits a new Submit
+        vi.mocked(submissionApi.create).mockResolvedValue(
+          created({ id: 42, problem_id: transition === 'slug' ? 2 : 1 }),
+        );
+        await click('Submit');
+        await act(async () => TestEventSource.instances.at(-1)!.open());
+      }
+      expect(previous.closed).toBe(true);
+      const close = vi.spyOn(previous, 'close');
+      const tickets = vi.mocked(submissionApi.issueStreamTicket).mock.calls.length;
+      // The real editor may still have its independent 600ms draft-save timer.
+      const timers = vi.getTimerCount();
+      const before = {
+        streamState: state().streamState,
+        liveUpdateError: state().liveUpdateError,
+        detailFetchError: state().detailFetchError,
+        submission: state().submission,
+        submitting: state().submitting,
+      };
+      await act(async () => queuedError());
+      expect(state()).toMatchObject(before);
+      expect(close).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(timers);
+      await act(async () => vi.advanceTimersByTimeAsync(20000));
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(tickets);
+      expect(submissionApi.get).not.toHaveBeenCalled();
+      expect(observed.problem!.historyRefreshKey).toBe(0);
+      expect(observed.toast).not.toHaveBeenCalled();
+      if (transition !== 'logout' && transition !== 'unmount') {
+        expect(TestEventSource.instances.at(-1)!.closed).toBe(false);
+        expect(state()).toMatchObject({
+          streamState: 'open',
+          liveUpdateError: '',
+          submission: { id: 42, status: 'PENDING' },
+        });
+      }
+    },
+  );
+});

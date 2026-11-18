@@ -260,24 +260,22 @@ export function useSubmissionStream({
       const source = new EventSource(buildSubmissionStreamURL(submissionId, ticket));
       eventSourceRef.current = source;
 
+      // Automatic retries share a generation. Closing/replacing a source must
+      // revoke its queued callbacks too, including repeated errors before retry.
+      const ownsSource = () =>
+        generationRef.current === generation &&
+        !terminalHandledRef.current &&
+        eventSourceRef.current === source;
+
       source.onopen = () => {
-        if (
-          generationRef.current !== generation ||
-          terminalHandledRef.current ||
-          eventSourceRef.current !== source
-        )
-          return;
+        if (!ownsSource()) return;
         setState('open');
         onConnectedRef.current?.(submissionId);
       };
 
       source.onerror = () => {
-        if (generationRef.current !== generation || terminalHandledRef.current) {
-          source.close();
-          return;
-        }
-        source.close();
-        if (eventSourceRef.current === source) eventSourceRef.current = null;
+        if (!ownsSource()) return;
+        closeEventSource();
 
         if (attempt < MAX_RECONNECT_ATTEMPTS) {
           setState('reconnecting');
@@ -296,12 +294,7 @@ export function useSubmissionStream({
 
       let firstEvent = true;
       const handleSourceEvent = (message: MessageEvent<string>) => {
-        if (
-          generationRef.current !== generation ||
-          terminalHandledRef.current ||
-          eventSourceRef.current !== source
-        )
-          return;
+        if (!ownsSource()) return;
         const snapshot =
           firstEvent &&
           (message.type === 'submission.snapshot' || message.type === 'submission.completed');
