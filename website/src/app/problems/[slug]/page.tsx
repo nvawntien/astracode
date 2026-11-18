@@ -46,6 +46,7 @@ export default function WorkspacePage() {
   const slug = params?.slug ?? '';
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const accountId = user?.id ?? null;
   const { showToast } = useToast();
   const online = useOnline();
   const width = useViewportWidth();
@@ -119,8 +120,20 @@ export default function WorkspacePage() {
   const [jumpLine, setJumpLine] = useState<number | null>(null);
   const [codeDiagnostics, setCodeDiagnostics] = useState<CodeDiagnostic[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
-  const [restoreSubmission, setRestoreSubmission] = useState<SubmissionDetail | null>(null);
+  const [restoreSubmissionCandidate, setRestoreSubmission] = useState<SubmissionDetail | null>(
+    null,
+  );
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  // The history's restore confirmation also contains private metadata. Gate it
+  // during render, then discard it so returning to an old account cannot revive it.
+  const restoreSubmission =
+    restoreSubmissionCandidate?.user_id === accountId &&
+    restoreSubmissionCandidate?.problem_id === problem?.id
+      ? restoreSubmissionCandidate
+      : null;
+  useEffect(() => {
+    setRestoreSubmission(null);
+  }, [accountId, problem?.id]);
 
   const settingsRef = useDismissable<HTMLDivElement>(settingsOpen, () => setSettingsOpen(false));
 
@@ -155,7 +168,7 @@ export default function WorkspacePage() {
 
   const restoreSubmissionCode = useCallback(
     (detail: SubmissionDetail) => {
-      if (!problem) return;
+      if (!problem || detail.user_id !== accountId || detail.problem_id !== problem.id) return;
       const nextLanguage = detail.language.toUpperCase() as LanguageCode;
       if (!LANGUAGES.some((item) => item.code === nextLanguage)) {
         showToast(`Cannot restore unsupported language: ${detail.language}`, 'error');
@@ -171,11 +184,12 @@ export default function WorkspacePage() {
       if (stacked) setMobileView('editor');
       showToast(`Submission #${detail.id} restored to the editor`, 'success');
     },
-    [problem, restoreDraft, showToast, stacked],
+    [accountId, problem, restoreDraft, showToast, stacked],
   );
 
   const requestRestoreSubmissionCode = useCallback(
     (detail: SubmissionDetail) => {
+      if (detail.user_id !== accountId || detail.problem_id !== problem?.id) return;
       const nextLanguage = detail.language.toUpperCase() as LanguageCode;
       const willReplaceDraft = code !== detail.source_code || language !== nextLanguage;
       if (willReplaceDraft) {
@@ -184,7 +198,7 @@ export default function WorkspacePage() {
       }
       restoreSubmissionCode(detail);
     },
-    [code, language, restoreSubmissionCode],
+    [accountId, code, language, problem?.id, restoreSubmissionCode],
   );
 
   /* ---------------------------------------------------------------- tests */
@@ -453,7 +467,7 @@ export default function WorkspacePage() {
                 onTabChange={setTab}
                 solved={solved}
                 attempted={attempted}
-                signedIn={Boolean(user)}
+                accountId={accountId}
                 historyRefreshKey={historyRefreshKey}
                 onUseExample={(input, expected) => {
                   addExample(input, expected);
