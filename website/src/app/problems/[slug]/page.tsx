@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/Header';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
@@ -17,7 +17,7 @@ import { Icon } from '@/components/ui';
 import { ApiError, NetworkError, problemApi } from '@/lib/api';
 import { LANGUAGES, formatDateTime, languageMeta, verdictMeta } from '@/lib/format';
 import { useDismissable, useOnline, useViewportWidth } from '@/lib/hooks';
-import { fetchProgress, invalidateProgress } from '@/lib/progress';
+import { fetchProgress, invalidateProgress, type Progress } from '@/lib/progress';
 import type {
   CodeDiagnostic,
   LanguageCode,
@@ -92,21 +92,61 @@ export default function WorkspacePage() {
 
   /* ------------------------------------------------------------- progress */
 
-  const [solved, setSolved] = useState(false);
-  const [attempted, setAttempted] = useState(false);
+  const problemId = problem?.id;
+  const progressOwner = JSON.stringify([accountId, slug, problemId]);
+  const [progressSnapshot, setProgressSnapshot] = useState<{
+    owner: string;
+    solved: boolean;
+    attempted: boolean;
+  } | null>(null);
+  const progressScopeRef = useRef<{
+    owner: string;
+    accountId: string | null;
+    active: boolean;
+    request: Promise<Progress> | null;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const previousAccount = progressScopeRef.current?.accountId;
+    if (previousAccount && previousAccount !== accountId) invalidateProgress(previousAccount);
+    const scope: NonNullable<typeof progressScopeRef.current> = {
+      owner: progressOwner,
+      accountId,
+      active: true,
+      request: null,
+    };
+    progressScopeRef.current = scope;
+    return () => {
+      scope.active = false;
+    };
+  }, [accountId, progressOwner]);
+
+  // Hide a previous account/problem's flags in the first committed render,
+  // rather than waiting for an effect to clear them.
+  const ownedProgress = progressSnapshot?.owner === progressOwner ? progressSnapshot : null;
+  const solved = Boolean(accountId && ownedProgress?.solved);
+  const attempted = Boolean(accountId && ownedProgress?.attempted);
 
   const syncProgress = useCallback(
     async (force = false) => {
-      if (!user || !problem) return;
+      const scope = progressScopeRef.current;
+      if (!accountId || !problemId || !scope?.active || scope.owner !== progressOwner) return;
+      const request = fetchProgress(accountId, force);
+      scope.request = request;
       try {
-        const progress = await fetchProgress(force);
-        setSolved(progress.solvedIds.has(problem.id));
-        setAttempted(progress.attemptedIds.has(problem.id));
+        const progress = await request;
+        if (!scope.active || progressScopeRef.current !== scope || scope.request !== request)
+          return;
+        setProgressSnapshot({
+          owner: progressOwner,
+          solved: progress.solvedIds.has(problemId),
+          attempted: progress.attemptedIds.has(problemId),
+        });
       } catch {
         /* progress is decorative */
       }
     },
-    [user, problem],
+    [accountId, problemId, progressOwner],
   );
 
   useEffect(() => {
@@ -233,10 +273,10 @@ export default function WorkspacePage() {
         detail.status === 'ACCEPTED' ? 'Accepted' : `Verdict: ${verdict.label}`,
         detail.status === 'ACCEPTED' ? 'success' : 'error',
       );
-      invalidateProgress();
+      if (accountId) invalidateProgress(accountId);
       void syncProgress(true);
     },
-    [showToast, syncProgress],
+    [accountId, showToast, syncProgress],
   );
 
   const {

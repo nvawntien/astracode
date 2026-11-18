@@ -226,7 +226,7 @@ beforeEach(async () => {
     diagnostics: [],
     compile_output: '',
   });
-  vi.mocked(fetchProgress).mockImplementation(async (force) => ({
+  vi.mocked(fetchProgress).mockImplementation(async (_accountId, force) => ({
     submissions: [],
     solvedIds: new Set(force ? [1] : []),
     attemptedIds: new Set(force ? [1] : []),
@@ -397,7 +397,7 @@ describe('official submission guards, creation and completion with real React', 
     expect(observed.problem!.historyRefreshKey).toBe(1);
     expect(observed.problem).toMatchObject({ solved: true, attempted: true });
     expect(invalidateProgress).toHaveBeenCalledTimes(1);
-    expect(fetchProgress).toHaveBeenLastCalledWith(true);
+    expect(fetchProgress).toHaveBeenLastCalledWith(user.id, true);
     expect(observed.toast).toHaveBeenCalledWith('Accepted', 'success');
   });
 
@@ -676,7 +676,7 @@ describe('submission recovery and cancellation', () => {
     });
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
     await act(async () => pending.resolve(detail()));
-    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
   });
 
   it('retains submission and recovery errors on logout, and does not reset on same-account refresh', async () => {
@@ -734,7 +734,7 @@ describe('cross-account workspace isolation', () => {
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
     expect(observed.editor!.value).toBe(sourceCode);
     expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
-    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
   });
 
   it('clears already completed A submission data when the authenticated account becomes B', async () => {
@@ -750,7 +750,8 @@ describe('cross-account workspace isolation', () => {
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
     expect(observed.toast).not.toHaveBeenCalled();
     expect(observed.problem!.historyRefreshKey).toBe(1);
-    expect(invalidateProgress).toHaveBeenCalledTimes(1);
+    // One invalidation for A's completion, one for leaving account A.
+    expect(vi.mocked(invalidateProgress).mock.calls).toEqual([[user.id], [user.id]]);
   });
 
   it('clears tracked submission state on A to B and ignores the closed stream events', async () => {
@@ -776,7 +777,7 @@ describe('cross-account workspace isolation', () => {
     expect(state().submission).toBeNull();
     expect(state().liveUpdateError).toBe('');
     expect(submissionApi.get).not.toHaveBeenCalled();
-    expect(invalidateProgress).not.toHaveBeenCalled();
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
     expect(observed.problem!.historyRefreshKey).toBe(0);
     expect(observed.toast).not.toHaveBeenCalled();
     vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
@@ -813,8 +814,8 @@ describe('cross-account workspace isolation', () => {
         detailFetchError: '',
       });
       expect(observed.problem!.historyRefreshKey).toBe(0);
-      expect(invalidateProgress).not.toHaveBeenCalled();
-      expect(fetchProgress).not.toHaveBeenCalledWith(true);
+      expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+      expect(fetchProgress).not.toHaveBeenCalledWith(user.id, true);
       expect(observed.toast).not.toHaveBeenCalled();
       vi.mocked(submissionApi.get).mockResolvedValue(
         detail({ id: 42, user_id: 'fixture-user-b', username: 'fixture-user-b' }),
@@ -825,7 +826,8 @@ describe('cross-account workspace isolation', () => {
           .emit('submission.completed', event({ submission_id: 42, status: 'ACCEPTED' })),
       );
       expect(observed.problem!.historyRefreshKey).toBe(1);
-      expect(invalidateProgress).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(invalidateProgress).mock.calls).toEqual([[user.id], ['fixture-user-b']]);
+      expect(fetchProgress).toHaveBeenLastCalledWith('fixture-user-b', true);
       expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
     },
   );
@@ -1102,7 +1104,11 @@ describe('SSE recovery and independent detail errors', () => {
       expect(view!.container.textContent).not.toContain(warning);
       expect(view!.container.textContent).toContain(message);
       expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(3);
-      expect(invalidateProgress).not.toHaveBeenCalled();
+      if (transition === 'logout' || transition === 'account') {
+        expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+      } else {
+        expect(invalidateProgress).not.toHaveBeenCalled();
+      }
     },
   );
 
@@ -1137,7 +1143,7 @@ describe('SSE recovery and independent detail errors', () => {
       expect(view!.container.textContent).toContain(message);
       expect(view!.container.textContent).not.toContain('obsolete account error');
       expect(submissionApi.get).toHaveBeenCalledTimes(2);
-      expect(invalidateProgress).not.toHaveBeenCalled();
+      expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
       expect(observed.problem!.historyRefreshKey).toBe(0);
       expect(observed.toast).not.toHaveBeenCalled();
     },
