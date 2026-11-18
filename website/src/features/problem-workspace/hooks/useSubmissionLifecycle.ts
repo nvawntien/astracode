@@ -166,7 +166,12 @@ export function useSubmissionLifecycle({
   const finishSubmissionFromDetail = useCallback(
     (detail: Submission, generation: number) => {
       const operations = operationsRef.current;
-      if (!isCurrent(generation, detail.id) || operations.completed) return;
+      if (
+        !isCurrent(generation, detail.id) ||
+        operations.completed ||
+        !isTerminalSubmissionStatus(detail.status)
+      )
+        return false;
       // This latch belongs to one generation and its bound submission ID.
       // Set it before callbacks so concurrent GETs cannot finish twice.
       operations.completed = true;
@@ -178,6 +183,7 @@ export function useSubmissionLifecycle({
       setLiveUpdateError('');
       setDetailFetchError('');
       onCompleted(detail);
+      return true;
     },
     [isCurrent, onCompleted],
   );
@@ -200,7 +206,13 @@ export function useSubmissionLifecycle({
       try {
         const detail = await submissionApi.get(id, controller.signal);
         if (!ownsRequest()) return;
-        finishSubmissionFromDetail(detail, generation);
+        if (!finishSubmissionFromDetail(detail, generation)) {
+          // HTTP detail has no attempt ID. Keep the SSE status/order and let an
+          // explicit retry check the result without consuming the completion latch.
+          setSubmitting(false);
+          setActiveSubmissionId(null);
+          setDetailFetchError('Submission details could not confirm a final result. Try again.');
+        }
       } catch (err) {
         if (!ownsRequest()) return;
         setSubmitting(false);
@@ -236,7 +248,9 @@ export function useSubmissionLifecycle({
       !controller.signal.aborted &&
       !operationsRef.current.completed;
     setCheckingResult(true);
-    setDetailFetchError('');
+    // Keep the recovery UI visible during a retry of terminal detail, even if
+    // another nonterminal response is rejected by the status order below.
+    if (!isTerminalSubmissionStatus(submission.status)) setDetailFetchError('');
     try {
       const latest = await submissionApi.get(id, controller.signal);
       if (!ownsRequest()) return;

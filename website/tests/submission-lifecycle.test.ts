@@ -449,6 +449,48 @@ describe('official submission guards, creation and completion with real React', 
 });
 
 describe('submission recovery and cancellation', () => {
+  it.each(['PENDING', 'JUDGING'] as const)(
+    'keeps terminal HTTP %s out of completion presentation and side effects until Retry detail succeeds',
+    async (status) => {
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await mount();
+      await click('Submit');
+      await terminal();
+      const snapshot = detail({ status, updated_at: '2026-11-17T02:00:00Z' });
+      await act(async () => pending.resolve(snapshot));
+      expect(observed.toast).not.toHaveBeenCalled();
+      expect(invalidateProgress).not.toHaveBeenCalled();
+      expect(fetchProgress).not.toHaveBeenCalledWith(user.id, true);
+      expect(observed.problem!.historyRefreshKey).toBe(0);
+      expect(state()).toMatchObject({ submitting: false, submission: { status: 'ACCEPTED' } });
+      expect(view!.container.querySelector('[role="alert"]')?.textContent).toMatch(
+        /could not confirm a final result/i,
+      );
+      expect(view!.container.textContent).not.toContain('Judged at');
+      expect(view!.container.textContent).not.toContain('Accepted');
+
+      const retry = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(retry.promise);
+      await click('Retry detail');
+      expect(view!.container.querySelector('[role="alert"] button:disabled')?.textContent).toBe(
+        'Checking…',
+      );
+      expect(view!.container.textContent).not.toContain('Judged at');
+      await act(async () => retry.resolve(detail()));
+      expect(state().submission).toEqual(detail());
+      expect(view!.container.querySelector('[role="alert"]')).toBeNull();
+      expect(view!.container.textContent).toContain('Judged at');
+      expect(view!.container.textContent).toContain('Accepted');
+      expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+      expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+      expect(fetchProgress).toHaveBeenLastCalledWith(user.id, true);
+      expect(observed.problem!.historyRefreshKey).toBe(1);
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('exposes stream recovery UI and checks a pending result once without pretending it completed', async () => {
     await mount();
     await click('Submit');

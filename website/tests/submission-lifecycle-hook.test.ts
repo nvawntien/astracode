@@ -456,18 +456,158 @@ describe('manual HTTP and SSE status reconciliation', () => {
     expect(latest.submission?.status).toBe('JUDGING');
   });
 
-  it('characterizes unresolved terminal-GET/rejudge ambiguity without inventing an HTTP attempt ID', async () => {
+  it.each(['PENDING', 'JUDGING'] as const)(
+    'does not complete on a terminal-detail GET returning %s and permits later recovery',
+    async (status) => {
+      const props = options();
+      await mountHook(props, true);
+      await act(async () => latest.submit());
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await deliverTerminal();
+      const notified = latest.submission;
+      expect(notified?.status).toBe('ACCEPTED');
+      // A newer timestamp cannot identify a new attempt.
+      const snapshot = { ...detail, status, updated_at: later };
+      await act(async () => pending.resolve(snapshot));
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(props.showToast).not.toHaveBeenCalled();
+      expect(latest.submission).toBe(notified);
+      expect(latest.submitting).toBe(false);
+      expect(latest.stream.state).toBe('idle');
+      expect(latest.detailFetchError).toMatch(/could not confirm a final result/i);
+      await deliverTerminal(); // a queued duplicate must not start an automatic GET
+      expect(submissionApi.get).toHaveBeenCalledTimes(1);
+
+      vi.mocked(submissionApi.get).mockResolvedValueOnce(snapshot);
+      await act(async () => latest.checkResultOnce());
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(latest.submission).toBe(notified);
+      expect(latest.detailFetchError).toMatch(/could not confirm a final result/i);
+      expect(latest.checkingResult).toBe(false);
+      expect(props.onCompleted).not.toHaveBeenCalled();
+
+      await act(async () => latest.checkResultOnce());
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+      expect(latest.submission).toEqual(detail);
+      expect(latest.detailFetchError).toBe('');
+      await act(async () => latest.checkResultOnce());
+      expect(submissionApi.get).toHaveBeenCalledTimes(3);
+      expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('uses the same terminal requirement after an immediate-terminal create response', async () => {
+    const props = options();
+    vi.mocked(submissionApi.create).mockResolvedValueOnce({ ...created, status: 'ACCEPTED' });
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, status: 'PENDING' });
+    await mountHook(props);
+    await act(async () => latest.submit());
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(latest.submitting).toBe(false);
+    expect(latest.detailFetchError).toMatch(/could not confirm a final result/i);
+    await act(async () => latest.checkResultOnce());
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(submissionApi.get).toHaveBeenCalledTimes(2);
+    expect(submissionApi.issueStreamTicket).not.toHaveBeenCalled();
+  });
+
+  it('allows recovery when the terminal detail carries the wrong submission ID', async () => {
+    const props = options();
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, id: 99 });
+    await mountHook(props);
+    await act(async () => latest.submit());
+    await deliverTerminal();
+    expect(props.onCompleted).not.toHaveBeenCalled();
+    expect(latest.submission?.id).toBe(41);
+    expect(latest.submitting).toBe(false);
+    expect(latest.detailFetchError).toMatch(/could not confirm a final result/i);
+    await act(async () => latest.checkResultOnce());
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+  });
+
+  it.each(['account', 'slug', 'unmount'] as const)(
+    'ignores an obsolete nonterminal detail after %s even when HTTP resolves after abort',
+    async (kind) => {
+      const props = options();
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      await mountHook(props);
+      await act(async () => latest.submit());
+      await deliverTerminal();
+      const [, signal] = vi.mocked(submissionApi.get).mock.calls[0];
+      await invalidateContext(kind, props);
+      expect(signal?.aborted).toBe(true);
+      if (kind !== 'unmount') {
+        vi.mocked(submissionApi.create).mockResolvedValueOnce({
+          ...created,
+          id: 42,
+          problem_id: kind === 'slug' ? 2 : 1,
+        });
+        await act(async () => latest.submit());
+      }
+      await act(async () => pending.resolve({ ...detail, status: 'PENDING' }));
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(latest.detailFetchError).toBe('');
+      if (kind !== 'unmount') {
+        expect(latest.submitting).toBe(true);
+        expect(latest.submission).toMatchObject({ id: 42, status: 'PENDING' });
+      }
+    },
+  );
+
+  it('cannot distinguish a late terminal HTTP snapshot from the attempt adopted on reconnect', async () => {
     const props = options();
     await mountHook(props);
     await act(async () => latest.submit());
-    const rejudged = { ...detail, status: 'PENDING' as const, updated_at: later };
-    vi.mocked(submissionApi.get).mockResolvedValue(rejudged);
+    await act(async () =>
+      TestEventSource.instances[0].emit('submission.snapshot', statusEvent('JUDGING')),
+    );
+    expect(latest.submission?.status).toBe('JUDGING');
+    await disconnectStream();
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    const check = await startCheck();
+    await act(async () => latest.stream.reconnect());
+    const source = TestEventSource.instances.at(-1)!;
+    await act(async () =>
+      source.emit('submission.snapshot', {
+        ...statusEvent('PENDING', later),
+        attempt_id: 'attempt-b',
+      }),
+    );
+    expect(latest.submission).toMatchObject({ status: 'PENDING', updated_at: later });
+
+    // This DTO could be a delayed terminal read of A or a final read of B.
+    // The current policy accepts an owned terminal GET without proving its attempt.
+    await act(async () => {
+      pending.resolve(detail);
+      await check.done;
+    });
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(latest.submission).toEqual(detail);
+    expect(source.closed).toBe(true);
+  });
+
+  it('does not track a later rejudge automatically after completing the current lifecycle', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const source = TestEventSource.instances[0];
     await deliverTerminal();
-    // Existing terminal-fetch authority is deliberately preserved in this task.
-    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(rejudged);
-    expect(latest.submission).toEqual(rejudged);
-    await act(async () => latest.checkResultOnce());
+    expect(source.closed).toBe(true);
+    expect(latest.stream.state).toBe('idle');
+    await act(async () => {
+      source.emit('submission.snapshot', {
+        ...statusEvent('PENDING', later),
+        attempt_id: 'attempt-b',
+      });
+      await latest.checkResultOnce();
+    });
+    expect(latest.submission).toEqual(detail);
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
     expect(submissionApi.get).toHaveBeenCalledTimes(1);
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
   });
 
   it('keeps current ordering during a same-account refresh while manual GET is pending', async () => {
