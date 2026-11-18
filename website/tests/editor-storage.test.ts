@@ -11,24 +11,25 @@ import type { LanguageCode } from '../src/lib/types';
 const languages: LanguageCode[] = ['GO', 'CPP', 'PYTHON', 'JAVA'];
 
 describe('workspace draft storage contract', () => {
-  it('isolates each problem/language pair using the existing key format', () => {
+  it('encodes version, owner, problem and language without delimiter collisions', () => {
     const drafts = new Map<string, string>();
-    for (const problemId of [17, 29]) {
-      for (const language of languages) {
-        const key = draftKey(problemId, language);
-        expect(key).toBe(`astra-draft:${problemId}:${language}`);
-        drafts.set(key, `${problemId} ${language} draft\n`);
+    for (const owner of ['account:a', 'account:["a",17]']) {
+      for (const problemId of [17, 29]) {
+        for (const language of languages) {
+          const key = draftKey(owner, problemId, language);
+          expect(key.startsWith('astra-draft:v2:')).toBe(true);
+          expect(JSON.parse(key.slice('astra-draft:v2:'.length))).toEqual([
+            owner,
+            problemId,
+            language,
+          ]);
+          drafts.set(key, `${owner} ${problemId} ${language} draft\n`);
+        }
       }
     }
-    expect(drafts.size).toBe(8);
-    for (const problemId of [17, 29]) {
-      for (const language of languages) {
-        expect(resolveDraftCode(language, drafts.get(draftKey(problemId, language)) ?? null)).toBe(
-          `${problemId} ${language} draft\n`,
-        );
-      }
-    }
-    expect(resolveDraftCode('CPP', drafts.get(draftKey(99, 'CPP')) ?? null)).toBe(
+    expect(drafts.size).toBe(16);
+    expect(drafts.get(draftKey('account:a', 17, 'CPP'))).toBe('account:a 17 CPP draft\n');
+    expect(resolveDraftCode('CPP', drafts.get(draftKey('unknown', 17, 'CPP')) ?? null)).toBe(
       CODE_TEMPLATES.CPP,
     );
   });

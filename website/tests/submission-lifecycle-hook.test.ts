@@ -162,11 +162,14 @@ describe('submission hook callback boundaries with real React', () => {
     );
     await act(async () => latest.submit());
     expect(onSubmitStart).toHaveBeenCalledTimes(1);
-    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
-      problem_id: 2,
-      language: 'JAVA',
-      source_code: 'new source\n',
-    });
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith(
+      {
+        problem_id: 2,
+        language: 'JAVA',
+        source_code: 'new source\n',
+      },
+      expect.any(Function),
+    );
   });
 });
 
@@ -888,11 +891,15 @@ describe('submission async ownership and completion races', () => {
       vi.mocked(submissionApi.create).mockResolvedValue({ ...created, id: 42 });
       await act(async () => latest.submit());
       expect(submissionApi.create).toHaveBeenCalledTimes(2);
-      expect(submissionApi.create).toHaveBeenNthCalledWith(2, {
-        problem_id: 1,
-        language: 'CPP',
-        source_code: 'fixture source',
-      });
+      expect(submissionApi.create).toHaveBeenNthCalledWith(
+        2,
+        {
+          problem_id: 1,
+          language: 'CPP',
+          source_code: 'fixture source',
+        },
+        expect.any(Function),
+      );
       expect(props.requireAuth).toHaveBeenCalledExactlyOnceWith('submit');
       expect(props.onSubmitStart).toHaveBeenCalledTimes(1);
       expect(latest.submission?.id).toBe(42);

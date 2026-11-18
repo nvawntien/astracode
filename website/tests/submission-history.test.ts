@@ -13,6 +13,7 @@ import WorkspacePage from '../src/app/problems/[slug]/page';
 import type { CodeEditor } from '../src/components/CodeEditor';
 import { ApiError, NetworkError, problemApi, submissionApi } from '../src/lib/api';
 import { fetchProgress } from '../src/lib/progress';
+import { CODE_TEMPLATES, draftKey } from '../src/lib/templates';
 import type {
   ListSubmissionsResponse,
   Me,
@@ -28,10 +29,19 @@ import { deferred, renderReact } from './helpers/react-dom';
 const observed = vi.hoisted(() => ({
   user: null as Me | null,
   slug: 'history-problem',
+  authLoading: false,
+  realEditor: false,
+  onCommit: null as (() => void) | null,
   push: vi.fn(),
   toast: vi.fn(),
   editor: null as ComponentProps<typeof CodeEditor> | null,
-  commits: [] as { accountId: string | null; history: string; dialog: string }[],
+  commits: [] as {
+    accountId: string | null;
+    history: string;
+    dialog: string;
+    source: string;
+    overlay: string;
+  }[],
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ slug: observed.slug }),
@@ -42,20 +52,24 @@ vi.mock('next/link', () => ({
     createElement('a', { href }, children),
 }));
 vi.mock('@/components/AuthProvider', () => ({
-  useAuth: () => ({ user: observed.user, loading: false }),
+  useAuth: () => ({ user: observed.user, loading: observed.authLoading }),
 }));
 vi.mock('@/components/ToastProvider', () => ({ useToast: () => ({ showToast: observed.toast }) }));
 vi.mock('@/components/Header', () => ({ Header: () => null }));
-vi.mock('@/components/CodeEditor', () => ({
-  CodeEditor: (props: ComponentProps<typeof CodeEditor>) => {
-    observed.editor = props;
-    return createElement('textarea', {
-      'aria-label': 'History fixture editor',
-      value: props.value,
-      readOnly: true,
-    });
-  },
-}));
+vi.mock('@/components/CodeEditor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/components/CodeEditor')>();
+  return {
+    CodeEditor: (props: ComponentProps<typeof CodeEditor>) => {
+      observed.editor = props;
+      if (observed.realEditor) return createElement(actual.CodeEditor, props);
+      return createElement('textarea', {
+        'aria-label': 'History fixture editor',
+        value: props.value,
+        readOnly: true,
+      });
+    },
+  };
+});
 vi.mock('@/lib/progress', () => ({ fetchProgress: vi.fn(), invalidateProgress: vi.fn() }));
 
 const accountA: Me = {
@@ -143,9 +157,12 @@ function CommitObserver() {
   useLayoutEffect(() => {
     observed.commits.push({
       accountId: observed.user?.id ?? null,
+      source: document.querySelector<HTMLTextAreaElement>('.ac-code-editor-input')?.value ?? '',
+      overlay: document.querySelector('[data-code-editor-scroll]')?.textContent ?? '',
       history: document.querySelector('#workspace-problem-pane')?.textContent ?? '',
       dialog: document.querySelector('[aria-label="Replace editor code"]')?.textContent ?? '',
     });
+    observed.onCommit?.();
   });
   return createElement(WorkspacePage);
 }
@@ -198,8 +215,11 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem('astra-lang', 'CPP');
-  localStorage.setItem('astra-draft:1:CPP', draft);
+  localStorage.setItem(draftKey(accountA.id, 1, 'CPP'), draft);
   observed.user = accountA;
+  observed.realEditor = false;
+  observed.onCommit = null;
+  observed.authLoading = false;
   observed.slug = problem.slug;
   observed.editor = null;
   observed.commits = [];
@@ -248,8 +268,8 @@ describe('real workspace submission history account isolation', () => {
     expect(observed.commits.at(-1)?.history).not.toContain(privateSourceA);
     expect(observed.commits.at(-1)?.history).not.toContain('#101');
     expectNoAccountAHistory();
-    expect(view!.container.querySelector('textarea')).toBe(editor);
-    expect(observed.editor?.value).toBe(draft);
+    expect(view!.container.querySelector('textarea')).not.toBe(editor);
+    expect(observed.editor?.value).toBe(CODE_TEMPLATES.CPP);
     await act(async () => oldRestore.click());
     expect(view!.container.querySelector('[role="dialog"]')).toBeNull();
     await act(async () => nextHistory.resolve(history([detail(201)])));
@@ -267,7 +287,7 @@ describe('real workspace submission history account isolation', () => {
     expect(observed.commits.at(-1)?.history).not.toContain(privateSourceA);
     expect(historyPane().textContent).toContain('Sign in to see your submissions');
     expect(submissionApi.listMine).toHaveBeenCalledTimes(1);
-    expect(observed.editor?.value).toBe(draft);
+    expect(observed.editor?.value).toBe(CODE_TEMPLATES.CPP);
   });
 
   it('loads B independently after A logs out and B logs in', async () => {
@@ -494,7 +514,7 @@ describe('history and detail request ownership', () => {
         oldDetail.resolve(detail(101, { status: 'PENDING' }));
       });
       expect(view!.container.textContent).toBe('');
-      expect(localStorage.getItem('astra-draft:1:CPP')).toBe(draft);
+      expect(localStorage.getItem(draftKey(accountA.id, 1, 'CPP'))).toBe(draft);
     },
   );
 
@@ -609,7 +629,7 @@ describe('current-account history/detail behavior', () => {
       expect(observed.commits.at(-1)?.dialog).toBe('');
       expect(view!.container.querySelector('[aria-label="Replace editor code"]')).toBeNull();
       await act(async () => oldConfirm.click());
-      expect(observed.editor?.value).toBe(draft);
+      expect(observed.editor?.value).toBe(CODE_TEMPLATES.CPP);
       await changeAccount(accountA);
       expect(view!.container.querySelector('[aria-label="Replace editor code"]')).toBeNull();
     },
@@ -662,11 +682,14 @@ describe('current-account history/detail behavior', () => {
     );
     expect(historyPane().textContent).toContain('Page 1 / 2');
     expect(historyPane().querySelector('[aria-label="Submission detail"]')).toBeNull();
-    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
-      problem_id: 1,
-      language: 'CPP',
-      source_code: draft,
-    });
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith(
+      {
+        problem_id: 1,
+        language: 'CPP',
+        source_code: draft,
+      },
+      expect.any(Function),
+    );
     expect(submissionApi.listMine).toHaveBeenLastCalledWith(
       { problem_id: 1, page: 1, limit: 10 },
       expect.any(AbortSignal),
@@ -742,4 +765,223 @@ describe('current-account history/detail behavior', () => {
       expect.any(AbortSignal),
     );
   });
+});
+
+describe('editor source privacy in the real Workspace and CodeEditor', () => {
+  const typed = '// typed only by account A';
+  const bDraft = '// account B scoped code';
+  const legacyKey = 'astra-draft:1:CPP';
+  const ownerKey = (account: Me) => draftKey(account.id, 1, 'CPP');
+  const runResult = {
+    status: 'completed' as const,
+    compile_output: '',
+    diagnostics: [],
+    tests: [],
+  };
+
+  function editorInput() {
+    const input = view!.container.querySelector<HTMLTextAreaElement>('.ac-code-editor-input');
+    expect(input).not.toBeNull();
+    return input!;
+  }
+
+  function enterCode(code: string) {
+    const input = editorInput();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, code);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function expectNoEditorSource(source: string) {
+    expect(editorInput().value).not.toContain(source);
+    expect(view!.container.querySelector('[data-code-editor-scroll]')?.textContent).not.toContain(
+      source.trim(),
+    );
+    expect(observed.commits.length).toBeGreaterThan(0);
+    expect(observed.commits.every((commit) => !commit.source.includes(source))).toBe(true);
+    expect(observed.commits.every((commit) => !commit.overlay.includes(source.trim()))).toBe(true);
+  }
+
+  async function restoreCurrentSource(id: number) {
+    await openDetail(id);
+    await click('Use this code', historyPane());
+    const dialog = view!.container.querySelector('[aria-label="Replace editor code"]')!;
+    expect(dialog).not.toBeNull();
+    await click('Use this code', dialog);
+  }
+
+  beforeEach(() => {
+    localStorage.setItem(legacyKey, draft);
+    observed.realEditor = true;
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    vi.spyOn(submissionApi, 'run').mockResolvedValue(runResult);
+  });
+
+  it.each(['direct', 'logout'] as const)(
+    'keeps restored source and the committed textarea isolated on a %s switch and B remount',
+    async (mode) => {
+      localStorage.setItem(ownerKey(accountB), bDraft);
+      await mount(true);
+      await restoreCurrentSource(101);
+      expect(editorInput().value).toBe(privateSourceA);
+      await act(async () => vi.advanceTimersByTimeAsync(600));
+      const aInput = editorInput();
+      observed.commits.length = 0;
+
+      if (mode === 'logout') {
+        await changeAccount(null, true);
+        expectNoEditorSource(privateSourceA);
+        expect(editorInput().value).toBe(CODE_TEMPLATES.CPP);
+      }
+      await changeAccount(accountB, true);
+      expectNoEditorSource(privateSourceA);
+      expect(editorInput().value).toBe(bDraft);
+      expect(editorInput()).not.toBe(aInput);
+      expect(localStorage.getItem(ownerKey(accountA))).toBe(privateSourceA);
+      expect(localStorage.getItem(legacyKey)).toBe(draft);
+
+      await view!.unmount();
+      await mount(true);
+      expectNoEditorSource(privateSourceA);
+      expect(editorInput().value).toBe(bDraft);
+      await changeAccount(accountA, true);
+      expect(editorInput().value).toBe(privateSourceA);
+    },
+  );
+
+  it('keeps typed code private in the first B commit and in both Run and Submit payloads', async () => {
+    localStorage.setItem(ownerKey(accountB), bDraft);
+    TestEventSource.instances = [];
+    vi.stubGlobal('EventSource', TestEventSource);
+    vi.spyOn(submissionApi, 'issueStreamTicket').mockResolvedValue({
+      ticket: 'fixture-ticket',
+      expires_at: accountA.updated_at,
+    });
+
+    await mount();
+    await act(async () => enterCode(typed));
+    // jsdom queues a zero-delay storage event one fake tick after the 600 ms write.
+    await act(async () => vi.advanceTimersByTimeAsync(601));
+    const aInput = editorInput();
+    await changeAccount({ ...accountA });
+    expect(editorInput()).toBe(aInput);
+    expect(editorInput().value).toBe(typed);
+    await click('Run');
+    await click('Submit');
+
+    observed.commits.length = 0;
+    const transitionHotkeys = vi.fn(() => {
+      observed.onCommit = null;
+      for (const shiftKey of [false, true]) {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey }),
+        );
+      }
+    });
+    observed.onCommit = transitionHotkeys;
+    await changeAccount(accountB);
+    expect(transitionHotkeys).toHaveBeenCalledTimes(1);
+    expect(submissionApi.run).toHaveBeenCalledTimes(1);
+    expect(submissionApi.create).toHaveBeenCalledTimes(1);
+    expectNoEditorSource(typed);
+    await click('Run');
+    await click('Submit');
+    const runSources = vi.mocked(submissionApi.run).mock.calls.map(([body]) => body.source_code);
+    const submitSources = vi
+      .mocked(submissionApi.create)
+      .mock.calls.map(([body]) => body.source_code);
+    expect({ runSources, submitSources }).toEqual({
+      runSources: [typed, bDraft],
+      submitSources: [typed, bDraft],
+    });
+  });
+
+  it.each([
+    { transition: 'A to B', action: 'Submit', nextOwner: accountB, postCount: 1 },
+    { transition: 'same-ID refresh', action: 'Submit', nextOwner: { ...accountA }, postCount: 2 },
+    { transition: 'A to B', action: 'Run', nextOwner: accountB, postCount: 1 },
+  ])(
+    'guards $action replay of the source after a 401 refresh in flight and $transition',
+    async ({ action, nextOwner, postCount }) => {
+      const refresh = deferred<Response>();
+      const postedSources: string[] = [];
+      const fetchStub = vi.fn(async (input: string, options: RequestInit) => {
+        if (input.endsWith('/auth/refresh-token')) return refresh.promise;
+        expect(input.endsWith(action === 'Submit' ? '/submissions' : '/submissions/run')).toBe(
+          true,
+        );
+        postedSources.push(JSON.parse(String(options.body)).source_code);
+        return postedSources.length === 1
+          ? new Response('', { status: 401 })
+          : Response.json({ data: action === 'Submit' ? detail(101) : runResult });
+      });
+      vi.mocked(action === 'Submit' ? submissionApi.create : submissionApi.run).mockRestore();
+      vi.stubGlobal('fetch', fetchStub);
+      await mount();
+      await act(async () => enterCode(typed));
+      await click(action);
+      expect(fetchStub).toHaveBeenCalledTimes(2);
+      await changeAccount(nextOwner);
+      await act(async () => refresh.resolve(new Response('', { status: 200 })));
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(postedSources).toEqual(Array(postCount).fill(typed));
+    },
+  );
+
+  it('does not cross-write a pending autosave and restores B own private code normally', async () => {
+    localStorage.removeItem(ownerKey(accountA));
+    await mount(true);
+    await act(async () => {
+      enterCode('// edit in same batch');
+      enterCode(typed);
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(599));
+    await changeAccount(accountB, true);
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    expect(editorInput().value).toBe(CODE_TEMPLATES.CPP);
+    expect(localStorage.getItem(ownerKey(accountB))).toBeNull();
+    expect(localStorage.getItem(ownerKey(accountA))).toBeNull();
+    expect(localStorage.getItem(legacyKey)).toBe(draft);
+
+    await restoreCurrentSource(201);
+    expect(editorInput().value).toBe(privateSourceB);
+    expect(localStorage.getItem(ownerKey(accountB))).toBe(privateSourceB);
+    expect(localStorage.getItem(ownerKey(accountA))).toBeNull();
+  });
+
+  it.each([accountA, null])(
+    'does not load legacy or editable guest source during auth hydration',
+    async (nextUser) => {
+      observed.user = null;
+      observed.authLoading = true;
+      const aDraft = '// persisted A source';
+      localStorage.setItem(ownerKey(accountA), aDraft);
+      await mount();
+      expect(editorInput().readOnly).toBe(true);
+      expect(editorInput().value).toBe(CODE_TEMPLATES.CPP);
+      await act(async () => vi.advanceTimersByTimeAsync(600));
+      expect(localStorage.getItem(legacyKey)).toBe(draft);
+
+      observed.authLoading = false;
+      await changeAccount(nextUser);
+      expect(editorInput().readOnly).toBe(false);
+      expect(editorInput().value).toBe(nextUser ? aDraft : CODE_TEMPLATES.CPP);
+      if (!nextUser) {
+        await act(async () => enterCode('// anonymous code'));
+        expect(editorInput().value).toBe('// anonymous code');
+        await act(async () => vi.advanceTimersByTimeAsync(1000));
+        await changeAccount(accountA);
+        expect(editorInput().value).toBe(aDraft);
+        await changeAccount(null);
+        expect(editorInput().value).toBe(CODE_TEMPLATES.CPP);
+      }
+      expect(localStorage.getItem(legacyKey)).toBe(draft);
+    },
+  );
 });

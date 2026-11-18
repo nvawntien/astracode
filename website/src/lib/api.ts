@@ -105,6 +105,8 @@ interface RequestOptions {
   signal?: AbortSignal;
   /** Skip the refresh-token retry (used by auth endpoints themselves). */
   noRetry?: boolean;
+  /** Recheck ownership before retrying a request that carries editor source. */
+  canRetry?: () => boolean;
 }
 
 let refreshInFlight: Promise<boolean> | null = null;
@@ -167,9 +169,10 @@ async function rawRequest(path: string, options: RequestOptions): Promise<Respon
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   let res = await rawRequest(path, options);
 
-  if (res.status === 401 && !options.noRetry) {
+  const canRetry = () => !options.signal?.aborted && options.canRetry?.() !== false;
+  if (res.status === 401 && !options.noRetry && canRetry()) {
     const refreshed = await refreshSession();
-    if (refreshed) res = await rawRequest(path, options);
+    if (refreshed && canRetry()) res = await rawRequest(path, options);
   }
 
   const text = await res.text();
@@ -437,8 +440,8 @@ export const adminUserApi = {
 /* ------------------------------------------------------------ submission */
 
 export const submissionApi = {
-  create: (body: CreateSubmissionRequest) =>
-    apiRequest<CreateSubmissionResponse>('/api/v1/submissions', { method: 'POST', body }),
+  create: (body: CreateSubmissionRequest, canRetry?: () => boolean) =>
+    apiRequest<CreateSubmissionResponse>('/api/v1/submissions', { method: 'POST', body, canRetry }),
 
   get: (id: number, signal?: AbortSignal) =>
     apiRequest<SubmissionDetail>(`/api/v1/submissions/${id}`, { signal }),

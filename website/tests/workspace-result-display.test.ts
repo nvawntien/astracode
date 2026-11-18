@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspacePage from '../src/app/problems/[slug]/page';
+import { draftKey } from '../src/lib/templates';
 import type { CodeEditor } from '../src/components/CodeEditor';
 import { ApiError, NetworkError, problemApi, submissionApi } from '../src/lib/api';
 import { fetchProgress, invalidateProgress } from '../src/lib/progress';
@@ -198,7 +199,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem('astra-lang', 'CPP');
-  localStorage.setItem('astra-draft:1:CPP', '// draft');
+  localStorage.setItem(draftKey(user.id, 1, 'CPP'), '// draft');
   Object.defineProperty(window, 'innerWidth', { value: 1280, configurable: true, writable: true });
   observed.user = user;
   observed.slug = problem.slug;

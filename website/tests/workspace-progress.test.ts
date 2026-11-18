@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspacePage from '../src/app/problems/[slug]/page';
+import { CODE_TEMPLATES, draftKey } from '../src/lib/templates';
 import type { CodeEditor } from '../src/components/CodeEditor';
 import { ApiError, problemApi, submissionApi } from '../src/lib/api';
 import { fetchProgress, invalidateProgress, useProgress } from '../src/lib/progress';
@@ -173,7 +174,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem('astra-lang', 'CPP');
-  localStorage.setItem('astra-draft:1:CPP', '// draft\n');
+  localStorage.setItem(draftKey(accountA.id, 1, 'CPP'), '// draft\n');
   Object.defineProperty(window, 'innerWidth', { value: 1280, configurable: true, writable: true });
   observed.user = accountA;
   observed.slug = problem.slug;
@@ -226,8 +227,8 @@ describe('real Workspace progress ownership', () => {
       await account(accountB);
       expect(observed.commits.at(-1)).toBe('Not attempted');
       expect(status()).toBe('Not attempted');
-      expect(view!.container.querySelector('textarea')).toBe(editor);
-      expect(observed.editor?.value).toBe('// draft\n');
+      expect(view!.container.querySelector('textarea')).not.toBe(editor);
+      expect(observed.editor?.value).toBe(CODE_TEMPLATES.CPP);
       await act(async () => pendingB.resolve(history()));
       expect(status()).toBe('Not attempted');
       expect(progressCalls()).toHaveLength(2);

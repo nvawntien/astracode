@@ -180,13 +180,14 @@ export default function WorkspacePage() {
   // The history's restore confirmation also contains private metadata. Gate it
   // during render, then discard it so returning to an old account cannot revive it.
   const restoreSubmission =
+    !authLoading &&
     restoreSubmissionCandidate?.user_id === accountId &&
     restoreSubmissionCandidate?.problem_id === problem?.id
       ? restoreSubmissionCandidate
       : null;
   useEffect(() => {
     setRestoreSubmission(null);
-  }, [accountId, problem?.id]);
+  }, [authLoading, accountId, problem?.id]);
 
   const settingsRef = useDismissable<HTMLDivElement>(settingsOpen, () => setSettingsOpen(false));
 
@@ -206,11 +207,14 @@ export default function WorkspacePage() {
     setJumpTarget(null);
   }, [problem, language, runOwner]);
 
-  const { code, setCode, draftSavedAt, resetCode, restoreDraft } = useEditorDraft({
-    problem,
-    language,
-    setLanguage,
-  });
+  const { code, setCode, draftSavedAt, resetCode, restoreDraft, editorKey, ready, isCurrentDraft } =
+    useEditorDraft({
+      accountId,
+      authLoading,
+      problemId,
+      language,
+      setLanguage,
+    });
 
   const changeLanguage = (next: LanguageCode) => {
     changeEditorLanguage(next);
@@ -227,7 +231,7 @@ export default function WorkspacePage() {
         return;
       }
 
-      restoreDraft(nextLanguage, detail.source_code);
+      if (!restoreDraft(nextLanguage, detail.source_code)) return;
       setDiagnosticSnapshot(null);
       setJumpTarget(null);
       setRestoreSubmission(null);
@@ -241,7 +245,8 @@ export default function WorkspacePage() {
 
   const requestRestoreSubmissionCode = useCallback(
     (detail: SubmissionDetail) => {
-      if (detail.user_id !== accountId || detail.problem_id !== problem?.id) return;
+      if (!isCurrentDraft() || detail.user_id !== accountId || detail.problem_id !== problem?.id)
+        return;
       const nextLanguage = detail.language.toUpperCase() as LanguageCode;
       const willReplaceDraft = code !== detail.source_code || language !== nextLanguage;
       if (willReplaceDraft) {
@@ -250,7 +255,7 @@ export default function WorkspacePage() {
       }
       restoreSubmissionCode(detail);
     },
-    [accountId, code, language, problem?.id, restoreSubmissionCode],
+    [accountId, code, isCurrentDraft, language, problem?.id, restoreSubmissionCode],
   );
 
   /* ---------------------------------------------------------------- tests */
@@ -285,6 +290,7 @@ export default function WorkspacePage() {
     setResultSelection(null);
   }, [runOwner]);
   const requireAuth = (action: string): boolean => {
+    if (!isCurrentDraft()) return false;
     if (user) return true;
     showToast(`Sign in to ${action}`, 'error');
     router.push(`/login?next=/problems/${slug}`);
@@ -623,8 +629,8 @@ export default function WorkspacePage() {
                     style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--warn)' }}
                   />
                   <span style={{ fontSize: 12, fontWeight: 550 }}>
-                    Network disconnected — code is saved locally; Run and Submit are disabled until
-                    you reconnect.
+                    Network disconnected — {accountId ? 'drafts are saved locally. ' : ''}
+                    Run and Submit are disabled until you reconnect.
                   </span>
                 </div>
               )}
@@ -647,7 +653,9 @@ export default function WorkspacePage() {
               />
 
               <CodeEditor
+                key={editorKey}
                 value={code}
+                readOnly={!ready}
                 onChange={(next) => {
                   setCode(next);
                   setDiagnosticSnapshot(null);

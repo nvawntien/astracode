@@ -3,6 +3,7 @@
 import { act, createElement, StrictMode, type ComponentProps, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspacePage from '../src/app/problems/[slug]/page';
+import { draftKey } from '../src/lib/templates';
 import type { CodeEditor } from '../src/components/CodeEditor';
 import type { ProblemPanel } from '../src/components/workspace/ProblemPanel';
 import { ApiError, problemApi, submissionApi } from '../src/lib/api';
@@ -277,7 +278,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem('astra-lang', 'CPP');
-  localStorage.setItem('astra-draft:1:CPP', sourceCode);
+  localStorage.setItem(draftKey(user.id, 1, 'CPP'), sourceCode);
   observed.slug = problem.slug;
   observed.user = user;
   observed.editor = observed.problem = null;
@@ -926,7 +927,7 @@ describe('workspace fullscreen responsive accessibility', () => {
     'preserves language, draft and testcases while exiting fullscreen in stacked Code view (%spx)',
     async (width) => {
       localStorage.setItem('astra-lang', 'JAVA');
-      localStorage.setItem('astra-draft:1:JAVA', '// existing Java draft');
+      localStorage.setItem(draftKey(user.id, 1, 'JAVA'), '// existing Java draft');
       await mount();
       await click('Use fixture example');
       await act(async () => observed.editor!.onChange('// edited Java draft'));
@@ -934,7 +935,7 @@ describe('workspace fullscreen responsive accessibility', () => {
       // jsdom schedules a storage event from inside the draft-save timer. Fake timers
       // defer that nested zero-delay callback to the next tick; flush it explicitly.
       await act(async () => vi.advanceTimersToNextTimerAsync());
-      expect(localStorage.getItem('astra-draft:1:JAVA')).toBe('// edited Java draft');
+      expect(localStorage.getItem(draftKey(user.id, 1, 'JAVA'))).toBe('// edited Java draft');
       await click('Full-width editor');
       await resize(width);
       await click('Code');
@@ -951,7 +952,7 @@ describe('workspace fullscreen responsive accessibility', () => {
       await click('Code');
       expect(observed.editor?.value).toBe('// edited Java draft');
       expect(localStorage.getItem('astra-lang')).toBe('JAVA');
-      expect(localStorage.getItem('astra-draft:1:JAVA')).toBe('// edited Java draft');
+      expect(localStorage.getItem(draftKey(user.id, 1, 'JAVA'))).toBe('// edited Java draft');
       expect(submissionApi.create).not.toHaveBeenCalled();
       expect(submissionApi.run).not.toHaveBeenCalled();
       expect(observed.push).not.toHaveBeenCalled();

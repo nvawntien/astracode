@@ -13,6 +13,7 @@ import WorkspacePage from '../src/app/problems/[slug]/page';
 import { ApiError, NetworkError, problemApi, submissionApi } from '../src/lib/api';
 import { fetchProgress, invalidateProgress } from '../src/lib/progress';
 import type { useSubmissionStream } from '../src/lib/submission-stream';
+import { CODE_TEMPLATES, draftKey } from '../src/lib/templates';
 import type { CodeEditor } from '../src/components/CodeEditor';
 import type { ProblemPanel } from '../src/components/workspace/ProblemPanel';
 import type { ResultPanel } from '../src/features/problem-workspace/components/ResultPanel';
@@ -213,7 +214,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem('astra-lang', 'CPP');
-  localStorage.setItem('astra-draft:1:CPP', sourceCode);
+  localStorage.setItem(draftKey(user.id, 1, 'CPP'), sourceCode);
   observed.slug = problem.slug;
   observed.user = user;
   observed.result = observed.editor = observed.problem = null;
@@ -277,7 +278,7 @@ describe('official submission guards, creation and completion with real React', 
   });
 
   it('rejects whitespace-only source without changing its stored format', async () => {
-    localStorage.setItem('astra-draft:1:CPP', ' \n\t');
+    localStorage.setItem(draftKey(user.id, 1, 'CPP'), ' \n\t');
     await mount();
     await click('Submit');
     expect(submissionApi.create).not.toHaveBeenCalled();
@@ -325,11 +326,14 @@ describe('official submission guards, creation and completion with real React', 
     const pending = deferred<CreateSubmissionResponse>();
     vi.mocked(submissionApi.create).mockReturnValue(pending.promise);
     await click('Submit');
-    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
-      problem_id: 1,
-      language: 'CPP',
-      source_code: sourceCode,
-    });
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith(
+      {
+        problem_id: 1,
+        language: 'CPP',
+        source_code: sourceCode,
+      },
+      expect.any(Function),
+    );
     expect(state()).toMatchObject({
       submitting: true,
       submission: null,
@@ -787,7 +791,7 @@ describe('cross-account workspace isolation', () => {
       checkingResult: false,
     });
     expect(observed.stream).toMatchObject({ submissionId: null, enabled: false });
-    expect(observed.editor!.value).toBe(sourceCode);
+    expect(observed.editor!.value).toBe(CODE_TEMPLATES.CPP);
     expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
     expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
   });
@@ -975,11 +979,15 @@ describe('async lifecycle response validity', () => {
       vi.mocked(submissionApi.create).mockResolvedValue(created({ id: 42 }));
       await shortcut(true, modifier);
       expect(submissionApi.create).toHaveBeenCalledTimes(2);
-      expect(submissionApi.create).toHaveBeenNthCalledWith(2, {
-        problem_id: 1,
-        language: 'CPP',
-        source_code: sourceCode,
-      });
+      expect(submissionApi.create).toHaveBeenNthCalledWith(
+        2,
+        {
+          problem_id: 1,
+          language: 'CPP',
+          source_code: sourceCode,
+        },
+        expect.any(Function),
+      );
       expect(state()).toMatchObject({
         checkingResult: false,
         submitting: true,
@@ -1547,7 +1555,7 @@ describe('Workspace Run ownership and action guards', () => {
     expect(submissionApi.run).toHaveBeenCalledTimes(2);
   });
 
-  it('hides completed Run result and editor markers in B first commit while preserving the editor', async () => {
+  it('hides completed Run result, editor markers and source in B first commit', async () => {
     const commits: {
       diagnostics: ComponentProps<typeof CodeEditor>['diagnostics'];
       line: number | null | undefined;
@@ -1572,8 +1580,8 @@ describe('Workspace Run ownership and action guards', () => {
     observed.user = { ...user, id: 'account-b', username: 'account-b' };
     await view.rerender(createElement(OutputObserver));
     expect(commits.at(-1)).toEqual({ diagnostics: [], line: null, run: null });
-    expect(view.container.querySelector('textarea')).toBe(editor);
-    expect(observed.editor!.value).toBe(sourceCode);
+    expect(view.container.querySelector('textarea')).not.toBe(editor);
+    expect(observed.editor!.value).toBe(CODE_TEMPLATES.CPP);
     await click('Console');
     expect(view.container.textContent).not.toContain('obsolete Run output');
   });
@@ -1620,11 +1628,14 @@ describe('Workspace Run ownership and action guards', () => {
       view!.container.querySelector('textarea[aria-label="Test input for Custom 1"]'),
     ).toBeNull();
     await click('Submit');
-    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith({
-      problem_id: 1,
-      language: 'CPP',
-      source_code: 'current source\n',
-    });
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith(
+      {
+        problem_id: 1,
+        language: 'CPP',
+        source_code: 'current source\n',
+      },
+      expect.any(Function),
+    );
     expect(observed.editor!.diagnostics).toEqual([]);
   });
 

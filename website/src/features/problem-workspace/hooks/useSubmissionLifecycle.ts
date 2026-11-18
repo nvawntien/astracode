@@ -431,11 +431,12 @@ export function useSubmissionLifecycle({
     onSubmitStart();
 
     try {
-      const created = await submissionApi.create({
-        problem_id: problem.id,
-        language,
-        source_code: code,
-      });
+      const created = await submissionApi.create(
+        { problem_id: problem.id, language, source_code: code },
+        // The API client may refresh cookies before retrying a 401. The
+        // original source must still belong to this lifecycle at replay time.
+        () => isCurrent(generation),
+      );
       if (!isCurrent(generation)) return;
       operationsRef.current.submissionId = created.id;
       operationsRef.current.statusOrder = {
