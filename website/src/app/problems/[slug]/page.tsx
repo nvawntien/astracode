@@ -29,8 +29,14 @@ import type {
 import { EditorToolbar } from '@/features/problem-workspace/components/EditorToolbar';
 import { RunSubmitButtons } from '@/features/problem-workspace/components/RunSubmitButtons';
 import { TestcasePanel } from '@/features/problem-workspace/components/TestcasePanel';
-import { ResultPanel } from '@/features/problem-workspace/components/ResultPanel';
-import { iconButton } from '@/features/problem-workspace/components/workspaceStyles';
+import {
+  ResultPanel,
+  type ResultSource,
+} from '@/features/problem-workspace/components/ResultPanel';
+import {
+  iconButton,
+  smallActionButton,
+} from '@/features/problem-workspace/components/workspaceStyles';
 import { useEditorDraft } from '@/features/problem-workspace/hooks/useEditorDraft';
 import { useEditorPreferences } from '@/features/problem-workspace/hooks/useEditorPreferences';
 import { useTestcases } from '@/features/problem-workspace/hooks/useTestcases';
@@ -40,6 +46,7 @@ import { useWorkspaceGeometry } from '@/features/problem-workspace/hooks/useWork
 
 type BottomTab = 'tests' | 'console' | 'result';
 type LoadState = 'loading' | 'ready' | 'notfound' | 'error';
+type ResultSelection = { owner: string; source: ResultSource };
 
 export default function WorkspacePage() {
   const params = useParams<{ slug: string }>();
@@ -263,6 +270,20 @@ export default function WorkspacePage() {
 
   const [bottomTab, setBottomTab] = useState<BottomTab>('tests');
   const [bottomOpen, setBottomOpen] = useState(true);
+  const [resultSelection, setResultSelection] = useState<ResultSelection | null>(null);
+  const resultSelectionRef = useRef<ResultSelection | null>(null);
+  const selectResultSource = (source: ResultSource) => {
+    const selection = { owner: runOwner, source };
+    // Async Run fallbacks must respect a later explicit display choice, even
+    // before React has committed the action's state update.
+    resultSelectionRef.current = selection;
+    setResultSelection(selection);
+  };
+  const resultSource = resultSelection?.owner === runOwner ? resultSelection.source : null;
+  useLayoutEffect(() => {
+    resultSelectionRef.current = null;
+    setResultSelection(null);
+  }, [runOwner]);
   const requireAuth = (action: string): boolean => {
     if (user) return true;
     showToast(`Sign in to ${action}`, 'error');
@@ -307,6 +328,7 @@ export default function WorkspacePage() {
       setRunResult(null);
       setDiagnosticSnapshot(null);
       setJumpTarget(null);
+      selectResultSource('submission');
       setBottomTab('result');
       setBottomOpen(true);
     },
@@ -328,14 +350,19 @@ export default function WorkspacePage() {
     onStart: () => {
       setDiagnosticSnapshot(null);
       setJumpTarget(null);
+      selectResultSource('run');
       setBottomTab('result');
+      setBottomOpen(true);
     },
     onResult: (result, diagnostics) => {
       setDiagnosticSnapshot({ owner: runOwner, items: diagnostics });
       if (diagnostics[0]?.line) setJumpTarget({ owner: runOwner, line: diagnostics[0].line });
       selectRunResult(result);
     },
-    onUnavailable: () => setBottomTab('console'),
+    onUnavailable: () => {
+      const selection = resultSelectionRef.current;
+      if (selection?.owner === runOwner && selection.source === 'run') setBottomTab('console');
+    },
   });
 
   // Ctrl/Cmd+Enter runs, Ctrl/Cmd+Shift+Enter submits.
@@ -367,6 +394,9 @@ export default function WorkspacePage() {
 
   const langMeta = languageMeta(language);
   const busy = running || submitting || checkingResult;
+  const canViewSubmission = Boolean(
+    accountId && submission?.user_id === accountId && submission?.problem_id === problemId,
+  );
   const runResultsByID = useMemo(() => {
     const entries = runResult?.tests.map((test) => [test.id, test] as const) ?? [];
     return new Map(entries);
@@ -788,29 +818,52 @@ export default function WorkspacePage() {
                     )}
 
                     {bottomTab === 'result' && (
-                      <ResultPanel
-                        submitting={submitting}
-                        checkingResult={checkingResult}
-                        submission={submission}
-                        streamState={stream.state}
-                        liveUpdateError={liveUpdateError || stream.error?.message || ''}
-                        detailFetchError={detailFetchError}
-                        runResult={runResult}
-                        running={running}
-                        diagnostics={codeDiagnostics}
-                        onReconnectStream={stream.reconnect}
-                        onCheckResult={checkResultOnce}
-                        onSelectDiagnostic={(diagnostic) => {
-                          if (diagnostic.line > 0) {
-                            setJumpTarget({ owner: runOwner, line: diagnostic.line });
-                            if (stacked) setMobileView('editor');
-                          }
-                        }}
-                        onOpenSubmissions={() => {
-                          setTab('submissions');
-                          if (stacked) setMobileView('problem');
-                        }}
-                      />
+                      <>
+                        {resultSource === 'run' && canViewSubmission && (
+                          <button
+                            type="button"
+                            onClick={() => selectResultSource('submission')}
+                            className="ac-hover-surface2"
+                            style={{ ...smallActionButton, marginBottom: 8 }}
+                          >
+                            View submission result
+                          </button>
+                        )}
+                        {resultSource === 'submission' && (runResult || running) && (
+                          <button
+                            type="button"
+                            onClick={() => selectResultSource('run')}
+                            className="ac-hover-surface2"
+                            style={{ ...smallActionButton, marginBottom: 8 }}
+                          >
+                            View Run result
+                          </button>
+                        )}
+                        <ResultPanel
+                          source={resultSource}
+                          submitting={submitting}
+                          checkingResult={checkingResult}
+                          submission={submission}
+                          streamState={stream.state}
+                          liveUpdateError={liveUpdateError || stream.error?.message || ''}
+                          detailFetchError={detailFetchError}
+                          runResult={runResult}
+                          running={running}
+                          diagnostics={codeDiagnostics}
+                          onReconnectStream={stream.reconnect}
+                          onCheckResult={checkResultOnce}
+                          onSelectDiagnostic={(diagnostic) => {
+                            if (diagnostic.line > 0) {
+                              setJumpTarget({ owner: runOwner, line: diagnostic.line });
+                              if (stacked) setMobileView('editor');
+                            }
+                          }}
+                          onOpenSubmissions={() => {
+                            setTab('submissions');
+                            if (stacked) setMobileView('problem');
+                          }}
+                        />
+                      </>
                     )}
                   </div>
                 )}

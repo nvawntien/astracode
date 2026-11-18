@@ -1282,22 +1282,24 @@ describe('workspace keyboard resize accessibility', () => {
 });
 
 describe('workspace layout coordination with feature actions', () => {
-  it.each([true, false])('Run selects Result while preserving bottomOpen=%s', async (open) => {
-    const pending = deferred<RunResponse>();
-    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
-    await mount();
-    await click('Console');
-    if (!open) await click('Collapse panel');
-    await click('Run');
-    expectSelected('Result');
-    expect(bottomPanel().style.height).toBe(open ? '235px' : '39px');
-    if (open) expect(view!.container.textContent).toContain('Running your code');
-    else expect(view!.container.textContent).not.toContain('Running your code');
-    expect(submissionApi.run).toHaveBeenCalledTimes(1);
-    expect(observed.editor?.value).toBe(sourceCode);
-    await act(async () => pending.resolve(runResult));
-    expect(bottomPanel().style.height).toBe(open ? '235px' : '39px');
-  });
+  it.each([true, false])(
+    'Run opens Result and retains geometry when initially bottomOpen=%s',
+    async (open) => {
+      const pending = deferred<RunResponse>();
+      vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+      await mount();
+      await click('Console');
+      if (!open) await click('Collapse panel');
+      await click('Run');
+      expectSelected('Result');
+      expect(bottomPanel().style.height).toBe('235px');
+      expect(view!.container.textContent).toContain('Running your code');
+      expect(submissionApi.run).toHaveBeenCalledTimes(1);
+      expect(observed.editor?.value).toBe(sourceCode);
+      await act(async () => pending.resolve(runResult));
+      expect(bottomPanel().style.height).toBe('235px');
+    },
+  );
 
   it('Submit selects Result and opens a previously collapsed bottom panel before create settles', async () => {
     const pending = deferred<CreateSubmissionResponse>();

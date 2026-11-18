@@ -13,7 +13,10 @@ import { formatRunStatus, isRunFailure } from '../runResult';
 import { ResultTile } from './ResultTile';
 import { runOutputBlock, settingsLabel, smallActionButton } from './workspaceStyles';
 
+export type ResultSource = 'run' | 'submission';
+
 interface ResultPanelProps {
+  source: ResultSource | null;
   submitting: boolean;
   checkingResult: boolean;
   submission: Submission | null;
@@ -30,20 +33,42 @@ interface ResultPanelProps {
 }
 
 export function ResultPanel({
+  source,
   submitting,
   checkingResult,
-  submission,
+  submission: officialSubmission,
   streamState,
   liveUpdateError,
   detailFetchError,
-  runResult,
-  running,
+  runResult: availableRunResult,
+  running: runPending,
   diagnostics,
   onReconnectStream,
   onCheckResult,
   onSelectDiagnostic,
   onOpenSubmissions,
 }: ResultPanelProps) {
+  // Availability and asynchronous completion do not choose the display source.
+  // Keep both data objects in their lifecycle owners; project only the selected
+  // source into the existing presentation branches, including empty/error states.
+  const submission = source === 'submission' ? officialSubmission : null;
+  const runResult = source === 'run' ? availableRunResult : null;
+  const running = source === 'run' && runPending;
+
+  if (source === 'submission' && submitting && !submission) {
+    return (
+      <div
+        role="status"
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}
+      >
+        <Spinner />
+        <span style={{ fontSize: 12.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>
+          Submitting your code…
+        </span>
+      </div>
+    );
+  }
+
   if (running) {
     return (
       <div
