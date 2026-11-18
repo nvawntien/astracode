@@ -1,5 +1,5 @@
 import { isTerminalSubmissionStatus } from '../../lib/format';
-import type { SubmissionStatus, SubmissionStreamEvent } from '../../lib/types';
+import type { SubmissionStatus } from '../../lib/types';
 
 export interface SubmissionStatusSnapshot {
   attemptId: string | null;
@@ -7,15 +7,25 @@ export interface SubmissionStatusSnapshot {
   updatedAt: string;
 }
 
-// The stream validates attempt identity before this policy runs. A different
-// attempt from a fresh connection snapshot starts an independent progression.
+interface SubmissionStatusUpdate {
+  status: SubmissionStatus;
+  updated_at: string;
+  attempt_id?: string;
+}
+
+// Only a transport-validated SSE identity can establish a different attempt.
+// HTTP detail lacks that identity: conservatively compare it with the current
+// progression. This cannot distinguish stale snapshots from a new rejudge.
 export function nextSubmissionStatus(
   current: SubmissionStatusSnapshot | null,
-  event: SubmissionStreamEvent,
+  event: SubmissionStatusUpdate,
 ): SubmissionStatusSnapshot | null {
   const incomingTime = Date.parse(event.updated_at);
   const sameAttempt =
-    current && (current.attemptId === null || current.attemptId === event.attempt_id);
+    current &&
+    (event.attempt_id === undefined ||
+      current.attemptId === null ||
+      current.attemptId === event.attempt_id);
 
   if (sameAttempt) {
     if (isTerminalSubmissionStatus(current.status)) return null;
@@ -36,7 +46,7 @@ export function nextSubmissionStatus(
   // Wall-clock timestamps are not a sequence. Equal/skewed/invalid timestamps
   // must not suppress a valid phase advance (especially its first terminal).
   return {
-    attemptId: event.attempt_id,
+    attemptId: event.attempt_id ?? current?.attemptId ?? null,
     status: event.status,
     updatedAt: Number.isFinite(incomingTime)
       ? event.updated_at

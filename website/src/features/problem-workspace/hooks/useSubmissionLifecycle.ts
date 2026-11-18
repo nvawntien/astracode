@@ -243,12 +243,16 @@ export function useSubmissionLifecycle({
       if (isTerminalSubmissionStatus(latest.status)) {
         finishSubmissionFromDetail(latest, generation);
       } else {
-        operations.statusOrder = {
-          attemptId: operations.statusOrder?.attemptId ?? null,
+        // Reconcile against the synchronous latest order, not the submission
+        // captured when GET began. HTTP supplies no attempt ID, so it cannot
+        // establish a rejudge; terminal detail above retains its authority.
+        const next = nextSubmissionStatus(operations.statusOrder, {
           status: latest.status,
-          updatedAt: latest.updated_at,
-        };
-        setSubmission(latest);
+          updated_at: latest.updated_at,
+        });
+        if (!next) return;
+        operations.statusOrder = next;
+        setSubmission({ ...latest, status: next.status, updated_at: next.updatedAt });
         showToast(
           `Submission #${latest.id} is still ${verdictMeta(latest.status).label.toLowerCase()}.`,
           'success',

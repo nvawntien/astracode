@@ -92,3 +92,47 @@ describe('submission status partial order', () => {
     ).toEqual({ attemptId: 'attempt-b', status: 'PENDING', updatedAt: earlier });
   });
 });
+
+describe('HTTP status snapshots without attempt identity', () => {
+  it('cannot infer a new attempt from HTTP PENDING and a newer clock value', () => {
+    expect(nextSubmissionStatus(current, { status: 'PENDING', updated_at: later })).toBeNull();
+  });
+
+  it('accepts initial HTTP progression while leaving an unknown attempt unknown', () => {
+    expect(nextSubmissionStatus(null, { status: 'JUDGING', updated_at: time })).toEqual({
+      attemptId: null,
+      status: 'JUDGING',
+      updatedAt: time,
+    });
+  });
+
+  it('preserves the known attempt on HTTP phase advances despite invalid timestamps', () => {
+    expect(
+      nextSubmissionStatus(
+        { ...current, status: 'PENDING' },
+        { status: 'JUDGING', updated_at: 'invalid-time' },
+      ),
+    ).toEqual(current);
+  });
+
+  it('ignores same-status duplicate, older, equal and invalid HTTP metadata', () => {
+    for (const updated_at of [time, earlier, '2026-11-17T01:00:00+00:00', '', 'invalid-time']) {
+      expect(nextSubmissionStatus(current, { status: 'JUDGING', updated_at })).toBeNull();
+    }
+  });
+
+  it('accepts newer HTTP metadata without replacing attempt identity', () => {
+    expect(nextSubmissionStatus(current, { status: 'JUDGING', updated_at: later })).toEqual({
+      ...current,
+      updatedAt: later,
+    });
+  });
+
+  it('keeps an accepted terminal immutable for attempt-less status comparisons', () => {
+    for (const status of ['PENDING', 'JUDGING', 'WRONG_ANSWER'] as const) {
+      expect(
+        nextSubmissionStatus({ ...current, status: 'ACCEPTED' }, { status, updated_at: later }),
+      ).toBeNull();
+    }
+  });
+});

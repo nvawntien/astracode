@@ -1151,6 +1151,36 @@ describe('SSE recovery and independent detail errors', () => {
 });
 
 describe('SSE status ordering', () => {
+  it('keeps the judging UI after a stale manual GET and still completes through the reconnected stream', async () => {
+    await mount();
+    await click('Submit');
+    await disconnect();
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    await click('Check result');
+    await click('Reconnect');
+    const source = TestEventSource.instances.at(-1)!;
+    await act(async () => {
+      source.open();
+      source.emit('submission.snapshot', event());
+    });
+    expect(view!.container.textContent).toContain('is being judged');
+    await act(async () =>
+      pending.resolve(detail({ status: 'PENDING', updated_at: '2026-11-17T02:00:00Z' })),
+    );
+    expect(state().submission).toMatchObject({ status: 'JUDGING', updated_at: event().updated_at });
+    expect(view!.container.textContent).toContain('is being judged');
+    expect(view!.container.textContent).not.toContain('queued — waiting');
+    expect(state().checkingResult).toBe(false);
+    expect(state().detailFetchError).toBe('');
+    await act(async () => source.emit('submission.completed', event({ status: 'ACCEPTED' })));
+    expect(state().submission).toEqual(detail());
+    expect(observed.problem!.historyRefreshKey).toBe(1);
+    expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
+    expect(fetchProgress).toHaveBeenLastCalledWith(user.id, true);
+    expect(observed.toast).toHaveBeenCalledExactlyOnceWith('Accepted', 'success');
+  });
+
   it('ignores duplicate and older same-status metadata without replacing the React submission object', async () => {
     await mount();
     await click('Submit');

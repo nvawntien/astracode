@@ -4,7 +4,7 @@ import { act, createElement, StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSubmissionLifecycle } from '../src/features/problem-workspace/hooks/useSubmissionLifecycle';
 import { ApiError, NetworkError, submissionApi } from '../src/lib/api';
-import type { CreateSubmissionResponse, Submission } from '../src/lib/types';
+import type { CreateSubmissionResponse, Submission, SubmissionStreamEvent } from '../src/lib/types';
 import { TestEventSource } from './helpers/event-source';
 import { deferred, renderReact } from './helpers/react-dom';
 
@@ -225,6 +225,297 @@ async function invalidateContext(kind: Invalidation, props: Options) {
     }),
   );
 }
+
+describe('manual HTTP and SSE status reconciliation', () => {
+  const judgingTime = '2026-11-17T01:00:30Z';
+  const later = '2026-11-17T02:00:00Z';
+  function statusEvent(status: SubmissionStreamEvent['status'], updated_at = judgingTime) {
+    return { submission_id: 41, attempt_id: 'fixture-attempt', status, updated_at };
+  }
+
+  it.each(['separate acts', 'same batch', 'StrictMode'] as const)(
+    'rejects stale manual PENDING after SSE JUDGING in %s and still completes',
+    async (mode) => {
+      const props = options();
+      await mountHook(props, mode === 'StrictMode');
+      await act(async () => latest.submit());
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      const check = await startCheck();
+      const source = TestEventSource.instances.at(-1)!;
+      const advance = () => source.emit('submission.updated', statusEvent('JUDGING'));
+      if (mode !== 'same batch') await act(async () => advance());
+      await act(async () => {
+        if (mode === 'same batch') advance();
+        pending.resolve({ ...detail, status: 'PENDING', updated_at: later });
+        await check.done;
+      });
+      expect(latest.submission).toMatchObject({ status: 'JUDGING', updated_at: judgingTime });
+      expect(latest.checkingResult).toBe(false);
+      expect(latest.detailFetchError).toBe('');
+      expect(props.showToast).not.toHaveBeenCalled();
+      const accepted = latest.submission;
+      await act(async () => {
+        source.emit('submission.updated', statusEvent('PENDING', later));
+        source.emit('submission.updated', statusEvent('JUDGING'));
+      });
+      // An unchanged object also proves the manual response did not rewind
+      // the synchronous ordering ref behind the rendered JUDGING state.
+      expect(latest.submission).toBe(accepted);
+      await deliverTerminal();
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    },
+  );
+
+  it.each([created.created_at, judgingTime, later, '', 'invalid-time'])(
+    'accepts manual JUDGING progression with timestamp %j and rejects later SSE PENDING',
+    async (updated_at) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      vi.mocked(submissionApi.get).mockResolvedValueOnce({
+        ...detail,
+        status: 'JUDGING',
+        updated_at,
+        execution_time_ms: 23,
+      });
+      await act(async () => latest.checkResultOnce());
+      const accepted = latest.submission;
+      expect(accepted).toMatchObject({
+        status: 'JUDGING',
+        execution_time_ms: 23,
+        updated_at:
+          updated_at === '' || updated_at === 'invalid-time' ? created.created_at : updated_at,
+      });
+      const source = TestEventSource.instances.at(-1)!;
+      await act(async () => source.emit('submission.snapshot', statusEvent('PENDING', later)));
+      expect(latest.submission).toBe(accepted);
+      await deliverTerminal();
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    },
+  );
+
+  it.each(['PENDING', 'JUDGING'] as const)(
+    'ignores duplicate/older/invalid manual %s metadata and merges newer metadata once',
+    async (status) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const source = TestEventSource.instances.at(-1)!;
+      await act(async () => source.emit('submission.snapshot', statusEvent(status)));
+      const accepted = latest.submission;
+      for (const updated_at of [
+        created.created_at,
+        judgingTime,
+        '2026-11-17T01:00:30+00:00',
+        '',
+        'invalid-time',
+      ]) {
+        vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, status, updated_at });
+        await act(async () => latest.checkResultOnce());
+        expect(latest.submission).toBe(accepted);
+        expect(latest.checkingResult).toBe(false);
+        expect(latest.detailFetchError).toBe('');
+      }
+      expect(props.showToast).not.toHaveBeenCalled();
+      vi.mocked(submissionApi.get).mockResolvedValueOnce({ ...detail, status, updated_at: later });
+      await act(async () => latest.checkResultOnce());
+      expect(latest.submission).toMatchObject({ status, updated_at: later, execution_time_ms: 1 });
+      const refreshed = latest.submission;
+      await act(async () => source.emit('submission.updated', statusEvent(status, later)));
+      expect(latest.submission).toBe(refreshed);
+      expect(props.showToast).toHaveBeenCalledExactlyOnceWith(
+        `Submission #41 is still ${status === 'PENDING' ? 'queued' : 'judging'}.`,
+        'success',
+      );
+    },
+  );
+
+  it('reconciles manual progression before queued SSE updates within the same React batch', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    const check = await startCheck();
+    const source = TestEventSource.instances.at(-1)!;
+    await act(async () => {
+      pending.resolve({ ...detail, status: 'JUDGING', updated_at: judgingTime });
+      await check.done;
+      source.emit('submission.updated', statusEvent('PENDING', later));
+      source.emit('submission.completed', statusEvent('ACCEPTED', created.created_at));
+    });
+    expect(latest.submission).toEqual(detail);
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+    expect(submissionApi.get).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['PENDING', 'JUDGING'] as const)(
+    'keeps a terminal SSE while a stale manual %s resolves before terminal detail',
+    async (status) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const manual = deferred<Submission>();
+      const terminalDetail = deferred<Submission>();
+      vi.mocked(submissionApi.get)
+        .mockReturnValueOnce(manual.promise)
+        .mockReturnValueOnce(terminalDetail.promise);
+      const check = await startCheck();
+      await deliverTerminal();
+      const terminalSignal = vi.mocked(submissionApi.get).mock.calls[1][1]!;
+      const accepted = latest.submission;
+      await act(async () => {
+        manual.resolve({ ...detail, status, updated_at: later });
+        await check.done;
+      });
+      expect(latest.submission).toBe(accepted);
+      expect(latest.submission?.status).toBe('ACCEPTED');
+      expect(latest.checkingResult).toBe(false);
+      expect(terminalSignal.aborted).toBe(false);
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(props.showToast).not.toHaveBeenCalled();
+      await act(async () => terminalDetail.resolve(detail));
+      expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(detail);
+      expect(submissionApi.get).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('keeps manual terminal detail authoritative over SSE without ranking terminal verdicts', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const manual = deferred<Submission>();
+    const terminalDetail = deferred<Submission>();
+    vi.mocked(submissionApi.get)
+      .mockReturnValueOnce(manual.promise)
+      .mockReturnValueOnce(terminalDetail.promise);
+    const check = await startCheck();
+    await deliverTerminal();
+    const final = { ...detail, status: 'WRONG_ANSWER' as const, updated_at: created.created_at };
+    await act(async () => {
+      manual.resolve(final);
+      await check.done;
+      terminalDetail.resolve(detail);
+    });
+    expect(latest.submission).toEqual(final);
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(final);
+  });
+
+  it('allows terminal manual recovery after a failed terminal-detail GET', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    vi.mocked(submissionApi.get).mockRejectedValueOnce(new NetworkError());
+    await deliverTerminal();
+    expect(latest.detailFetchError).toContain('Verdict received');
+    const recovered = {
+      ...detail,
+      status: 'WRONG_ANSWER' as const,
+      updated_at: created.created_at,
+    };
+    vi.mocked(submissionApi.get).mockResolvedValueOnce(recovered);
+    await act(async () => latest.checkResultOnce());
+    expect(latest.detailFetchError).toBe('');
+    expect(latest.submission).toEqual(recovered);
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(recovered);
+  });
+
+  it('cannot identify rejudge from HTTP PENDING alone, but accepts a validated new-attempt snapshot', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    await act(async () =>
+      TestEventSource.instances[0].emit('submission.snapshot', statusEvent('JUDGING')),
+    );
+    // A newer timestamp is equally compatible with a stale current-attempt
+    // snapshot or a new rejudge. The HTTP DTO supplies no attempt identity.
+    vi.mocked(submissionApi.get).mockResolvedValueOnce({
+      ...detail,
+      status: 'PENDING',
+      updated_at: later,
+    });
+    await act(async () => latest.checkResultOnce());
+    expect(latest.submission?.status).toBe('JUDGING');
+    await act(async () => latest.stream.reconnect());
+    const source = TestEventSource.instances.at(-1)!;
+    await act(async () =>
+      source.emit('submission.snapshot', {
+        ...statusEvent('PENDING', later),
+        attempt_id: 'attempt-b',
+      }),
+    );
+    expect(latest.submission?.status).toBe('PENDING');
+    await act(async () =>
+      source.emit('submission.updated', {
+        ...statusEvent('JUDGING', later),
+        attempt_id: 'attempt-b',
+      }),
+    );
+    expect(latest.submission?.status).toBe('JUDGING');
+  });
+
+  it('characterizes unresolved terminal-GET/rejudge ambiguity without inventing an HTTP attempt ID', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const rejudged = { ...detail, status: 'PENDING' as const, updated_at: later };
+    vi.mocked(submissionApi.get).mockResolvedValue(rejudged);
+    await deliverTerminal();
+    // Existing terminal-fetch authority is deliberately preserved in this task.
+    expect(props.onCompleted).toHaveBeenCalledExactlyOnceWith(rejudged);
+    expect(latest.submission).toEqual(rejudged);
+    await act(async () => latest.checkResultOnce());
+    expect(submissionApi.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps current ordering during a same-account refresh while manual GET is pending', async () => {
+    const props = options();
+    await mountHook(props);
+    await act(async () => latest.submit());
+    const pending = deferred<Submission>();
+    vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+    const check = await startCheck();
+    const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+    await view!.rerender(
+      createElement(Probe, { ...props, user: { ...props.user!, username: 'fresh' } }),
+    );
+    expect(signal.aborted).toBe(false);
+    await act(async () =>
+      TestEventSource.instances[0].emit('submission.updated', statusEvent('JUDGING')),
+    );
+    await act(async () => {
+      pending.resolve({ ...detail, status: 'PENDING' });
+      await check.done;
+    });
+    expect(latest.submission?.status).toBe('JUDGING');
+    expect(submissionApi.issueStreamTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['slug', 'account', 'unmount'] as const)(
+    'keeps a stale nonterminal response invalid after %s',
+    async (kind) => {
+      const props = options();
+      await mountHook(props);
+      await act(async () => latest.submit());
+      const pending = deferred<Submission>();
+      vi.mocked(submissionApi.get).mockReturnValueOnce(pending.promise);
+      const check = await startCheck();
+      const signal = vi.mocked(submissionApi.get).mock.calls[0][1]!;
+      await invalidateContext(kind, props);
+      expect(signal.aborted).toBe(true);
+      const accepted = latest.submission;
+      await act(async () => {
+        pending.resolve({ ...detail, status: 'JUDGING' });
+        await check.done;
+      });
+      expect(latest.submission).toBe(accepted);
+      expect(props.onCompleted).not.toHaveBeenCalled();
+      expect(props.showToast).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe('submission async ownership and completion races', () => {
   it.each(['pending', 'error'] as const)(
