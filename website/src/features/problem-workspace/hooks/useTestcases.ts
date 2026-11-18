@@ -1,85 +1,122 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { ToastKind } from '../../../components/ToastProvider';
 import type { Problem, RunResponse } from '../../../lib/types';
 import { isRunFailure } from '../runResult';
 import { initialTestcases } from '../testcases';
-import type { TestCase } from '../types';
+import type { TestCase, TestCasePatch } from '../types';
+
+const MAX_TESTCASES = 10;
 
 interface TestcasesOptions {
   problem: Pick<Problem, 'examples'> | null;
   showToast: (message: string, kind?: ToastKind) => void;
 }
 
-export function useTestcases({ problem, showToast }: TestcasesOptions) {
-  const [tests, setTests] = useState<TestCase[]>([]);
-  const [selectedTest, setSelectedTest] = useState(0);
+interface TestcaseCollection {
+  problem: TestcasesOptions['problem'];
+  tests: TestCase[];
+  selectedId: string | null;
+  nextCustomId: number;
+}
 
-  useEffect(() => {
-    if (!problem) return;
-    setTests(initialTestcases(problem.examples));
-    setSelectedTest(0);
+function createCollection(
+  problem: TestcasesOptions['problem'],
+  nextCustomId: number,
+): TestcaseCollection {
+  const tests = problem ? initialTestcases(problem.examples) : [];
+  return { problem, tests, selectedId: tests[0]?.id ?? null, nextCustomId };
+}
+
+export function useTestcases({ problem, showToast }: TestcasesOptions) {
+  const [collection, setCollection] = useState(() => createCollection(problem, 1));
+  const current = useRef(collection);
+
+  useLayoutEffect(() => {
+    if (current.current.problem === problem) return;
+    current.current = createCollection(problem, current.current.nextCustomId);
+    setCollection(current.current);
   }, [problem]);
 
-  const updateTest = (index: number, patch: Partial<TestCase>) => {
-    setTests((current) => current.map((test, i) => (i === index ? { ...test, ...patch } : test)));
+  const activeCollection = () =>
+    problem && current.current.problem === problem ? current.current : null;
+
+  // Actions use the latest collection within a batch. This also lets Add
+  // Example report acceptance before the page switches tabs or mobile views.
+  const commit = (next: TestcaseCollection) => {
+    current.current = next;
+    setCollection(next);
   };
 
-  const addTest = () => {
-    if (tests.length >= 10) {
-      showToast('Maximum of 10 test cases', 'error');
-      return;
+  const selectTest = (id: string) => {
+    const active = activeCollection();
+    if (!active || active.selectedId === id || !active.tests.some((test) => test.id === id)) return;
+    commit({ ...active, selectedId: id });
+  };
+
+  const updateTest = (id: string, patch: TestCasePatch) => {
+    const active = activeCollection();
+    if (!active || !active.tests.some((test) => test.id === id && !test.fromExample)) return;
+    const tests = active.tests.map((test) => (test.id === id ? { ...test, ...patch } : test));
+    commit({ ...active, tests });
+  };
+
+  const appendTest = (input: string, expected: string | null) => {
+    const active = activeCollection();
+    if (!active) return false;
+    if (active.tests.length >= MAX_TESTCASES) {
+      showToast(`Maximum of ${MAX_TESTCASES} test cases`, 'error');
+      return false;
     }
-    const customCount = tests.filter((test) => test.kind === 'custom').length + 1;
-    setTests((current) => [
-      ...current,
-      {
-        id: `custom-${Date.now()}`,
-        kind: 'custom',
-        name: `Custom ${customCount}`,
-        input: '',
-        expected: null,
-        fromExample: false,
-      },
-    ]);
-    setSelectedTest(tests.length);
+
+    let nextCustomId = active.nextCustomId;
+    let id = `custom-${nextCustomId++}`;
+    while (active.tests.some((test) => test.id === id)) {
+      id = `custom-${nextCustomId++}`;
+    }
+    const customCount = active.tests.filter((test) => test.kind === 'custom').length;
+    const test: TestCase = {
+      id,
+      kind: 'custom',
+      name: `Custom ${customCount + 1}`,
+      input,
+      expected,
+      fromExample: false,
+    };
+    commit({ ...active, tests: [...active.tests, test], selectedId: id, nextCustomId });
+    return true;
   };
 
-  const removeTest = (index: number) => {
-    setTests((current) => current.filter((_, i) => i !== index));
-    setSelectedTest((current) => Math.max(0, current > index ? current - 1 : current));
-  };
+  const addTest = () => appendTest('', null);
+  const addExample = (input: string, expected: string) => appendTest(input, expected);
 
-  const addExample = (input: string, expected: string) => {
-    // Preserve the existing example path, including its lack of a count guard.
-    setTests((current) => {
-      const next = [
-        ...current,
-        {
-          id: `custom-${Date.now()}`,
-          kind: 'custom' as const,
-          name: `Custom ${current.filter((test) => test.kind === 'custom').length + 1}`,
-          input,
-          expected,
-          fromExample: false,
-        },
-      ];
-      setSelectedTest(next.length - 1);
-      return next;
-    });
+  const removeTest = (id: string) => {
+    const active = activeCollection();
+    if (!active || active.tests.length <= 1) return;
+    const index = active.tests.findIndex((test) => test.id === id);
+    if (index < 0 || active.tests[index].fromExample) return;
+
+    const tests = active.tests.filter((test) => test.id !== id);
+    const selectedId =
+      active.selectedId === id ? tests[Math.min(index, tests.length - 1)].id : active.selectedId;
+    commit({ ...active, tests, selectedId });
   };
 
   const selectRunResult = (result: RunResponse) => {
-    const firstFailed = result.tests.findIndex((test) => isRunFailure(test));
-    if (firstFailed >= 0) setSelectedTest(firstFailed);
-    else if (selectedTest >= tests.length) setSelectedTest(0);
+    const active = activeCollection();
+    if (!active) return;
+    const firstFailed = result.tests.find(
+      (test) =>
+        isRunFailure(test) && active.tests.some((currentTest) => currentTest.id === test.id),
+    );
+    if (firstFailed) selectTest(firstFailed.id);
   };
 
   return {
-    tests,
-    selectedTest,
-    setSelectedTest,
+    tests: collection.tests,
+    selectedTest: collection.tests.findIndex((test) => test.id === collection.selectedId),
+    selectTest,
     updateTest,
     addTest,
     removeTest,

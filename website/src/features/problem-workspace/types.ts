@@ -7,3 +7,5 @@ export interface TestCase {
   /** Examples come from the problem and cannot be removed. */
   fromExample: boolean;
 }
+
+export type TestCasePatch = Partial<Pick<TestCase, 'input' | 'expected'>>;

@@ -604,3 +604,99 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     expect(vi.mocked(submissionApi.run).mock.calls[0][1]!.aborted).toBe(true);
   });
 });
+
+describe('testcase collection in the real Workspace', () => {
+  it('rejects a full collection from Add Example without changing mobile view, tab or Run payload', async () => {
+    window.innerWidth = 700;
+    await mount();
+    const example = 'Use input from example 1 as a test';
+    await click(example);
+    expect(button('Code').getAttribute('aria-selected')).toBe('true');
+    expect(button('Tests (2)').getAttribute('aria-selected')).toBe('true');
+    for (let i = 0; i < 8; i++) await click('+ Add case');
+    await click('Case 1');
+    await shortcut();
+    const originalRequest = vi.mocked(submissionApi.run).mock.calls[0][0];
+    expect(originalRequest.testcases).toHaveLength(10);
+
+    await click('Console');
+    await click('Problem');
+    observed.toast.mockClear();
+    await click(example);
+    expect(button('Problem').getAttribute('aria-selected')).toBe('true');
+    expect(observed.toast.mock.calls).toEqual([['Maximum of 10 test cases', 'error']]);
+    expect(observed.push).not.toHaveBeenCalled();
+
+    await click('Code');
+    expect(button('Console').getAttribute('aria-selected')).toBe('true');
+    await click('Tests (10)');
+    expect(button('Case 1').getAttribute('aria-pressed')).toBe('true');
+    await shortcut();
+    expect(submissionApi.run).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(submissionApi.run).mock.calls[1][0]).toEqual(originalRequest);
+  });
+
+  it('sends ordered current testcase values after a selected deletion and selects failures by surviving ID', async () => {
+    // Keep values distinct even on the original implementation so this case
+    // exercises selection and response mapping independently of ID collisions.
+    let timestamp = 100;
+    vi.spyOn(Date, 'now').mockImplementation(() => timestamp++);
+    await mount();
+    await click('+ Add case');
+    await click('+ Add case');
+    await click('+ Add case');
+    await click('Remove Custom 3');
+    expect(button('Custom 2').getAttribute('aria-pressed')).toBe('true');
+    await click('Use input from example 1 as a test');
+    expect(button('Custom 3').getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => {
+      const input = view!.container.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Test input for Custom 3"]',
+      )!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+        input,
+        '  edited\n',
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const pending = deferred<RunResponse>();
+    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+    await shortcut();
+    const [request] = vi.mocked(submissionApi.run).mock.calls[0];
+    expect(request).toEqual({
+      problem_id: problem.id,
+      language: 'CPP',
+      source_code: '// draft',
+      testcases: [
+        { id: 'sample-1', kind: 'sample', stdin: '1', expected_output: '2' },
+        { id: expect.any(String), kind: 'custom', stdin: '', expected_output: null },
+        { id: expect.any(String), kind: 'custom', stdin: '', expected_output: null },
+        { id: expect.any(String), kind: 'custom', stdin: '  edited\n', expected_output: '2' },
+      ],
+    });
+
+    await click('Tests (4)');
+    await click('Remove Custom 1');
+    await click('Custom 2');
+    await act(async () =>
+      pending.resolve({
+        ...runResult,
+        tests: request.testcases.map((test, index) => ({
+          ...runResult.tests[0],
+          id: test.id,
+          kind: test.kind,
+          expected_output: test.expected_output,
+          status: index === 1 || index === 3 ? 'wrong_answer' : 'accepted',
+        })),
+      }),
+    );
+    expect(button('Custom 3').getAttribute('aria-pressed')).toBe('true');
+    expect(
+      view!.container.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Test input for Custom 3"]',
+      )?.value,
+    ).toBe('  edited\n');
+  });
+});

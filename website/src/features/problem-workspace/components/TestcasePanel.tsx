@@ -1,5 +1,5 @@
 import type { RunTestCaseResult } from '@/lib/types';
-import type { TestCase } from '../types';
+import type { TestCase, TestCasePatch } from '../types';
 import { RunCaseDetails } from './RunCaseDetails';
 import { testField, testLabel } from './workspaceStyles';
 
@@ -8,10 +8,10 @@ interface TestcasePanelProps {
   selected: number;
   results: Map<string, RunTestCaseResult>;
   running: boolean;
-  onSelect: (index: number) => void;
+  onSelect: (id: string) => void;
   onAdd: () => void;
-  onRemove: (index: number) => void;
-  onUpdate: (index: number, patch: Partial<TestCase>) => void;
+  onRemove: (id: string) => void;
+  onUpdate: (id: string, patch: TestCasePatch) => void;
 }
 
 export function TestcasePanel({
@@ -42,7 +42,7 @@ export function TestcasePanel({
           const active = index === selected;
           return (
             <span
-              key={index}
+              key={test.id}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -54,7 +54,7 @@ export function TestcasePanel({
             >
               <button
                 type="button"
-                onClick={() => onSelect(index)}
+                onClick={() => onSelect(test.id)}
                 aria-pressed={active}
                 style={{
                   height: 30,
@@ -73,7 +73,7 @@ export function TestcasePanel({
               {!test.fromExample && tests.length > 1 && (
                 <button
                   type="button"
-                  onClick={() => onRemove(index)}
+                  onClick={() => onRemove(test.id)}
                   aria-label={`Remove ${test.name}`}
                   className="ac-hover-error"
                   style={{
@@ -119,7 +119,7 @@ export function TestcasePanel({
             Input — {current.name}
             <textarea
               value={current.input}
-              onChange={(event) => onUpdate(selected, { input: event.target.value })}
+              onChange={(event) => onUpdate(current.id, { input: event.target.value })}
               readOnly={current.fromExample}
               rows={4}
               spellCheck={false}
@@ -133,7 +133,7 @@ export function TestcasePanel({
             <textarea
               value={current.expected ?? ''}
               onChange={(event) =>
-                onUpdate(selected, {
+                onUpdate(current.id, {
                   expected:
                     event.target.value === '' && current.kind === 'custom'
                       ? null

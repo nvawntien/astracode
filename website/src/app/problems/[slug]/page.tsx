@@ -258,7 +258,7 @@ export default function WorkspacePage() {
   const {
     tests,
     selectedTest,
-    setSelectedTest,
+    selectTest,
     updateTest,
     addTest,
     removeTest,
@@ -548,7 +548,7 @@ export default function WorkspacePage() {
                 accountId={accountId}
                 historyRefreshKey={historyRefreshKey}
                 onUseExample={(input, expected) => {
-                  addExample(input, expected);
+                  if (!addExample(input, expected)) return;
                   setBottomTab('tests');
                   setBottomOpen(true);
                   showToast('Example added as a custom test', 'success');
@@ -782,7 +782,7 @@ export default function WorkspacePage() {
                         selected={selectedTest}
                         results={runResultsByID}
                         running={running}
-                        onSelect={setSelectedTest}
+                        onSelect={selectTest}
                         onAdd={addTest}
                         onRemove={removeTest}
                         onUpdate={updateTest}
