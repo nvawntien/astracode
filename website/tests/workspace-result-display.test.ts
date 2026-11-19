@@ -837,6 +837,88 @@ describe('explicit Run testcase selection in the real Workspace', () => {
 
 describe('Run result attribution by submitted testcase values', () => {
   it.each([
+    { change: 'uncheck A', toggleCases: [1], nextCases: [2], bothFail: false },
+    { change: 'replace A with C', toggleCases: [1, 3], nextCases: [2, 3], bothFail: false },
+    { change: 'uncheck both', toggleCases: [1, 2], nextCases: [], bothFail: false },
+    { change: 'keep A checked', toggleCases: [], nextCases: [1, 2], bothFail: false },
+    { change: 'uncheck A when both fail', toggleCases: [1], nextCases: [2], bothFail: true },
+  ])(
+    'focuses the first snapshot failure after pending Run selection changes: $change',
+    async ({ toggleCases, nextCases, bothFail }) => {
+      loadExamples(3);
+      await mount(true);
+      await toggle('Case 3');
+      await click('Case 2');
+
+      const pending = deferred<RunResponse>();
+      vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+      const testcase = (n: number) => ({
+        id: `sample-${n}`,
+        kind: 'sample',
+        stdin: `stdin ${n}\n`,
+        expected_output: `stdout ${n}\n`,
+      });
+      const original = {
+        problem_id: problem.id,
+        language: 'CPP',
+        source_code: '// draft',
+        testcases: [testcase(1), testcase(2)],
+      };
+      await click('Run');
+      expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith(original, expect.any(AbortSignal));
+      await click('Tests (3)');
+      for (const n of toggleCases) await toggle(`Case ${n}`);
+      expect(button('Case 2').getAttribute('aria-pressed')).toBe('true');
+
+      const firstFailure = {
+        ...runResult.tests[0],
+        status: 'wrong_answer' as const,
+        stdout: 'original A output',
+        expected_output: original.testcases[0].expected_output,
+      };
+      const secondResult = {
+        ...runResult.tests[0],
+        id: 'sample-2',
+        status: bothFail ? ('runtime_error' as const) : ('accepted' as const),
+        stdout: 'original B output',
+        expected_output: original.testcases[1].expected_output,
+      };
+      await act(async () =>
+        pending.resolve({
+          ...runResult,
+          // Deliberately reverse the failures to check submitted execution order.
+          tests: bothFail ? [secondResult, firstFailure] : [firstFailure, secondResult],
+        }),
+      );
+      await click('Result');
+      expect(text()).toContain(`${bothFail ? 2 : 1} failed among selected test cases`);
+      expect(text()).toContain('sample-1');
+      expect(text()).toContain('sample-2');
+      await click('Console');
+      expect(text()).toContain('original A output');
+      expect(text()).toContain('original B output');
+      expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith(original, expect.any(AbortSignal));
+
+      await click('Tests (3)');
+      expect(button('Case 1').getAttribute('aria-pressed')).toBe('true');
+      expect(text()).toContain('original A output');
+      expect([1, 2, 3].filter((n) => checkbox(`Case ${n}`).checked)).toEqual(nextCases);
+      await click('Run');
+      if (nextCases.length > 0) {
+        expect(submissionApi.run).toHaveBeenCalledTimes(2);
+        expect(submissionApi.run).toHaveBeenLastCalledWith(
+          { ...original, testcases: nextCases.map(testcase) },
+          expect.any(AbortSignal),
+        );
+      } else {
+        expect(submissionApi.run).toHaveBeenCalledTimes(1);
+        expect(text()).toContain('Select 1–10 test cases to run.');
+        expect(button('Case 1').getAttribute('aria-pressed')).toBe('true');
+      }
+    },
+  );
+
+  it.each([
     ['Test input for Custom 1', 'input Y'],
     ['Expected output for Custom 1', 'expected B'],
   ])('keeps a deferred verdict off the edited case after changing %s', async (field, edit) => {
@@ -900,7 +982,8 @@ describe('Run result attribution by submitted testcase values', () => {
     await click('Remove Custom 1');
     await click('+ Add case');
     expect(text()).toContain('Input — Custom 2');
-    const activeCase = () => panel().querySelector('button[aria-pressed="true"]');
+    const activeCase = () =>
+      panel().querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
     const addedCase = activeCase();
     await act(async () =>
       pending.resolve({
@@ -914,6 +997,12 @@ describe('Run result attribution by submitted testcase values', () => {
         })),
       }),
     );
+    // The removed failure is ineligible. The unchanged sample still belongs
+    // to this Run even though it was unchecked for the next one.
+    expect(activeCase()).toBe(button('Case 1'));
+    expect(checkbox('Case 1').checked).toBe(false);
+    expect(text()).toContain('snapshot output from sample-1');
+    await act(async () => addedCase!.click());
     expect(activeCase()).toBe(addedCase);
     expect(text()).toContain('Not included in the last Run');
     expect(text()).not.toContain('Actual Output');
@@ -932,8 +1021,10 @@ describe('Run result attribution by submitted testcase values', () => {
     );
   });
 
-  it('shows no inline verdict for a submitted case after compilation failure', async () => {
+  it('preserves the active case and shows no inline verdict after compilation failure', async () => {
+    loadExamples(2);
     await mount();
+    await click('Case 2');
     vi.mocked(submissionApi.run).mockResolvedValueOnce({
       ...runResult,
       status: 'compile_error',
@@ -942,7 +1033,8 @@ describe('Run result attribution by submitted testcase values', () => {
     });
     await click('Run');
     expect(text()).toContain('compiler diagnostic');
-    await click('Tests (1)');
+    await click('Tests (2)');
+    expect(button('Case 2').getAttribute('aria-pressed')).toBe('true');
     expect(text()).toContain('No result for this case in the last Run');
     expect(text()).not.toContain('Actual Output');
   });

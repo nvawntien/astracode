@@ -139,11 +139,9 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
     if (!active) return;
     const firstFailed = cases.find(
       (submitted) =>
-        active.includedIds.has(submitted.id) &&
         result.tests.some(
           (test) => test.id === submitted.id && test.kind === submitted.kind && isRunFailure(test),
-        ) &&
-        active.tests.some((test) => matchesRunCase(test, submitted)),
+        ) && active.tests.some((test) => matchesRunCase(test, submitted)),
     );
     if (firstFailed) selectTest(firstFailed.id);
   };
