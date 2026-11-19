@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Coordinate a protected release on the existing App and Judge nodes."""
+import ipaddress
 import re
 import shlex
 import subprocess
@@ -18,7 +19,7 @@ def release_tag(value):
 
 
 class Nodes:
-    def __init__(self, app_dir, judge_dir, fixture):
+    def __init__(self, app_dir, judge_dir, fixture, legacy_from="", legacy_peer=""):
         for directory in (app_dir, judge_dir):
             if not re.fullmatch(r"/opt/astracode/\.deploy/rollout\.[a-zA-Z0-9]{8}", directory):
                 raise RuntimeError("Invalid private upload directory")
@@ -34,6 +35,11 @@ class Nodes:
         self.judge_probe = f"{judge_dir}/astracode-judge-rollout-probe"
         self.settings = ()
         self.worker_id = ""
+        self.legacy_from = release_tag(legacy_from) if legacy_from else ""
+        if bool(self.legacy_from) != bool(legacy_peer):
+            raise RuntimeError("Legacy bootstrap requires both the installed release tag and the Judge broker peer")
+        self.legacy_peer = str(ipaddress.IPv4Address(legacy_peer)) if legacy_peer else ""
+        self.legacy_member = ""
 
     def remote(self, host, argv, *, source=None, capture=False):
         return subprocess.run(
@@ -54,27 +60,42 @@ class Nodes:
             "env", PROTECTED, "/opt/astracode/scripts/deploy-judge-node.sh", *args,
         ], capture=capture)
 
-    def app_gate(self, mode, *args):
+    def app_gate(self, mode, *args, capture=False):
         source = (SCRIPT_DIR / "verify-judge-rollout-app.sh").read_text()
-        self.remote("astracode-app", ["bash", "-s", "--", mode, *self.settings, *args], source=source)
+        return self.remote("astracode-app", ["bash", "-s", "--", mode, *self.settings, *args],
+                           source=source, capture=capture)
 
     def preflight(self, target):
+        if target == self.legacy_from:
+            raise RuntimeError("Legacy bootstrap requires a different, protected target release")
         self.remote("astracode-app", ["chmod", "0700", self.app_probe])
         self.remote("astracode-judge", ["chmod", "0700", self.judge_probe])
         self.remote("astracode-judge", ["mkdir", "-p", "/opt/astracode/scripts"])
         self.remote("astracode-judge", [
             "tar", "-xzf", self.judge_bundle, "-C", "/opt/astracode", "scripts/deploy-judge-node.sh",
         ])
-        judge_tag, settings, self.worker_id = self.judge(
-            "--preflight", target, self.judge_probe, capture=True,
-        ).strip().splitlines()
+        judge_args = ["--preflight", target, self.judge_probe]
+        if self.legacy_from:
+            judge_args = ["--legacy-preflight", target, self.judge_probe, self.legacy_from]
+        judge_tag, settings, self.worker_id = self.judge(*judge_args, capture=True).strip().splitlines()
         self.settings = tuple(settings.split())
         if len(self.settings) != 4 or not re.fullmatch(r"[0-9a-f]{64}", self.worker_id):
             raise RuntimeError("Judge preflight did not identify the Worker container, Problem endpoint and Kafka group")
         previous = release_tag(self.app("--current-tag", self.app_bundle).strip())
         if previous != release_tag(judge_tag):
             raise RuntimeError("App and Judge started on different tags. Recover the existing pair before deploying.")
-        self.app_gate("preflight")
+        if self.legacy_from:
+            if previous != self.legacy_from:
+                raise RuntimeError("Running App and Judge tags do not match the approved legacy source")
+            self.legacy_member = self.app_gate(
+                "legacy-preflight", previous, self.app_probe, self.legacy_peer, *self.fixture, capture=True,
+            ).strip()
+            if not re.fullmatch(r"[a-zA-Z0-9._-]+", self.legacy_member):
+                raise RuntimeError("App probe did not identify the legacy Kafka member")
+            print(f"Verified legacy Worker {self.worker_id} and Kafka member {self.legacy_member}. "
+                  f"Problem, broker, group and topic: {' '.join(self.settings)}", flush=True)
+        else:
+            self.app_gate("preflight")
         return previous
 
     def app_tag(self):
@@ -84,7 +105,11 @@ class Nodes:
         self.judge("--suspend", tag)
 
     def suspend_verified(self, tag):
-        self.judge("--suspend", tag, self.judge_probe, self.worker_id, " ".join(self.settings))
+        args = (tag, self.judge_probe, self.worker_id, " ".join(self.settings))
+        if self.legacy_from:
+            self.judge("--legacy-suspend", *args, self.legacy_peer, self.legacy_member)
+        else:
+            self.judge("--suspend", *args)
 
     def idle(self):
         self.app_gate("idle")
@@ -99,6 +124,11 @@ class Nodes:
         if self.app_tag() != tag:
             raise RuntimeError(f"App runtime does not match expected release {tag}")
         self.app_gate("ready", tag, self.app_probe, *self.fixture)
+
+    def verify_legacy(self, tag):
+        if self.app_tag() != tag:
+            raise RuntimeError("Restored App runtime does not match the legacy release")
+        self.app_gate("legacy-ready", tag, self.app_probe, *self.fixture)
 
     def start_judge(self, tag, previous):
         self.judge("--activate", tag, previous, self.judge_probe, " ".join(self.settings), *self.fixture)
@@ -141,6 +171,11 @@ def deploy(nodes, target):
                 raise RuntimeError("App activation outcome is unknown after an SSH failure")
             if app_activated:
                 nodes.rollback_app(target, previous)
+            if nodes.legacy_from:
+                nodes.verify_legacy(previous)
+                print(f"Restored and verified legacy App {previous}. Operator action required: judging remains suspended. "
+                      "Recover to a verified limits-aware pair before resuming.", file=sys.stderr, flush=True)
+                return False
             nodes.verify(previous)
             recovery_start_attempted = True
             nodes.start_judge(previous, previous)
@@ -164,8 +199,9 @@ def deploy(nodes, target):
 
 if __name__ == "__main__":
     try:
-        target, app_dir, judge_dir, *fixture = sys.argv[1:]
-        sys.exit(0 if deploy(Nodes(app_dir, judge_dir, fixture), release_tag(target)) else 1)
+        target, app_dir, judge_dir, problem, time_ms, memory_kib, *legacy = sys.argv[1:]
+        sys.exit(0 if deploy(Nodes(app_dir, judge_dir, [problem, time_ms, memory_kib], *legacy),
+                             release_tag(target)) else 1)
     except Exception as error:
         print(f"Release preflight failed: {error}", file=sys.stderr)
         sys.exit(1)

@@ -31,10 +31,17 @@ func main() {
 	switch {
 	case len(os.Args) == 6 && os.Args[1] == "metadata":
 		err = verifyMetadata(os.Args[2], os.Args[3:])
+	case len(os.Args) == 6 && os.Args[1] == "legacy-metadata":
+		err = checkMetadata(os.Args[2], os.Args[3:], true)
+	case len(os.Args) == 4 && os.Args[1] == "legacy-consumer":
+		err = verifyLegacyConsumerLog(os.Stdin, os.Args[2], os.Args[3])
+	case len(os.Args) == 6 && os.Args[1] == "kafka-member":
+		err = inspectLegacyMember(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 	case len(os.Args) == 4 && os.Args[1] == "worker-settings":
 		err = workerSettings(os.Args[2], os.Args[3])
 	default:
-		err = fmt.Errorf("usage: judge-rollout-probe metadata <address> <problem-id> <ms> <KiB> | worker-settings <config.yaml> <running|planned>")
+		err = fmt.Errorf("usage: judge-rollout-probe <metadata|legacy-metadata> <address> <problem-id> <ms> <KiB> | " +
+			"worker-settings <config.yaml> <running|planned> | legacy-consumer <broker> <group> | kafka-member <broker> <group> <topic> <peer>")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -43,6 +50,10 @@ func main() {
 }
 
 func verifyMetadata(address string, values []string) error {
+	return checkMetadata(address, values, false)
+}
+
+func checkMetadata(address string, values []string, legacy bool) error {
 	expected := make([]int64, len(values))
 	for i, value := range values {
 		number, err := strconv.ParseInt(value, 10, 64)
@@ -62,10 +73,18 @@ func verifyMetadata(address string, values []string) error {
 	if err != nil {
 		return fmt.Errorf("GetTestCase capability probe failed: gRPC %s", status.Code(err))
 	}
-	if reply.GetTimeLimitMs() != expected[1] || reply.GetMemoryLimitKb() != expected[2] ||
+	timeMS, memoryKiB := expected[1], expected[2]
+	if legacy {
+		timeMS, memoryKiB = 0, 0
+	}
+	if reply.GetTimeLimitMs() != timeMS || reply.GetMemoryLimitKb() != memoryKiB ||
 		reply.GetTestCount() <= 0 || reply.GetVersion() <= 0 || reply.GetZipDownloadUrl() == "" {
 		return fmt.Errorf("GetTestCase capability mismatch for fixture %d: got %d ms / %d KiB, expected %d ms / %d KiB with usable dataset metadata",
-			expected[0], reply.GetTimeLimitMs(), reply.GetMemoryLimitKb(), expected[1], expected[2])
+			expected[0], reply.GetTimeLimitMs(), reply.GetMemoryLimitKb(), timeMS, memoryKiB)
+	}
+	if legacy {
+		fmt.Printf("Verified legacy GetTestCase fixture %d has no execution limits\n", expected[0])
+		return nil
 	}
 	fmt.Printf("Verified GetTestCase fixture %d: %d ms / %d KiB\n", expected[0], expected[1], expected[2])
 	return nil

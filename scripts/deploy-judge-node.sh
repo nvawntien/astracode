@@ -90,7 +90,8 @@ require_readable_file() {
 }
 
 operation="${1:-}"
-if [[ "$operation" == --preflight || "$operation" == --suspend || "$operation" == --activate ]]; then
+if [[ "$operation" == --preflight || "$operation" == --suspend || "$operation" == --activate ||
+      "$operation" == --legacy-preflight || "$operation" == --legacy-suspend ]]; then
   if [[ ${ASTRACODE_PROTECTED_ROLLOUT:-0} != 1 ]]; then
     usage
     exit 2
@@ -98,6 +99,8 @@ if [[ "$operation" == --preflight || "$operation" == --suspend || "$operation" =
 fi
 case "$operation" in
   --preflight) [[ $# -eq 3 ]] || exit 2 ;;
+  --legacy-preflight) [[ $# -eq 4 ]] || exit 2 ;;
+  --legacy-suspend) [[ $# -eq 7 ]] || exit 2 ;;
   --suspend) [[ $# -eq 2 || $# -eq 5 ]] || exit 2 ;;
   --activate) [[ $# -eq 8 ]] || exit 2 ;;
   *)
@@ -330,6 +333,72 @@ suspend_verified_worker() {
   fi
 }
 
+legacy_startup() {
+  local id="$1" probe="$2" tag="$3" settings="$4" started path image pool broker group
+  local -a tuple
+  read -r -a tuple <<<"$settings"
+  [[ ${#tuple[@]} -eq 4 ]] || return 1
+  broker="${tuple[1]}" group="${tuple[2]}"
+  image="$IMAGE_ROOT/judge-worker:$tag"
+  path="$(docker inspect --format '{{.Path}} {{len .Args}} {{.Config.WorkingDir}}' "$id")" || return 1
+  if [[ "$path" != './app 0 /app' && "$path" != '/app/app 0 /app' ]]; then
+    echo "Legacy bootstrap requires the official Worker entrypoint without overrides." >&2
+    return 1
+  fi
+  local mounts
+  mounts="$(docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' "$id")" || return 1
+  if grep -Exq '/|/app/?|/app/app/?' <<<"$mounts"; then
+    echo "Legacy bootstrap cannot verify an entrypoint shadowed by a mount." >&2
+    return 1
+  fi
+  if [[ "$(docker inspect --format '{{.Config.Image}}' "$id")" != "$image" ||
+        "$(docker inspect --format '{{.State.Running}}' "$id")" != true ||
+        "$(docker inspect --format '{{.Image}}' "$id")" != "$(docker image inspect --format '{{.Id}}' "$image")" ]]; then
+    echo "Cannot verify the live legacy Worker image." >&2
+    return 1
+  fi
+  started="$(docker inspect --format '{{.State.StartedAt}}' "$id")" || return 1
+  pool="$(docker inspect --format '{{range .Config.Env}}{{if eq (index (split . "=") 0) "WORKER_POOL_SIZE"}}{{println .}}{{end}}{{end}}' "$id")" || return 1
+  if [[ "$pool" != WORKER_POOL_SIZE=1 ]] ||
+      ! timeout 10 docker exec "$id" test ! -e /tmp/astracode-judge-worker-runtime.json; then
+    echo "Legacy bootstrap requires WORKER_POOL_SIZE=1 and a Worker predating startup records." >&2
+    return 1
+  fi
+  if [[ -z "$started" ]] || ! timeout 10 docker logs --since "$started" "$id" 2>&1 \
+      | "$probe" legacy-consumer "$broker" "$group"; then
+    echo "Cannot verify the legacy Worker's current startup log." >&2
+    return 1
+  fi
+  [[ "$(docker inspect --format '{{.State.StartedAt}}' "$id")" == "$started" &&
+     "$(docker inspect --format '{{.State.Running}}' "$id")" == true ]] || return 1
+  printf '%s\n' "$started"
+}
+
+legacy_suspend() {
+  local probe="$1" expected_id="$2" settings="$3" peer="$4" expected_member="$5" id started member
+  local -a tuple
+  id="$(worker_id)" || return 1
+  if [[ -z "$id" || "$id" != "$expected_id" || "$(detect_current_release)" != "$requested" ||
+        "$(planned_settings "$probe")" != "$settings" ]]; then
+    echo "Legacy Worker identity or planned settings changed after preflight." >&2
+    return 1
+  fi
+  started="$(legacy_startup "$id" "$probe" "$requested" "$settings")" || return 1
+  read -r -a tuple <<<"$settings"
+  member="$(timeout 15 "$probe" kafka-member "${tuple[@]:1}" "$peer")" || return 1
+  if [[ "$member" != "$expected_member" || "$(worker_id)" != "$id" ||
+        "$(docker inspect --format '{{.State.StartedAt}}' "$id")" != "$started" ]]; then
+    echo "Legacy Worker or Kafka member changed before suspension." >&2
+    return 1
+  fi
+  docker update --restart=no "$id" >/dev/null || return 1
+  # The legacy handler can mark a failed DLT write during graceful shutdown.
+  # Terminate intake without running its cancellation/commit path.
+  docker kill --signal KILL "$id" >/dev/null || return 1
+  worker_stopped && [[ "$(worker_id)" == "$id" &&
+    "$(docker inspect --format '{{.State.StartedAt}}' "$id")" == "$started" ]]
+}
+
 activate() {
   local probe="$1" settings="$2" problem planned id evidence
   shift 2
@@ -392,6 +461,20 @@ if ! flock -n 9; then
 fi
 
 case "$operation" in
+  --legacy-preflight)
+    previous="$(detect_current_release)"
+    [[ "$previous" == "$4" && "$previous" != "$requested" ]] || {
+      echo "Installed Judge release is not the expected legacy source tag." >&2; exit 1;
+    }
+    id="$(worker_id)"
+    [[ -n "$id" ]] || { echo "No live legacy Worker to verify." >&2; exit 1; }
+    planned="$(planned_settings "$3")"
+    legacy_startup "$id" "$3" "$previous" "$planned" >/dev/null
+    printf '%s\n%s\n%s\n' "$previous" "$planned" "$id"
+    ;;
+  --legacy-suspend)
+    legacy_suspend "${@:3}"
+    ;;
   --preflight)
     previous="$(detect_current_release)"
     id="$(worker_id)"

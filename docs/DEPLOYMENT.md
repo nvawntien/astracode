@@ -414,13 +414,56 @@ even when the mounted file currently matches the plan. The Judge Node checks
 the same container and its startup settings again before suspension. The App
 Node verifies the consumer group reported by that Worker.
 
-A release predating the startup record cannot pass protected preflight or be
-resumed automatically by protected rollback. For the first rollout from such
-a release, arrange a maintenance window and establish a compatible bridge
-release with the startup record. Verify the old consumer's broker, group, topic,
-and offset continuity from trusted operational records and broker membership
-before changing it. Keep judging suspended if the old identity is uncertain.
-Retain a compatible release with startup evidence as the rollback target.
+### First protected rollout from a legacy pair
+
+Use a maintenance window. Keep the production lock, node-owned configuration,
+and private network topology stable and prevent other Worker launches. In the
+manual **Deploy production** workflow, select the protected target
+`image_tag`, enter the installed App/Judge tag as `legacy_from`, and enter the
+Judge Node's Kafka-visible private IPv4 address as `legacy_judge_peer`. Obtain
+the peer from the private network inventory before dispatch. The address must
+identify that Judge Node exclusively. Shared NAT or proxies cannot establish
+this identity. Leave both inputs blank after the first successful protected
+release.
+
+This path supports an official legacy Worker with the direct image entrypoint,
+`WORKER_POOL_SIZE=1`, and a retained current-startup log containing its
+effective broker and group. The broker must report one stable dynamic
+round-robin member at the approved peer, subscribed and assigned exclusively
+to the planned job topic. The App tag and live fixture must match the legacy
+pair, with both limit fields absent. Missing logs, ambiguous membership, a
+changed member, or different settings block the transition. Recover the
+evidence before retrying. A host config edit alone cannot establish identity.
+
+After rechecking the same container and Kafka member from Judge, the workflow
+disables restart and uses SIGKILL for the legacy Worker. This avoids running
+the legacy cancellation path, which can acknowledge a failed DLT publication.
+An uncommitted job can be redelivered, including a result published just before
+the stop. The existing attempt guards handle duplicate results. Kafka may
+retain the member until its session expires. App activation waits for
+`Empty` and zero members on the verified group. The procedure changes neither
+offsets nor topics and cannot recover a job the legacy Worker already
+acknowledged before suspension.
+
+App activates first. Both private probes must verify the new fixture limits
+before the Worker can start. The new Worker must report its startup record
+for the same broker, group, and topic. Submit one approved synthetic job and
+verify its completion and Kafka lag before closing the maintenance window.
+Interactive Run Code is unavailable while the Worker is stopped.
+
+If bootstrap fails after suspension, the workflow keeps judging suspended.
+When the previous App bundle can be restored and verified, it restores that
+legacy App without restarting the legacy Worker. Inspect the recorded tag,
+container ID, broker, group, and topic from the preflight output. Resolve any
+ambiguous SSH or App state on both hosts, verify the actual group is empty,
+then restore or activate a compatible limits-aware App bundle. Check the
+positive fixture contract from both nodes before activating its matching
+protected Worker with the recorded settings. Use the protected recovery
+commands below. Retain the staged bundles and probe for this recovery.
+Reverting to legacy judging requires a separate emergency decision because
+the old Worker can still use fallback limits and acknowledge failed DLT writes.
+
+### Normal protected rollout
 
 The manual **Deploy production** workflow:
 

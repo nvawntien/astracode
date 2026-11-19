@@ -29,6 +29,23 @@ assert_bindings() {
   fi
 }
 
+check_problem() {
+  local tag="$1" image running_image
+  image="$(docker inspect --format '{{.Config.Image}}' "$problem_id")" || return 1
+  running_image="$(docker inspect --format '{{.Image}}' "$problem_id")" || return 1
+  if [[ "$image" != */problem-service:"$tag" ||
+        "$running_image" != "$(docker image inspect --format '{{.Id}}' "$image")" ]]; then
+    echo "The active Problem Service image does not match release $tag." >&2
+    return 1
+  fi
+}
+
+recheck_topology() {
+  [[ "$(singleton problem-service judge_problem)" == "$problem_id" ]] || return 1
+  [[ "$(singleton kafka judge_kafka)" == "$kafka_id" ]] || return 1
+  assert_bindings
+}
+
 problem_id="$(singleton problem-service judge_problem)"
 kafka_id="$(singleton kafka judge_kafka)"
 assert_bindings
@@ -41,6 +58,15 @@ fi
 
 if [[ "$mode" == preflight ]]; then
   exit 0
+fi
+if [[ "$mode" == legacy-preflight ]]; then
+  tag="$1" probe="$2" peer="$3"
+  shift 3
+  check_problem "$tag"
+  "$probe" legacy-metadata "$problem_address" "$@" >&2
+  recheck_topology
+  timeout 15 "$probe" kafka-member "$kafka_address" "$group" "$topic" "$peer"
+  exit
 fi
 
 group_is_empty() {
@@ -65,21 +91,14 @@ done
 timeout 10 docker exec "$kafka_id" kafka-topics.sh --bootstrap-server 127.0.0.1:9092 \
   --describe --topic "$topic" >/dev/null
 
-if [[ "$mode" == ready ]]; then
-  tag="$1"
-  probe="$2"
+if [[ "$mode" == ready || "$mode" == legacy-ready ]]; then
+  tag="$1" probe="$2"
   shift 2
-  image="$(docker inspect --format '{{.Config.Image}}' "$problem_id")"
-  running_image="$(docker inspect --format '{{.Image}}' "$problem_id")"
-  if [[ "$image" != */problem-service:"$tag" ||
-        "$running_image" != "$(docker image inspect --format '{{.Id}}' "$image")" ]]; then
-    echo "The active Problem Service image does not match release $tag." >&2
-    exit 1
-  fi
-  "$probe" metadata "$problem_address" "$@"
-  [[ "$(singleton problem-service judge_problem)" == "$problem_id" ]]
-  [[ "$(singleton kafka judge_kafka)" == "$kafka_id" ]]
-  assert_bindings
+  check_problem "$tag"
+  command=metadata
+  if [[ "$mode" == legacy-ready ]]; then command=legacy-metadata; fi
+  "$probe" "$command" "$problem_address" "$@"
+  recheck_topology
 elif [[ "$mode" != idle ]]; then
   echo "Unknown App readiness check: $mode" >&2
   exit 2

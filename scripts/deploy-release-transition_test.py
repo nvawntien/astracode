@@ -27,6 +27,7 @@ class FakeNodes:
         self.app = OLD
         self.worker = OLD
         self.legacy = legacy
+        self.legacy_from = ""
 
     def record(self, name, *args):
         event = (name, *args)
@@ -94,6 +95,80 @@ class ReleaseTransitionTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
             result = transition.deploy(nodes, target)
         return result, stderr.getvalue()
+
+    def test_legacy_bootstrap_explicitly_routes_verified_identity_and_refuses_legacy_resume(self):
+        nodes = FakeNodes([("verify", NEW)], legacy=True)
+        nodes.legacy_from = OLD
+        nodes.verify_legacy = lambda tag: nodes.record("verify-legacy", tag)
+        ok, log = self.run_transition(nodes)
+        self.assertFalse(ok)
+        self.assertEqual(nodes.events[-4:], [
+            ("suspend", NEW), ("idle",), ("rollback", NEW, OLD), ("verify-legacy", OLD),
+        ])
+        self.assertIn("judging remains suspended", log)
+        self.assertIsNone(nodes.worker)
+
+    def test_legacy_opt_in_is_explicit_in_workflow(self):
+        workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text()
+        self.assertIn("legacy_from:", workflow)
+        self.assertIn("legacy_judge_peer:", workflow)
+
+    def test_legacy_coordinator_carries_broker_evidence_to_suspension(self):
+        for member in ("sarama-member-A", ""):
+            with self.subTest(member=member):
+                node = transition.Nodes("/opt/astracode/.deploy/rollout.abcdefgh",
+                                        "/opt/astracode/.deploy/rollout.hgfedcba",
+                                        ["42", "1000", "524288"], OLD, "192.0.2.20")
+                calls = []
+                identifier = "a" * 64
+                settings = "192.0.2.10:9092 192.0.2.10:9094 group-A judge.jobs"
+
+                def judge(*args, capture=False):
+                    calls.append(args)
+                    if capture:
+                        return f"{OLD}\n{settings}\n{identifier}\n"
+
+                def gate(*args, capture=False):
+                    calls.append(args)
+                    self.assertTrue(capture)
+                    return member
+
+                node.remote = lambda *args: None
+                node.judge = judge
+                node.app = lambda *args: OLD
+                node.app_gate = gate
+                if not member:
+                    with self.assertRaisesRegex(RuntimeError, "did not identify"):
+                        node.preflight(NEW)
+                    self.assertEqual([call[0] for call in calls], ["--legacy-preflight", "legacy-preflight"])
+                    continue
+                self.assertEqual(node.preflight(NEW), OLD)
+                node.suspend_verified(OLD)
+                self.assertEqual(calls, [
+                    ("--legacy-preflight", NEW, node.judge_probe, OLD),
+                    ("legacy-preflight", OLD, node.app_probe, "192.0.2.20", "42", "1000", "524288"),
+                    ("--legacy-suspend", OLD, node.judge_probe, identifier, settings, "192.0.2.20", member),
+                ])
+
+    def test_legacy_failures_keep_judging_suspended(self):
+        for failures, restored in (
+            ([("app", NEW)], True),
+            ([("verify", NEW)], True),
+            ([("judge", NEW, OLD)], True),
+            ([("app-response", NEW)], False),
+            ([("idle",), ("idle",)], False),
+            ([("judge", NEW, OLD), ("rollback", NEW, OLD)], False),
+        ):
+            with self.subTest(failures=failures):
+                nodes = FakeNodes(failures, legacy=True)
+                nodes.legacy_from = OLD
+                nodes.verify_legacy = lambda tag: nodes.record("verify-legacy", tag)
+                ok, log = self.run_transition(nodes)
+                self.assertFalse(ok)
+                self.assertIsNone(nodes.worker)
+                self.assertNotIn(("judge", OLD, OLD), nodes.events)
+                self.assertEqual(("verify-legacy", OLD) in nodes.events, restored)
+                self.assertIn("Operator action required", log)
 
     def test_suspend_and_contract_gate_precede_any_new_worker(self):
         nodes = FakeNodes(legacy=True)

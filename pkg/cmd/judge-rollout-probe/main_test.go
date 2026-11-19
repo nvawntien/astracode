@@ -88,6 +88,13 @@ func TestVerifyMetadataChecksExactUnitsAndLegacyResponses(t *testing.T) {
 			if err != nil && strings.Contains(err.Error(), "not-for-logs") {
 				t.Fatal("probe leaked a signed URL")
 			}
+			legacyErr := checkMetadata(listener.Addr().String(), []string{"42", "1000", "524288"}, true)
+			if (legacyErr == nil) != (tt.ms == 0 && tt.kib == 0) {
+				t.Fatalf("legacy metadata validation returned %v for %d ms / %d KiB", legacyErr, tt.ms, tt.kib)
+			}
+			if legacyErr != nil && strings.Contains(legacyErr.Error(), "not-for-logs") {
+				t.Fatal("legacy probe leaked a signed URL")
+			}
 		})
 	}
 }
