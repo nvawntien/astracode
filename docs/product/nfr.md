@@ -160,7 +160,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 
 | ID | Requirement | Target | Verification | Priority | Related |
 |---|---|---|---|---|---|
-| NFR-D01 | Every merge to the main branch is built, deployed to staging and smoke-tested automatically | 100% of merges | Pipeline history | Must | — |
+| NFR-D01 | Every merge to `develop` is built, deployed to staging and smoke-tested automatically | 100% of merges | Pipeline history | Must | — |
 | NFR-D02 | Production runs the same immutable image that passed staging; promotion requires manual approval | 100% of releases | Pipeline history | Must | — |
 | NFR-D03 | Rollback to the previous release | ≤ 15 min | Rollback drill | Must | — |
 | NFR-D04 | All cloud infrastructure is defined as code; a complete environment can be recreated in another subscription | ≤ 2 h from empty subscription to running stack | Recreation drill | Must | — |
