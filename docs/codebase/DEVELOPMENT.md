@@ -32,7 +32,16 @@ The worker accepts `-config` (default `/app/config`), so local usage needs a con
 
 ## Build, test and quality checks
 
-There is no root Makefile or CI configuration in this checkout. Use module-scoped commands. Tests are colocated with source (`*_test.go`) across shared packages, services, and worker adapters/use cases. A safe non-writing discovery/build sequence is:
+There is no root Makefile; `scripts/verify.sh` runs the standard checks (`QUICK=1` skips race tests and the website build). Otherwise use module-scoped commands. GitHub Actions workflows in `.github/workflows/`:
+
+| Workflow | Trigger | Purpose |
+| --- | --- | --- |
+| `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race per module, website typecheck and build, Compose validation, deployment-script checks, judge benchmark harness checks |
+| `openspec.yml` | pull requests and pushes to `develop`/`main` | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
+| `release-images.yml` | pushes to `develop`, `v*.*.*` tags, manual | Publish container images |
+| `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
+
+Tests are colocated with source (`*_test.go`) across shared packages, services, and worker adapters/use cases. A safe non-writing discovery/build sequence is:
 
 ```bash
 go test ./pkg/...
@@ -45,7 +54,7 @@ docker compose config --quiet
 
 Format modified Go files with `gofmt -w <files>`. Wire injectors are in each `cmd/server/wire.go` and generated output is checked in as `wire_gen.go`; no Wire generation command or `buf`/`protoc` configuration was found, so do not guess a generation command. Proto sources are `proto/problem/v1/problem.proto` and `proto/judge/v1/run.proto`; generated Go is checked in under `pkg/pb/`.
 
-For website development, inspect `website/package.json`; its defined script is `npm run build` (`next build`). `node_modules` and `.next` are generated local artifacts and should not be used as architecture evidence.
+For website development, the scripts in `website/package.json` are `npm run dev` (`next dev -p 3000`), `npm run build` (`next build`), `npm run start` (`next start -p 3000`), and `npm run typecheck` (`tsc --noEmit`). `node_modules` and `.next` are generated local artifacts and should not be used as architecture evidence.
 
 ## Migrations and operational checks
 
