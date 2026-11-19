@@ -24,18 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"   # OpenSpec requires Node.js >= 20.19
-
-      # Pin the same version the team uses locally (`openspec --version`), so CI and agents agree.
-      - name: Install OpenSpec CLI
-        run: npm install -g @fission-ai/openspec@X.Y.Z
-
-      - name: Show version
-        run: openspec --version
-
-      # Same logic as scripts/verify.sh: nothing to validate yet -> stay green.
+      # Same logic as scripts/verify.sh: nothing to validate yet -> stay green, skip the rest.
       - name: Check whether there is anything to validate
         id: scope
         run: |
@@ -47,6 +36,20 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "SKIP: no specs or active changes yet"
           fi
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: "22"   # OpenSpec requires Node.js >= 20.19
+
+      # Pinned to the version the team uses locally (`openspec --version`), so CI and agents agree.
+      - name: Install OpenSpec CLI
+        if: steps.scope.outputs.run == 'true'
+        run: npm install -g @fission-ai/openspec@1.13.0
+
+      - name: Show version
+        if: steps.scope.outputs.run == 'true'
+        run: openspec --version
 
       - name: Validate all specs and changes
         if: steps.scope.outputs.run == 'true'
