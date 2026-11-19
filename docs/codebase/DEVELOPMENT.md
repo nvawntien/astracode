@@ -37,8 +37,8 @@ There is no root Makefile; `scripts/verify.sh` runs the standard checks (`QUICK=
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race per module, website typecheck and build, Compose validation, deployment-script checks, judge benchmark harness checks |
-| `openspec.yml` | pull requests and pushes to `develop`/`main` | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
-| `release-images.yml` | pushes to `develop`, `v*.*.*` tags, manual | Publish container images |
+| `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
+| `release-images.yml` | pushes to `develop`, `v*.*.*` tags, manual | Builds and publishes container images on pushes to `develop`; images are built, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
 
 Tests are colocated with source (`*_test.go`) across shared packages, services, and worker adapters/use cases. A safe non-writing discovery/build sequence is:
