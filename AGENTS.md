@@ -14,7 +14,7 @@ Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w 
 
 ## Hard constraints (read first)
 
-<!--1. Never edit `openspec/specs/*` directly. Behaviour changes only through a change folder and archive.-->
+1. Never edit `openspec/specs/*` directly. Behaviour changes only through a change folder and archive.
 2. Work only inside the current change's `tasks.md` scope. Anything else: stop and report.
 3. Never weaken sandbox limits, authentication/JWT handling, the transactional outbox or attempt-aware result handling without an approved change that says so.
 4. Never change `proto/`, event schemas or gateway routes without a contract update marked BREAKING / NON-BREAKING in the change.
@@ -71,6 +71,6 @@ Do not read `docs/product/prd.md` or `frd.md` during implementation; the change 
 
 ## Hard constraints (repeat)
 
-<!-- - No direct edits to `openspec/specs/*`. --> 
+- No direct edits to `openspec/specs/*`.
 - Stay inside `tasks.md`.
 - No secrets; no premium checks in the UI only; no done without evidence.
