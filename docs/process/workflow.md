@@ -28,7 +28,7 @@ Capability owners are not assigned yet; until they are, the Orchestrator reviews
 
 | Zone | Content | Changed by | Read by agents |
 |---|---|---|---|
-| A — product | `docs/product/*` | Humans, by PR, on significant change only | Only the relevant F-xx section, at propose time |
+| A — product | `docs/product/*` | Humans, by PR, on significant change only | Only as stated in the product-document rule in §8 (F-xx section at propose time; `nfr.md` for cited NFR IDs) |
 | B — shared truth | `openspec/specs/*` (via archive only), `docs/architecture/*`, contracts, ADRs, `docs/codebase/*`, glossary | Change PRs, with doc-impact checklist | When relevant |
 | C — agent harness | `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`, module `AGENTS.md`, scripts | Humans, by PR | Every session |
 
@@ -102,7 +102,7 @@ One verb-object title; 1–2 capabilities (max 3); 5–15 tasks; 1–4 days; one
 |---|---|
 | Instructions | Both follow `AGENTS.md` (Codex reads it directly; Claude Code reads `CLAUDE.md`, which imports `AGENTS.md`). Agent-specific notes go only in `CLAUDE.md`. |
 | OpenSpec commands | Installed for both tools by `openspec init`; regenerated with `openspec update` after upgrading OpenSpec. |
-| Context | A session starts from `AGENTS.md`, the module `AGENTS.md`, the change folder and `progress.md`; agents do not load product documents beyond the pasted F-xx section. |
+| Context | A session starts from `AGENTS.md`, the module `AGENTS.md`, the change folder and `progress.md`; product documents: During implementation, do not read prd.md or frd.md. Read nfr.md only for the NFR IDs cited in the change. At propose time, use only the F-xx section given in the prompt. |
 | Parallelism | One agent session per worktree; never two agents in one worktree. |
 | Autonomous loops | Allowed only for changes with automated tests as the stop condition, with an iteration cap, on a feature branch, outside sandbox, authentication, outbox and production-deployment code. |
 | Reviewing | The agent that wrote the code does not review it; the other tool does (step 6), then a human (Gate 2). |
