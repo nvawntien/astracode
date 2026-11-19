@@ -9,6 +9,8 @@
 | Location | `docs/product/nfr.md` |
 | Related | `prd.md` (KPIs, launch scenario) · `frd.md` (use cases) · `docs/architecture/*` (how each NFR is met) · `docs/evidence/*` (measured results) |
 
+Architecture documents and evidence folders referenced here may be planned; see docs/architecture/README.md for their status.
+
 > **Scope of this document.** The NFR answers *how well* the system must work and *how we prove it*. Every NFR has
 > a **target** and a **verification method**. It does **not** describe how targets are achieved (→ architecture docs
 > and ADRs, which reference NFR IDs) and does **not** hold measured results (→ `docs/evidence/`).
