@@ -57,6 +57,8 @@ End:
 
 ## Where to look (only when relevant)
 
+Some paths below are created by upcoming changes. If a path does not exist, say so instead of searching.
+
 | Need | Read |
 |---|---|
 | Behaviour of capability X | `openspec/specs/X/spec.md` |
