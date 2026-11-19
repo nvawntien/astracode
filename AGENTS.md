@@ -69,7 +69,7 @@ Some paths below are created by upcoming changes. If a path does not exist, say 
 | Terms | `docs/process/glossary.md` |
 | Workflow, gates, definition of done | `docs/process/workflow.md` |
 
-Do not read `docs/product/prd.md` or `frd.md` during implementation; the change folder carries the intent.
+Do not read product documents during implementation. At propose time, use only the F-xx section given in the prompt.
 
 ## Hard constraints (repeat)
 
