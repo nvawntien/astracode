@@ -26,7 +26,6 @@
 * **Auth trust boundary:** Envoy removes client-supplied `X-User-ID`, `X-Username`, `X-Role`, and `X-Token-Iat`; Envoy validates the access JWT and recreates them before services install typed claims. Services must remain inaccessible to untrusted networks because this is a network-level trust boundary, not cryptographic header authentication. Direct service tests must not be treated as production authentication. Consider mTLS or signed service identity only if this network boundary can no longer be maintained.
 * **Executor hardening:** input/output limits, process limits, tempfs and language environments are configured, but container/kernel isolation policy depends on the executor image/runtime. Security review of the actual deployment host is needed; do not infer safety from application code alone.
 * **Observability:** Zap request logs and Kafka logs are present, but no tracing provider, metrics endpoint, or distributed correlation ID propagation was found. Validate any platform-level telemetry not stored in this repository.
-* **Readme staleness:** root README describes folders such as `api-tests/` and test fixtures that are absent from the checked-out tree. Treat code and Compose as authoritative.
 
 ## Testing gaps observed
 

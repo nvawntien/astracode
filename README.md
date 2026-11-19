@@ -366,19 +366,7 @@ before a multi-replica or public deployment.
 - Accounts, profiles, and the Admin Console.
 - Dual-node production deployment and an immutable release pipeline.
 
-### Next engineering work
-
-- Judge throughput benchmarking and capacity planning.
-- Evidence-based concurrency tuning.
-- Horizontal Judge fleet and scaling design.
-
-### Longer-term product work
-
-- Contests, standings, and rating.
-- Editorials and solution workflows.
-- Discussions.
-
-These items are plans, not released features.
+Planned work is tracked in a single place: [docs/product/delivery-plan.md](docs/product/delivery-plan.md).
 
 ## Contributing and security
 

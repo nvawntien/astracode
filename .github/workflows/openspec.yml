@@ -1,0 +1,56 @@
+# .github/workflows/openspec.yml
+# Validates all OpenSpec specs and changes on every pull request and on pushes to develop/main.
+# No path filter on purpose: if this job is a required status check, a path filter would leave
+# PRs that don't touch openspec/ waiting forever for the check.
+
+name: OpenSpec
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: openspec validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENSPEC_TELEMETRY: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same logic as scripts/verify.sh: nothing to validate yet -> stay green, skip the rest.
+      - name: Check whether there is anything to validate
+        id: scope
+        run: |
+          has_specs=$(find openspec/specs -name spec.md 2>/dev/null | head -n 1 || true)
+          has_changes=$(find openspec/changes -mindepth 1 -maxdepth 1 -type d ! -name archive 2>/dev/null | head -n 1 || true)
+          if [ -n "${has_specs}" ] || [ -n "${has_changes}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP: no specs or active changes yet"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: "22"   # OpenSpec requires Node.js >= 20.19
+
+      # Pinned to the version the team uses locally (`openspec --version`), so CI and agents agree.
+      - name: Install OpenSpec CLI
+        if: steps.scope.outputs.run == 'true'
+        run: npm install -g @fission-ai/openspec@1.13.0
+
+      - name: Show version
+        if: steps.scope.outputs.run == 'true'
+        run: openspec --version
+
+      - name: Validate all specs and changes
+        if: steps.scope.outputs.run == 'true'
+        run: openspec validate --all --strict --no-interactive
