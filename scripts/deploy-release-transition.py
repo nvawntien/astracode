@@ -33,6 +33,7 @@ class Nodes:
         self.app_probe = f"{app_dir}/astracode-judge-rollout-probe"
         self.judge_probe = f"{judge_dir}/astracode-judge-rollout-probe"
         self.settings = ()
+        self.worker_id = ""
 
     def remote(self, host, argv, *, source=None, capture=False):
         return subprocess.run(
@@ -64,10 +65,12 @@ class Nodes:
         self.remote("astracode-judge", [
             "tar", "-xzf", self.judge_bundle, "-C", "/opt/astracode", "scripts/deploy-judge-node.sh",
         ])
-        judge_tag, settings = self.judge("--preflight", target, self.judge_probe, capture=True).strip().splitlines()
+        judge_tag, settings, self.worker_id = self.judge(
+            "--preflight", target, self.judge_probe, capture=True,
+        ).strip().splitlines()
         self.settings = tuple(settings.split())
-        if len(self.settings) != 4:
-            raise RuntimeError("Judge preflight did not identify the Problem endpoint and Kafka group")
+        if len(self.settings) != 4 or not re.fullmatch(r"[0-9a-f]{64}", self.worker_id):
+            raise RuntimeError("Judge preflight did not identify the Worker container, Problem endpoint and Kafka group")
         previous = release_tag(self.app("--current-tag", self.app_bundle).strip())
         if previous != release_tag(judge_tag):
             raise RuntimeError("App and Judge started on different tags. Recover the existing pair before deploying.")
@@ -79,6 +82,9 @@ class Nodes:
 
     def suspend(self, tag):
         self.judge("--suspend", tag)
+
+    def suspend_verified(self, tag):
+        self.judge("--suspend", tag, self.judge_probe, self.worker_id, " ".join(self.settings))
 
     def idle(self):
         self.app_gate("idle")
@@ -101,14 +107,18 @@ class Nodes:
 def deploy(nodes, target):
     previous = nodes.preflight(target)
     print(f"Starting pair {previous}. Requested release {target}.", flush=True)
-    stage = "suspend Judge Worker"
+    print("Suspending judging, including interactive Run Code", flush=True)
+    try:
+        nodes.suspend_verified(previous)
+    except Exception as failure:
+        print(f"Could not verify Judge suspension: {failure}. Operator action required. "
+              "Verify the Worker and its Kafka group before retrying.", file=sys.stderr, flush=True)
+        return False
+    stage = "verify the Kafka consumer group is empty"
     app_activated = False
     app_uncertain = False
     recovery_start_attempted = False
     try:
-        print("Suspending judging, including interactive Run Code", flush=True)
-        nodes.suspend(previous)
-        stage = "verify the Kafka consumer group is empty"
         nodes.idle()
         stage = "activate App bundle"
         try:

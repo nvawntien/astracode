@@ -98,7 +98,7 @@ if [[ "$operation" == --preflight || "$operation" == --suspend || "$operation" =
 fi
 case "$operation" in
   --preflight) [[ $# -eq 3 ]] || exit 2 ;;
-  --suspend) [[ $# -eq 2 ]] || exit 2 ;;
+  --suspend) [[ $# -eq 2 || $# -eq 5 ]] || exit 2 ;;
   --activate) [[ $# -eq 8 ]] || exit 2 ;;
   *)
     if [[ ${ASTRACODE_JUDGE_DEPLOY_DRY_RUN:-0} != 1 &&
@@ -269,7 +269,10 @@ worker_stopped() {
 
 suspend_worker() {
   local id
-  id="$(worker_id)" || return 1
+  id="${1:-}"
+  if [[ -z "$id" ]]; then
+    id="$(worker_id)" || return 1
+  fi
   if [[ -n "$id" ]] && ! worker_stopped; then
     # Keep the old container stopped even across a Docker daemon restart.
     # Compose recreation restores the node-owned policy when judging resumes.
@@ -286,15 +289,56 @@ planned_settings() {
   compose config --format json | "$1" worker-settings "$JUDGE_CONFIG" planned
 }
 
+running_settings() {
+  local id="$1" probe="$2" started settings
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$id")" != true ]]; then
+    echo "Cannot verify startup settings: Judge Worker is not running." >&2
+    return 1
+  fi
+  started="$(docker inspect --format '{{.State.StartedAt}}' "$id")" || return 1
+  if ! settings="$(timeout 10 docker exec "$id" cat \
+      /proc/sys/kernel/random/boot_id /proc/1/stat /tmp/astracode-judge-worker-runtime.json \
+      | "$probe" worker-settings "$JUDGE_CONFIG" running)"; then
+    echo "Cannot verify Judge Worker startup settings. Keep the current release and investigate runtime identity." >&2
+    return 1
+  fi
+  if [[ -z "$started" || "$(docker inspect --format '{{.State.StartedAt}}' "$id")" != "$started" ||
+        "$(docker inspect --format '{{.State.Running}}' "$id")" != true ]]; then
+    echo "Judge Worker restarted or stopped while verifying its startup settings." >&2
+    return 1
+  fi
+  printf '%s\n%s\n' "$settings" "$started"
+}
+
+suspend_verified_worker() {
+  local probe="$1" expected_id="$2" expected="$3" id evidence started
+  id="$(worker_id)" || return 1
+  if [[ -z "$id" || "$id" != "$expected_id" ]]; then
+    echo "Judge Worker container changed after rollout preflight." >&2
+    return 1
+  fi
+  evidence="$(running_settings "$id" "$probe")" || return 1
+  if [[ "${evidence%$'\n'*}" != "$expected" ]]; then
+    echo "Judge Worker runtime settings changed after rollout preflight." >&2
+    return 1
+  fi
+  started="${evidence##*$'\n'}"
+  suspend_worker "$id" || return 1
+  if [[ "$(worker_id)" != "$id" || "$(docker inspect --format '{{.State.StartedAt}}' "$id")" != "$started" ]]; then
+    echo "Judge Worker identity changed during suspension. Kafka group identity is uncertain." >&2
+    return 1
+  fi
+}
+
 activate() {
-  local probe="$1" settings="$2" problem running_settings
+  local probe="$1" settings="$2" problem planned id evidence
   shift 2
   if ! worker_stopped; then
     echo "Judge activation requires confirmed Worker suspension." >&2
     return 1
   fi
-  running_settings="$(planned_settings "$probe")" || return 1
-  if [[ "$running_settings" != "$settings" ]]; then
+  planned="$(planned_settings "$probe")" || return 1
+  if [[ "$planned" != "$settings" ]]; then
     echo "Judge configuration changed after rollout preflight." >&2
     return 1
   fi
@@ -311,6 +355,12 @@ activate() {
   compose up -d --wait --wait-timeout 120 --no-deps --force-recreate --timeout "${COMPOSE_STOP_TIMEOUT:-30}" judge-worker || return 1
   compose ps "${JUDGE_SERVICES[@]}" || return 1
   verify_services || return 1
+  id="$(worker_id)" || return 1
+  evidence="$(running_settings "$id" "$probe")" || return 1
+  if [[ "${evidence%$'\n'*}" != "$settings" ]]; then
+    echo "Activated Judge Worker runtime settings differ from the verified settings." >&2
+    return 1
+  fi
 }
 
 write_state() {
@@ -345,17 +395,22 @@ case "$operation" in
   --preflight)
     previous="$(detect_current_release)"
     id="$(worker_id)"
-    [[ -n "$id" ]]
-    actual="$(docker inspect --format '{{json .}}' "$id" | "$3" worker-settings "$JUDGE_CONFIG" running)"
+    [[ -n "$id" ]] || { echo "No running Judge Worker to verify." >&2; exit 1; }
+    evidence="$(running_settings "$id" "$3")"
+    actual="${evidence%$'\n'*}"
     planned="$(planned_settings "$3")"
     if [[ "$actual" != "$planned" ]]; then
       echo "Running and planned Worker endpoints, group or topic disagree." >&2
       exit 1
     fi
-    printf '%s\n%s\n' "$previous" "$planned"
+    printf '%s\n%s\n%s\n' "$previous" "$actual" "$id"
     ;;
   --suspend)
-    suspend_worker
+    if [[ $# -eq 5 ]]; then
+      suspend_verified_worker "${@:3}"
+    else
+      suspend_worker
+    fi
     ;;
   --activate)
     previous="$3"

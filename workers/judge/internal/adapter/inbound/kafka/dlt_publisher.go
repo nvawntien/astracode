@@ -2,9 +2,13 @@ package kafka
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go-judge-system/pkg/config"
 
@@ -27,6 +31,7 @@ type DLTMessage struct {
 	OriginalOffset    int64           `json:"original_offset"`
 	OriginalKey       string          `json:"original_key"`
 	OriginalValue     json.RawMessage `json:"original_value"`
+	OriginalEncoding  string          `json:"original_value_encoding,omitempty"`
 	ErrorMessage      string          `json:"error_message"`
 	RetryCount        int             `json:"retry_count"`
 }
@@ -50,6 +55,12 @@ func NewDLTPublisher(
 
 // Publish sends a failed message to the DLT with error context.
 func (p *DLTPublisher) Publish(ctx context.Context, originalMsg *sarama.ConsumerMessage, errMsg string, retryCount int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if p.producer == nil {
+		return errors.New("DLT Kafka producer not configured")
+	}
 	dltPayload := DLTMessage{
 		OriginalTopic:     originalMsg.Topic,
 		OriginalPartition: originalMsg.Partition,
@@ -58,6 +69,12 @@ func (p *DLTPublisher) Publish(ctx context.Context, originalMsg *sarama.Consumer
 		OriginalValue:     originalMsg.Value,
 		ErrorMessage:      errMsg,
 		RetryCount:        retryCount,
+	}
+	if !json.Valid(originalMsg.Value) || !utf8.Valid(originalMsg.Value) {
+		// RawMessage cannot encode malformed JSON. A base64 string
+		// preserves the exact source bytes, including invalid UTF-8.
+		dltPayload.OriginalValue = json.RawMessage(strconv.Quote(base64.StdEncoding.EncodeToString(originalMsg.Value)))
+		dltPayload.OriginalEncoding = "base64"
 	}
 
 	value, err := json.Marshal(dltPayload)
@@ -71,6 +88,9 @@ func (p *DLTPublisher) Publish(ctx context.Context, originalMsg *sarama.Consumer
 		Value: sarama.ByteEncoder(value),
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	partition, offset, err := p.producer.SendMessage(msg)
 	if err != nil {
 		return fmt.Errorf("publish to DLT: %w", err)

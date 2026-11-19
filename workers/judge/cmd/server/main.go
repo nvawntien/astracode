@@ -25,6 +25,11 @@ func main() {
 	}
 	defer cleanup()
 
+	topic, poolSize := app.JobConsumer.JobSettings()
+	if err := writeRuntimeSettings(cfg, *configPath, topic, poolSize); err != nil {
+		log.Printf("Judge Worker runtime identity unavailable for protected rollout: %v", err)
+	}
+
 	if err := app.Run(); err != nil {
 		log.Fatalf("app runtime error: %v", err)
 	}

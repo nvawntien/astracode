@@ -3,9 +3,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -70,49 +72,65 @@ func verifyMetadata(address string, values []string) error {
 }
 
 func workerSettings(configPath, mode string) error {
-	var environment map[string]string
-	var volumes []mount
-	decoder := json.NewDecoder(os.Stdin)
 	switch mode {
 	case "running":
-		var container struct {
-			Config struct{ Env []string }
-			Mounts []mount
+		identity, err := readWorkerRuntime(os.Stdin)
+		if err != nil {
+			return err
 		}
-		if err := decoder.Decode(&container); err != nil {
-			return fmt.Errorf("could not read the Worker container environment")
-		}
-		volumes = container.Mounts
-		environment = make(map[string]string, len(container.Config.Env))
-		for _, item := range container.Config.Env {
-			key, value, _ := strings.Cut(item, "=")
-			environment[key] = value
-		}
+		return printWorkerSettings(identity)
 	case "planned":
-		var model struct {
-			Services map[string]struct {
-				Environment map[string]string
-				Scale       *int
-				Deploy      struct{ Replicas *int }
-				Volumes     []mount
-			}
-		}
-		if err := decoder.Decode(&model); err != nil {
-			return fmt.Errorf("could not read the planned Judge Compose model")
-		}
-		worker, ok := model.Services["judge-worker"]
-		if !ok || (worker.Scale != nil && *worker.Scale != 1) || (worker.Deploy.Replicas != nil && *worker.Deploy.Replicas != 1) {
-			return fmt.Errorf("the protected rollout requires one configured Judge Worker")
-		}
-		environment = worker.Environment
-		volumes = worker.Volumes
+		return plannedWorkerSettings(configPath)
 	default:
 		return fmt.Errorf("unknown Worker settings mode")
 	}
-	if environment["WORKER_POOL_SIZE"] != "1" {
-		return fmt.Errorf("WORKER_POOL_SIZE must be 1 to interrupt jobs without committing past a cancelled offset")
+}
+
+func readWorkerRuntime(source io.Reader) (config.JudgeWorkerRuntime, error) {
+	var identity config.JudgeWorkerRuntime
+	reader := bufio.NewReader(io.LimitReader(source, 16<<10))
+	bootID, err := reader.ReadString('\n')
+	if err != nil {
+		return identity, fmt.Errorf("could not read the Worker's boot identity")
 	}
-	if !usesWorkerConfig(volumes, configPath) {
+	stat, err := reader.ReadString('\n')
+	if err != nil {
+		return identity, fmt.Errorf("could not read the Worker's process identity")
+	}
+	instance, err := config.JudgeWorkerInstance(bootID, stat)
+	if err != nil {
+		return identity, err
+	}
+	if err := json.NewDecoder(reader).Decode(&identity); err != nil || identity.Instance != instance {
+		return identity, fmt.Errorf("missing or stale Worker startup settings")
+	}
+	if identity.ConfigDir != "/app/config" {
+		return identity, fmt.Errorf("running Worker must load its configuration from /app/config")
+	}
+	return identity, nil
+}
+
+func plannedWorkerSettings(configPath string) error {
+	var model struct {
+		Services map[string]struct {
+			Environment map[string]string
+			Scale       *int
+			Deploy      struct{ Replicas *int }
+			Volumes     []mount
+		}
+	}
+	if err := json.NewDecoder(os.Stdin).Decode(&model); err != nil {
+		return fmt.Errorf("could not read the planned Judge Compose model")
+	}
+	worker, ok := model.Services["judge-worker"]
+	if !ok || (worker.Scale != nil && *worker.Scale != 1) || (worker.Deploy.Replicas != nil && *worker.Deploy.Replicas != 1) {
+		return fmt.Errorf("the protected rollout requires one configured Judge Worker")
+	}
+	environment := worker.Environment
+	if environment["WORKER_POOL_SIZE"] != "1" {
+		return fmt.Errorf("the protected rollout requires WORKER_POOL_SIZE=1")
+	}
+	if !usesWorkerConfig(worker.Volumes, configPath) {
 		return fmt.Errorf("Worker must mount the node-owned config at /app/config or /app/config/config.yaml")
 	}
 	for _, key := range []string{"KAFKA_BROKERS", "KAFKA_CONSUMER_GROUP", "KAFKA_JOB_TOPIC", "PROBLEM_GRPC_ADDRESS"} {
@@ -132,13 +150,24 @@ func workerSettings(configPath, mode string) error {
 	if err != nil {
 		return fmt.Errorf("could not load the mounted Worker configuration")
 	}
-	problem := strings.TrimSpace(cfg.ProblemGRPC.Address)
-	broker := strings.TrimSpace(cfg.Kafka.Brokers)
-	group := strings.TrimSpace(cfg.Kafka.ConsumerGroup)
 	topic := strings.TrimSpace(cfg.Kafka.JobTopic)
 	if topic == "" {
 		topic = "judge.submission.jobs"
 	}
+	return printWorkerSettings(config.JudgeWorkerRuntime{
+		ProblemAddress: cfg.ProblemGRPC.Address, KafkaBroker: cfg.Kafka.Brokers, KafkaGroup: cfg.Kafka.ConsumerGroup,
+		KafkaTopic: topic, WorkerPoolSize: 1,
+	})
+}
+
+func printWorkerSettings(settings config.JudgeWorkerRuntime) error {
+	if settings.WorkerPoolSize != 1 {
+		return fmt.Errorf("the protected rollout requires WORKER_POOL_SIZE=1")
+	}
+	problem := strings.TrimSpace(settings.ProblemAddress)
+	broker := strings.TrimSpace(settings.KafkaBroker)
+	group := strings.TrimSpace(settings.KafkaGroup)
+	topic := settings.KafkaTopic
 	if !singleIPv4Endpoint(problem) || !singleIPv4Endpoint(broker) || !kafkaName.MatchString(group) || !kafkaName.MatchString(topic) {
 		return fmt.Errorf("expected one explicit private IPv4 endpoint each for Problem gRPC and Kafka, plus the Worker group and topic")
 	}

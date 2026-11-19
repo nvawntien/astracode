@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"go-judge-system/pkg/config"
 	problemv1 "go-judge-system/pkg/pb/problem/v1"
 	"google.golang.org/grpc"
 )
@@ -15,6 +17,39 @@ import (
 type fixtureProblem struct {
 	problemv1.UnimplementedProblemServiceServer
 	timeMS, memoryKB int64
+}
+
+func TestReadWorkerRuntimeRequiresCurrentStartupEvidence(t *testing.T) {
+	const stat = "1 (judge worker) test) S " + "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 12345\n"
+	for _, tt := range []struct {
+		name, boot, instance, configDir string
+		wantOK                          bool
+	}{
+		{"current", "boot-a", "boot-a:1:12345", "/app/config", true},
+		{"stale after restart", "boot-a", "boot-a:1:12344", "/app/config", false},
+		{"stale after reboot", "boot-b", "boot-a:1:12345", "/app/config", false},
+		{"not the container process", "boot-a", "boot-a:2:12345", "/app/config", false},
+		{"other config source", "boot-a", "boot-a:1:12345", "/elsewhere", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := json.Marshal(config.JudgeWorkerRuntime{
+				Instance: tt.instance, ConfigDir: tt.configDir, KafkaGroup: "group-A",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			current, err := readWorkerRuntime(strings.NewReader(tt.boot + "\n" + stat + string(snapshot)))
+			if (err == nil) != tt.wantOK {
+				t.Fatalf("runtime = %+v, err = %v, want success = %t", current, err, tt.wantOK)
+			}
+			if tt.wantOK && current.KafkaGroup != "group-A" {
+				t.Fatalf("running group = %q, want group-A", current.KafkaGroup)
+			}
+		})
+	}
+	if _, err := readWorkerRuntime(strings.NewReader("boot-a\n" + stat)); err == nil {
+		t.Fatal("missing startup evidence was accepted")
+	}
 }
 
 func (s fixtureProblem) GetTestCase(context.Context, *problemv1.GetTestCaseRequest) (*problemv1.GetTestCaseResponse, error) {

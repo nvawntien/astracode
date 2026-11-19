@@ -45,6 +45,9 @@ class FakeNodes:
             raise RuntimeError("Judge SSH unavailable")
         self.worker = None
 
+    def suspend_verified(self, tag):
+        self.suspend(tag)
+
     def idle(self):
         if self.record("idle"):
             raise RuntimeError("unexpected Kafka group member")
@@ -100,6 +103,13 @@ class ReleaseTransitionTests(unittest.TestCase):
             ("app", NEW), ("app-response", NEW), ("verify", NEW), ("judge", NEW, OLD),
         ])
 
+    def test_worker_identity_change_during_verified_suspend_blocks_app_and_recovery(self):
+        nodes = FakeNodes([("suspend", OLD)])
+        ok, log = self.run_transition(nodes)
+        self.assertFalse(ok)
+        self.assertIn("Could not verify Judge suspension", log)
+        self.assertEqual(nodes.events, [("preflight", NEW), ("suspend", OLD)])
+
     def test_app_failure_uses_transaction_restore_and_reverifies_old_pair(self):
         nodes = FakeNodes([("app", NEW)])
         ok, log = self.run_transition(nodes)
@@ -154,11 +164,11 @@ class ReleaseTransitionTests(unittest.TestCase):
         self.assertNotIn(("rollback", NEW, OLD), nodes.events)
 
     def test_unavailable_judge_blocks_app_mutations(self):
-        nodes = FakeNodes([("suspend", OLD), ("suspend", NEW)])
+        nodes = FakeNodes([("suspend", OLD)])
         ok, log = self.run_transition(nodes)
         self.assertFalse(ok)
         self.assertIn("Operator action required", log)
-        self.assertEqual(nodes.events, [("preflight", NEW), ("suspend", OLD), ("suspend", NEW)])
+        self.assertEqual(nodes.events, [("preflight", NEW), ("suspend", OLD)])
 
     def test_extra_consumer_blocks_app_and_judge_activation(self):
         nodes = FakeNodes([("idle",), ("idle",)])
@@ -274,6 +284,8 @@ elif cmd == 'inspect':
         print('running unless-stopped' if active.exists() else 'exited no')
     elif pattern == '{{.State.Running}}':
         print('true')
+    elif pattern == '{{.State.StartedAt}}':
+        print('2026-01-01T00:00:00Z')
     elif '.State.Health' in pattern and name == 'workerid' and os.environ['SCENARIO'] == 'health-fails':
         print('unhealthy')
 elif cmd == 'compose':
@@ -320,6 +332,76 @@ fi
                 self.assertEqual((path / "trace").read_text().splitlines(), expected, result.stderr)
                 self.assertEqual(result.returncode == 0, scenario == "ready", result.stderr)
                 self.assertEqual((path / "active").exists(), scenario == "ready")
+
+class JudgeRuntimePreflightTests(unittest.TestCase):
+    def test_runtime_identity_must_match_plan(self):
+        for scenario, succeeds in (
+            ("matched", True), ("restored", True),
+            ("atomic-replacement", False), ("edited-in-place", False),
+            ("different-topic", False), ("different-broker", False),
+            ("missing", False), ("stale-process", False),
+        ):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                compose = path / "compose.yml"
+                config = path / "config.yaml"
+                compose.touch()
+                config.touch()
+                docker = path / "docker"
+                docker.write_text("""#!/usr/bin/env python3
+import json, os, sys
+cmd, *args = sys.argv[1:]
+scenario = os.environ["SCENARIO"]
+if cmd == "ps":
+    print("workerid")
+elif cmd == "inspect":
+    value = {
+        "{{.Config.Image}}": "registry/astra/judge-worker:v1.0.0",
+        "{{.Id}}": "workerid",
+        "{{.State.Running}}": "true",
+        "{{.State.StartedAt}}": "2026-01-01T00:00:00Z",
+        "{{json .}}": "{}",
+    }
+    print(value[args[1]])
+elif cmd == "compose":
+    print("{}")
+elif cmd == "exec":
+    if scenario == "missing":
+        sys.exit(1)
+    print(scenario)
+else:
+    raise AssertionError("unexpected deployment command: " + cmd)
+""")
+                probe = path / "probe"
+                probe.write_text("""#!/usr/bin/env python3
+import sys
+source = sys.stdin.read().strip()
+settings = ["192.0.2.10:9092", "192.0.2.10:9094", "group-A", "judge.jobs"]
+if sys.argv[3] == "running":
+    if source in ("atomic-replacement", "edited-in-place"):
+        settings[2] = "group-B"
+    if source == "different-topic":
+        settings[3] = "other.jobs"
+    if source == "different-broker":
+        settings[1] = "192.0.2.11:9094"
+    if source == "stale-process":
+        sys.exit(1)
+print(*settings)
+""")
+                for executable in (docker, probe):
+                    executable.chmod(0o700)
+                result = subprocess.run([
+                    "bash", str(ROOT / "scripts/deploy-judge-node.sh"), "--preflight", NEW, str(probe)
+                ], env=dict(os.environ, PATH=str(path) + os.pathsep + os.environ["PATH"], SCENARIO=scenario,
+                            ASTRACODE_PROTECTED_ROLLOUT="1", ASTRACODE_JUDGE_COMPOSE=str(compose),
+                            ASTRACODE_JUDGE_CONFIG=str(config), ASTRACODE_JUDGE_STATE_DIR=str(path / "state")),
+                   capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, succeeds, result.stdout + result.stderr)
+                if succeeds:
+                    self.assertIn("group-A", result.stdout)
+                else:
+                    self.assertIn("Worker", result.stderr)
+
 
 
 if __name__ == "__main__":

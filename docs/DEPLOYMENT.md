@@ -404,6 +404,24 @@ Problem replicas, extra managed Workers, or a Kafka group that remains active.
 Avoid separate deployments, configuration edits, and new consumer instances
 during the maintenance window.
 
+The running Worker must provide its startup record at
+`/tmp/astracode-judge-worker-runtime.json`. The Worker writes it from its loaded
+configuration and initialized consumer, using a writable `/tmp` in the
+container. Preflight validates the record against
+PID 1 and compares the captured Problem endpoint, Kafka broker, group, topic,
+and pool size to the planned Compose settings. Startup evidence is required
+even when the mounted file currently matches the plan. The Judge Node checks
+the same container and its startup settings again before suspension. The App
+Node verifies the consumer group reported by that Worker.
+
+A release predating the startup record cannot pass protected preflight or be
+resumed automatically by protected rollback. For the first rollout from such
+a release, arrange a maintenance window and establish a compatible bridge
+release with the startup record. Verify the old consumer's broker, group, topic,
+and offset continuity from trusted operational records and broker membership
+before changing it. Keep judging suspended if the old identity is uncertain.
+Retain a compatible release with startup evidence as the rollback target.
+
 The manual **Deploy production** workflow:
 
 1. validates and checks out the requested semantic release tag;
@@ -429,6 +447,17 @@ Official submissions wait in the durable queue during the maintenance window.
 Interactive Run Code is unavailable while the Worker is stopped. Monitor
 Kafka lag, retention, and DLT activity, and use an approved synthetic job
 to verify the completion flow after judging resumes.
+
+The Worker processes each input partition in offset order. If both judging
+and the synchronous DLT write fail, the affected partition stops advancing for
+that consumer session. Other partitions can continue. The error log includes
+the source topic, partition, offset, and cause. Restore DLT publication and
+restart the Worker to redeliver the unresolved message. A Kafka rebalance may
+also redeliver it. Check the retained DLT record and committed offsets after
+recovery. DLT records for malformed messages use
+`original_value_encoding: "base64"` to keep their exact bytes. Valid JSON keeps
+the existing DLT representation. A shutdown between DLT acknowledgement and
+offset commit can produce duplicate DLT records with the same origin offset.
 
 ## Rollback
 
