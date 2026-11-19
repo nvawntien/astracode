@@ -12,8 +12,9 @@
 ## Verification
 - [ ] CI green (build, tests, `openspec validate --strict`, lint, scans)
 - [ ] `scripts/verify.sh` run locally; any check not run or failing is listed under Checks not run
-- [ ] Every delta scenario covered by a test or recorded manual check (list below)
+- [ ] Every delta scenario covered by a test or recorded manual check (NFR-D09; list below)
 - [ ] Cross-agent review done (Claude Code ↔ Codex); findings resolved
+- [ ] Doc impact ticks below match the diff (reviewer confirms)
 - [ ] Unfinished user-facing behaviour behind a feature flag
 - [ ] Scoped to the change: no unrelated cleanup, no debug leftovers
 - [ ] No secrets, credentials, personal data, or private testcase content committed

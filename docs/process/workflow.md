@@ -59,7 +59,7 @@ feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy─�
 | 4 | **Gate 1 — spec review** (checklist §5) on a draft PR | Reviewer (Orchestrator for hotspots / cross-capability) | GitHub | Approved |
 | 5 | Apply in sessions following the `AGENTS.md` protocol; update `progress.md` each session | Change owner + agent | OpenSpec apply | All tasks ticked with evidence; CI green |
 | 6 | Cross-agent review: the **other** agent reviews the diff against the delta spec (Claude Code reviews Codex work and vice versa) | Change owner | Claude Code / Codex | Findings fixed or answered in the PR |
-| 7 | **Gate 2 — PR review** (checklist §6) | Reviewer | GitHub | Approved; CI green |
+| 7 | **Gate 2 — PR review** (PR template checklist) | Reviewer | GitHub | Approved; CI green |
 | 8 | Merge to `develop` → auto-deploy to staging → smoke tests (planned: M0-13) | Pipeline | GitHub Actions | Staging healthy |
 | 9 | Archive the change (specs updated) in a follow-up commit on `develop` | Change owner | OpenSpec archive | `openspec/specs` reflects the change |
 | 10 | Close the issue | Change owner | GitHub | — |
@@ -81,12 +81,7 @@ One verb-object title; 1–2 capabilities (max 3); 5–15 tasks; 1–4 days; one
 
 ## 6. Gate 2 checklist — PR review
 
-- [ ] CI green: build, tests, `openspec validate`, lint, security scans.
-- [ ] Every delta scenario is covered by a test or a recorded manual check (NFR-D09).
-- [ ] Cross-agent review done; findings resolved.
-- [ ] Doc-impact checklist in the PR template matches the diff.
-- [ ] No secrets, no debug leftovers, no unrelated changes.
-- [ ] Unfinished user-facing behaviour is behind a feature flag.
+The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 
 ## 7. Definition of done (per change)
 
