@@ -62,7 +62,7 @@ async function fixture(overrides: Partial<Options> = {}) {
     problem: { id: 42 },
     language: 'CPP',
     code: 'source code\n',
-    tests,
+    getRunCases: () => tests,
     submitting: false,
     checkingResult: false,
     online: true,
@@ -71,6 +71,7 @@ async function fixture(overrides: Partial<Options> = {}) {
     onStart: vi.fn(),
     onResult: vi.fn(),
     onUnavailable: vi.fn(),
+    onInvalidSelection: vi.fn(),
     ...overrides,
   };
   function Probe(props: Options) {
@@ -89,7 +90,7 @@ async function fixture(overrides: Partial<Options> = {}) {
     options,
     read: () => ({
       running: latest.running,
-      runResult: latest.runResult,
+      runResult: latest.lastRun?.result ?? null,
       consoleLines: latest.consoleLines,
     }),
     render,
@@ -116,7 +117,7 @@ async function fixture(overrides: Partial<Options> = {}) {
         vi.mocked(callback).mockClear();
     },
     async clearResult() {
-      await act(async () => latest.setRunResult(null));
+      await act(async () => latest.clearRunResult());
     },
   };
 }
@@ -225,7 +226,10 @@ describe('interactive Run Code orchestration', () => {
       await pending;
     });
     expect(f.read().running).toBe(false);
-    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(completed, []);
+    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(
+      { result: completed, cases: vi.mocked(submissionApi.run).mock.lastCall?.[0].testcases },
+      [],
+    );
     expect(f.read().consoleLines).toEqual([
       { text: '[sample-1] stdout\nok\n', color: 'var(--code-fg)' },
     ]);
@@ -233,7 +237,7 @@ describe('interactive Run Code orchestration', () => {
 
   it('uses the latest render language, source and testcases without an extra request', async () => {
     const f = await fixture();
-    await f.run({ language: 'JAVA', code: 'new source', tests: [tests[1]] });
+    await f.run({ language: 'JAVA', code: 'new source', getRunCases: () => [tests[1]] });
     expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith(
       {
         problem_id: 42,
@@ -244,6 +248,23 @@ describe('interactive Run Code orchestration', () => {
       expect.any(AbortSignal),
     );
   });
+
+  it.each([0, 11])(
+    'rejects %i selected cases before starting or clearing the last Run',
+    async (count) => {
+      const f = await fixture();
+      await f.seed();
+      const lastRun = f.read();
+      await f.run({
+        getRunCases: () =>
+          Array.from({ length: count }, (_, i) => ({ ...tests[0], id: `sample-${i + 1}` })),
+      });
+      expect(f.options.onInvalidSelection).toHaveBeenCalledTimes(1);
+      expect(f.options.onStart).not.toHaveBeenCalled();
+      expect(submissionApi.run).not.toHaveBeenCalled();
+      expect(f.read()).toEqual(lastRun);
+    },
+  );
 
   it('forwards compile failure diagnostics and produces the same compile console output', async () => {
     const result: RunResponse = {
@@ -260,7 +281,10 @@ describe('interactive Run Code orchestration', () => {
       runResult: result,
       consoleLines: [{ text: 'compiler failed\n', color: 'var(--warn)' }],
     });
-    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(result, [diagnostic]);
+    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(
+      { result, cases: vi.mocked(submissionApi.run).mock.lastCall?.[0].testcases },
+      [diagnostic],
+    );
   });
 
   it('forwards runtime failures and ordered diagnostics to the page for selection and line jumps', async () => {
@@ -283,7 +307,10 @@ describe('interactive Run Code orchestration', () => {
     vi.mocked(submissionApi.run).mockResolvedValue(result);
     const f = await fixture();
     await f.run();
-    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(result, [runtime]);
+    expect(f.options.onResult).toHaveBeenCalledExactlyOnceWith(
+      { result, cases: vi.mocked(submissionApi.run).mock.lastCall?.[0].testcases },
+      [runtime],
+    );
     expect(f.read().consoleLines).toEqual([
       { text: '[sample-1] stdout\nok\n', color: 'var(--code-fg)' },
       { text: '[custom-2] stderr\npanic\n', color: 'var(--error)' },

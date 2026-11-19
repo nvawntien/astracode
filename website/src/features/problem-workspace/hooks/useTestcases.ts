@@ -2,12 +2,10 @@
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ToastKind } from '../../../components/ToastProvider';
-import type { Problem, RunResponse } from '../../../lib/types';
-import { isRunFailure } from '../runResult';
-import { initialTestcases } from '../testcases';
-import type { TestCase, TestCasePatch } from '../types';
-
-const MAX_TESTCASES = 10;
+import type { Problem } from '../../../lib/types';
+import { isRunFailure, matchesRunCase } from '../runResult';
+import { initialTestcases, MAX_RUN_TESTCASES } from '../testcases';
+import type { RunOutcome, TestCase, TestCasePatch } from '../types';
 
 interface TestcasesOptions {
   problem: Pick<Problem, 'examples'> | null;
@@ -18,6 +16,7 @@ interface TestcaseCollection {
   problem: TestcasesOptions['problem'];
   tests: TestCase[];
   selectedId: string | null;
+  includedIds: ReadonlySet<string>;
   nextCustomId: number;
 }
 
@@ -26,7 +25,10 @@ function createCollection(
   nextCustomId: number,
 ): TestcaseCollection {
   const tests = problem ? initialTestcases(problem.examples) : [];
-  return { problem, tests, selectedId: tests[0]?.id ?? null, nextCustomId };
+  const includedIds = new Set(
+    tests.length <= MAX_RUN_TESTCASES ? tests.map((test) => test.id) : [],
+  );
+  return { problem, tests, selectedId: tests[0]?.id ?? null, includedIds, nextCustomId };
 }
 
 export function useTestcases({ problem, showToast }: TestcasesOptions) {
@@ -55,6 +57,27 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
     commit({ ...active, selectedId: id });
   };
 
+  const setRunIncluded = (id: string, included: boolean) => {
+    const active = activeCollection();
+    if (!active || active.includedIds.has(id) === included) return;
+    if (
+      included &&
+      (active.includedIds.size >= MAX_RUN_TESTCASES || !active.tests.some((test) => test.id === id))
+    )
+      return;
+
+    const includedIds = new Set(active.includedIds);
+    if (included) includedIds.add(id);
+    else includedIds.delete(id);
+    commit({ ...active, includedIds });
+  };
+
+  // Read the latest collection even when an edit and Run share a React batch.
+  const getRunCases = () => {
+    const active = activeCollection();
+    return active ? active.tests.filter((test) => active.includedIds.has(test.id)) : [];
+  };
+
   const updateTest = (id: string, patch: TestCasePatch) => {
     const active = activeCollection();
     if (!active || !active.tests.some((test) => test.id === id && !test.fromExample)) return;
@@ -65,8 +88,8 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
   const appendTest = (input: string, expected: string | null) => {
     const active = activeCollection();
     if (!active) return false;
-    if (active.tests.length >= MAX_TESTCASES) {
-      showToast(`Maximum of ${MAX_TESTCASES} test cases`, 'error');
+    if (active.tests.length >= MAX_RUN_TESTCASES) {
+      showToast(`Maximum of ${MAX_RUN_TESTCASES} test cases`, 'error');
       return false;
     }
 
@@ -84,7 +107,13 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
       expected,
       fromExample: false,
     };
-    commit({ ...active, tests: [...active.tests, test], selectedId: id, nextCustomId });
+    commit({
+      ...active,
+      tests: [...active.tests, test],
+      includedIds: new Set([...active.includedIds, id]),
+      selectedId: id,
+      nextCustomId,
+    });
     return true;
   };
 
@@ -100,15 +129,21 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
     const tests = active.tests.filter((test) => test.id !== id);
     const selectedId =
       active.selectedId === id ? tests[Math.min(index, tests.length - 1)].id : active.selectedId;
-    commit({ ...active, tests, selectedId });
+    const includedIds = new Set(active.includedIds);
+    includedIds.delete(id);
+    commit({ ...active, tests, selectedId, includedIds });
   };
 
-  const selectRunResult = (result: RunResponse) => {
+  const selectRunResult = ({ cases, result }: RunOutcome) => {
     const active = activeCollection();
     if (!active) return;
-    const firstFailed = result.tests.find(
-      (test) =>
-        isRunFailure(test) && active.tests.some((currentTest) => currentTest.id === test.id),
+    const firstFailed = cases.find(
+      (submitted) =>
+        active.includedIds.has(submitted.id) &&
+        result.tests.some(
+          (test) => test.id === submitted.id && test.kind === submitted.kind && isRunFailure(test),
+        ) &&
+        active.tests.some((test) => matchesRunCase(test, submitted)),
     );
     if (firstFailed) selectTest(firstFailed.id);
   };
@@ -116,6 +151,9 @@ export function useTestcases({ problem, showToast }: TestcasesOptions) {
   return {
     tests: collection.tests,
     selectedTest: collection.tests.findIndex((test) => test.id === collection.selectedId),
+    includedIds: collection.includedIds,
+    setRunIncluded,
+    getRunCases,
     selectTest,
     updateTest,
     addTest,

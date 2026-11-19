@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestcasePanel } from '../src/features/problem-workspace/components/TestcasePanel';
 import { useTestcases } from '../src/features/problem-workspace/hooks/useTestcases';
 import { initialTestcases } from '../src/features/problem-workspace/testcases';
-import type { RunResponse, RunTestCaseStatus } from '../src/lib/types';
+import type { RunOutcome } from '../src/features/problem-workspace/types';
+import type { RunTestCaseStatus } from '../src/lib/types';
 import { renderReact } from './helpers/react-dom';
 
 type Problem = Parameters<typeof useTestcases>[0]['problem'];
@@ -20,8 +21,10 @@ function Probe({ problem }: { problem: Problem }) {
   return createElement(TestcasePanel, {
     tests: latest.tests,
     selected: latest.selectedTest,
-    results: new Map(),
-    running: false,
+    includedIds: latest.includedIds,
+    pendingCases: null,
+    lastRun: null,
+    onInclude: latest.setRunIncluded,
     onSelect: latest.selectTest,
     onAdd: latest.addTest,
     onRemove: latest.removeTest,
@@ -61,22 +64,31 @@ function assertSelection(index: number) {
   );
 }
 
-function results(...statuses: RunTestCaseStatus[]): RunResponse {
+function results(...statuses: RunTestCaseStatus[]): RunOutcome {
+  const cases = latest.getRunCases().map((test) => ({
+    id: test.id,
+    kind: test.kind,
+    stdin: test.input,
+    expected_output: test.expected,
+  }));
   return {
-    status: 'completed',
-    compile_output: '',
-    diagnostics: [],
-    tests: statuses.map((status, index) => ({
-      id: latest.tests[index].id,
-      kind: latest.tests[index].kind,
-      status,
-      stdout: '',
-      stderr: '',
-      expected_output: '',
-      execution_time_ms: 0,
-      memory_used_kb: 0,
+    cases,
+    result: {
+      status: 'completed',
+      compile_output: '',
       diagnostics: [],
-    })),
+      tests: statuses.map((status, index) => ({
+        id: cases[index].id,
+        kind: cases[index].kind,
+        status,
+        stdout: '',
+        stderr: '',
+        expected_output: cases[index].expected_output,
+        execution_time_ms: 0,
+        memory_used_kb: 0,
+        diagnostics: [],
+      })),
+    },
   };
 }
 
@@ -295,7 +307,7 @@ describe('testcase initialization and actions', () => {
     await click('Remove Custom 2');
     await click('Custom 1');
     await act(async () => latest.selectRunResult(response));
-    expect(selectedId()).toBe(response.tests[3].id);
+    expect(selectedId()).toBe(response.result.tests[3].id);
     assertSelection(2);
   });
 });
@@ -368,5 +380,109 @@ describe('testcase identity within a React batch', () => {
     expect(latest.tests).toEqual([original[1], original[3]]);
     expect(selectedId()).toBe(original[3].id);
     assertSelection(1);
+  });
+});
+
+function problemWithSamples(count: number) {
+  return {
+    examples: Array.from({ length: count }, (_, i) => ({
+      input: `input ${i + 1}`,
+      expected_output: `output ${i + 1}`,
+    })),
+  };
+}
+
+describe('Run testcase inclusion', () => {
+  it.each([
+    [0, 1, 1],
+    [1, 1, 1],
+    [9, 9, 9],
+    [10, 10, 10],
+    [11, 11, 0],
+    [24, 24, 0],
+  ])(
+    'initializes %i examples with %i visible and %i included',
+    async (count, visible, included) => {
+      const problem = problemWithSamples(count);
+      await mount(problem);
+      expect(latest.tests).toEqual(initialTestcases(problem.examples));
+      expect(view!.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(visible);
+      expect(view!.container.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(
+        included,
+      );
+      expect(view!.container.textContent).toContain(
+        `${included} / 10 selected · ${visible} available`,
+      );
+    },
+  );
+
+  it.each([false, true])(
+    'uses the latest inclusion inside a batch (StrictMode=%s)',
+    async (strict) => {
+      const problem = problemWithSamples(11);
+      await mount(problem, strict);
+      await act(async () => {
+        latest.setRunIncluded('sample-11', true);
+        for (let i = 2; i <= 10; i++) latest.setRunIncluded(`sample-${i}`, true);
+        latest.setRunIncluded('sample-1', true);
+        latest.setRunIncluded('missing', true);
+      });
+      assertSelection(0);
+      expect(latest.getRunCases().map((test) => test.id)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `sample-${i + 2}`),
+      );
+      expect(
+        view!.container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled,
+      ).toBe(true);
+
+      await act(async () => {
+        latest.selectTest('sample-5');
+        latest.setRunIncluded('sample-10', false);
+        latest.setRunIncluded('sample-1', true);
+      });
+      expect(selectedId()).toBe('sample-5');
+      expect(latest.getRunCases().map((test) => test.id)).toEqual([
+        ...Array.from({ length: 9 }, (_, i) => `sample-${i + 1}`),
+        'sample-11',
+      ]);
+      await view!.rerender(element(problem, strict));
+      expect(latest.includedIds.size).toBe(10);
+      await view!.rerender(element(sampleProblem, strict));
+      expect([...latest.includedIds]).toEqual(['sample-1']);
+      assertSelection(0);
+    },
+  );
+
+  it('keeps inclusion consistent across additions, deletions and rejected insertions', async () => {
+    await mount(problemWithSamples(7), true);
+    await act(async () => {
+      latest.setRunIncluded('sample-1', false);
+      expect(latest.addTest()).toBe(true);
+      expect(latest.addExample('example', 'output')).toBe(true);
+      expect(latest.addTest()).toBe(true);
+      expect(latest.addTest()).toBe(false);
+      expect(latest.addExample('rejected', '')).toBe(false);
+    });
+    expect(latest.tests).toHaveLength(10);
+    expect(
+      latest
+        .getRunCases()
+        .slice(-3)
+        .map((test) => test.id),
+    ).toEqual(['custom-1', 'custom-2', 'custom-3']);
+    expect(selectedId()).toBe('custom-3');
+    await act(async () => {
+      latest.setRunIncluded('custom-1', false);
+      latest.removeTest('custom-1');
+      latest.removeTest('custom-3');
+    });
+    expect(selectedId()).toBe('custom-2');
+    expect([...latest.includedIds]).toEqual([
+      ...Array.from({ length: 6 }, (_, i) => `sample-${i + 2}`),
+      'custom-2',
+    ]);
+    expect(showToast.mock.calls).toEqual(
+      Array.from({ length: 2 }, () => ['Maximum of 10 test cases', 'error']),
+    );
   });
 });

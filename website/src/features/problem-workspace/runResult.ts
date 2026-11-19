@@ -1,4 +1,19 @@
-import type { CodeDiagnostic, RunResponse, RunTestCaseResult } from '../../lib/types';
+import type {
+  CodeDiagnostic,
+  RunResponse,
+  RunTestCaseInput,
+  RunTestCaseResult,
+} from '../../lib/types';
+import type { TestCase } from './types';
+
+export function matchesRunCase(current: TestCase, submitted: Readonly<RunTestCaseInput>): boolean {
+  return (
+    current.id === submitted.id &&
+    current.kind === submitted.kind &&
+    current.input === submitted.stdin &&
+    current.expected === submitted.expected_output
+  );
+}
 
 export function isRunFailure(test: RunTestCaseResult): boolean {
   return !['accepted', 'executed'].includes(test.status);

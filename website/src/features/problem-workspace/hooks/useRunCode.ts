@@ -1,11 +1,12 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { ToastKind } from '../../../components/ToastProvider';
 import { ApiError, NetworkError, submissionApi } from '../../../lib/api';
-import type { CodeDiagnostic, LanguageCode, Problem, RunResponse } from '../../../lib/types';
+import type { CodeDiagnostic, LanguageCode, Problem } from '../../../lib/types';
 import { buildRunConsoleLines, collectRunDiagnostics } from '../runResult';
-import type { TestCase } from '../types';
+import { MAX_RUN_TESTCASES } from '../testcases';
+import type { RunCases, RunOutcome, TestCase } from '../types';
 
 interface RunCodeOptions {
   slug: string;
@@ -13,21 +14,22 @@ interface RunCodeOptions {
   problem: Pick<Problem, 'id'> | null;
   language: LanguageCode;
   code: string;
-  tests: TestCase[];
+  getRunCases: () => readonly TestCase[];
   submitting: boolean;
   checkingResult: boolean;
   online: boolean;
   requireAuth: (action: string) => boolean;
   showToast: (message: string, kind?: ToastKind) => void;
   onStart: () => void;
-  onResult: (result: RunResponse, diagnostics: CodeDiagnostic[]) => void;
+  onResult: (outcome: RunOutcome, diagnostics: CodeDiagnostic[]) => void;
+  onInvalidSelection: () => void;
   onUnavailable: () => void;
 }
 
 interface RunSnapshot {
   owner: string;
-  running: boolean;
-  runResult: RunResponse | null;
+  pendingCases: RunCases | null;
+  lastRun: RunOutcome | null;
   consoleLines: { text: string; color: string }[];
 }
 
@@ -43,7 +45,7 @@ export function useRunCode({
   problem,
   language,
   code,
-  tests,
+  getRunCases,
   submitting,
   checkingResult,
   online,
@@ -51,6 +53,7 @@ export function useRunCode({
   showToast,
   onStart,
   onResult,
+  onInvalidSelection,
   onUnavailable,
 }: RunCodeOptions) {
   // Code/language edits keep the request's original snapshot valid. Only the
@@ -70,7 +73,8 @@ export function useRunCode({
 
   // Render-time ownership also hides completed output before scope cleanup.
   const owned = snapshot?.owner === owner ? snapshot : null;
-  const running = owned?.running ?? false;
+  const pendingCases = owned?.pendingCases ?? null;
+  const running = pendingCases !== null;
 
   const run = async () => {
     const scope = scopeRef.current;
@@ -82,6 +86,19 @@ export function useRunCode({
       showToast('You appear to be offline', 'error');
       return;
     }
+
+    const selected = getRunCases();
+    if (selected.length === 0 || selected.length > MAX_RUN_TESTCASES) {
+      onInvalidSelection();
+      return;
+    }
+    // Copy the submitted values before callbacks and independent collection edits.
+    const cases = selected.map((test) => ({
+      id: test.id,
+      kind: test.kind,
+      stdin: test.input,
+      expected_output: test.expected,
+    }));
 
     const request = { controller: new AbortController(), pending: true };
     scope.request = request;
@@ -99,14 +116,14 @@ export function useRunCode({
             ? current
             : {
                 owner,
-                running: false,
-                runResult: null,
+                pendingCases: null,
+                lastRun: null,
                 consoleLines: [],
               };
         return { ...base, ...patch };
       });
     };
-    write({ running: true });
+    write({ pendingCases: cases });
     onStart();
 
     try {
@@ -116,19 +133,15 @@ export function useRunCode({
           problem_id: problem.id,
           language,
           source_code: code,
-          testcases: tests.map((test) => ({
-            id: test.id,
-            kind: test.kind,
-            stdin: test.input,
-            expected_output: test.expected,
-          })),
+          testcases: cases,
         },
         request.controller.signal,
       );
       if (!ownsRequest()) return;
-      write({ runResult: result });
+      const outcome = { cases, result };
+      write({ lastRun: outcome });
       const diagnostics = collectRunDiagnostics(result);
-      onResult(result, diagnostics);
+      onResult(outcome, diagnostics);
       write({ consoleLines: buildRunConsoleLines(result) });
     } catch (err) {
       if (!ownsRequest()) return;
@@ -160,34 +173,26 @@ export function useRunCode({
         // Keep identity after finishing: queued React updates still belong to
         // this request, but a subsequent request must supersede them.
         request.pending = false;
-        write({ running: false });
+        write({ pendingCases: null });
       }
     }
   };
 
   // Submit clears only the Run result; it must not reset the existing console.
-  const setRunResult: Dispatch<SetStateAction<RunResponse | null>> = (next) => {
+  const clearRunResult = () => {
     const scope = scopeRef.current;
     if (!scope?.active || scope.owner !== owner) return;
     setSnapshot((current) => {
       if (!scope.active || scopeRef.current !== scope) return current;
-      const base: RunSnapshot =
-        current?.owner === owner
-          ? current
-          : {
-              owner,
-              running: false,
-              runResult: null,
-              consoleLines: [],
-            };
-      return { ...base, runResult: typeof next === 'function' ? next(base.runResult) : next };
+      return current?.owner === owner ? { ...current, lastRun: null } : current;
     });
   };
   return {
     running,
-    runResult: owned?.runResult ?? null,
+    pendingCases,
+    lastRun: owned?.lastRun ?? null,
     consoleLines: owned?.consoleLines ?? [],
     run,
-    setRunResult,
+    clearRunResult,
   };
 }

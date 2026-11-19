@@ -1,14 +1,18 @@
-import type { RunTestCaseResult } from '@/lib/types';
-import type { TestCase, TestCasePatch } from '../types';
+import { useId } from 'react';
+import { matchesRunCase } from '../runResult';
+import { MAX_RUN_TESTCASES } from '../testcases';
+import type { RunCases, RunOutcome, TestCase, TestCasePatch } from '../types';
 import { RunCaseDetails } from './RunCaseDetails';
 import { testField, testLabel } from './workspaceStyles';
 
 interface TestcasePanelProps {
   tests: TestCase[];
   selected: number;
-  results: Map<string, RunTestCaseResult>;
-  running: boolean;
+  includedIds: ReadonlySet<string>;
+  pendingCases: RunCases | null;
+  lastRun: RunOutcome | null;
   onSelect: (id: string) => void;
+  onInclude: (id: string, included: boolean) => void;
   onAdd: () => void;
   onRemove: (id: string) => void;
   onUpdate: (id: string, patch: TestCasePatch) => void;
@@ -17,19 +21,46 @@ interface TestcasePanelProps {
 export function TestcasePanel({
   tests,
   selected,
-  results,
-  running,
+  includedIds,
+  pendingCases,
+  lastRun,
   onSelect,
+  onInclude,
   onAdd,
   onRemove,
   onUpdate,
 }: TestcasePanelProps) {
+  const summaryId = useId();
   const current = tests[selected];
-  const currentResult = current ? results.get(current.id) : undefined;
+  const cases = pendingCases ?? lastRun?.cases;
+  const submitted = current && cases?.find((test) => test.id === current.id);
+  const matches = submitted && matchesRunCase(current, submitted);
+  const currentResult =
+    !pendingCases && matches
+      ? lastRun?.result.tests.find((test) => test.id === current.id && test.kind === current.kind)
+      : undefined;
+  let caseMessage = '';
+  if (cases && !submitted) {
+    caseMessage = pendingCases ? 'Not included in this Run' : 'Not included in the last Run';
+  } else if (submitted && !matches) {
+    caseMessage = pendingCases ? 'Changed since this Run started' : 'Changed since the last Run';
+  } else if (submitted && !pendingCases && !currentResult) {
+    caseMessage = 'No result for this case in the last Run';
+  }
 
   return (
     <>
+      <p id={summaryId} aria-live="polite" style={{ ...testLabel, margin: '4px 0 8px' }}>
+        {includedIds.size} / {MAX_RUN_TESTCASES} selected · {tests.length} available
+        {includedIds.size === 0 && <> — Select 1–10 test cases to run.</>}
+        {includedIds.size === MAX_RUN_TESTCASES && tests.length > MAX_RUN_TESTCASES && (
+          <> — Uncheck a case to include another.</>
+        )}
+      </p>
       <div
+        role="group"
+        aria-label="Test cases to run"
+        aria-describedby={summaryId}
         style={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -40,6 +71,7 @@ export function TestcasePanel({
       >
         {tests.map((test, index) => {
           const active = index === selected;
+          const included = includedIds.has(test.id);
           return (
             <span
               key={test.id}
@@ -52,6 +84,23 @@ export function TestcasePanel({
                 overflow: 'hidden',
               }}
             >
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0 4px 0 8px',
+                  minHeight: 30,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Include ${test.name} in Run${test.fromExample ? '' : ` (${test.id})`}`}
+                  checked={included}
+                  disabled={!included && includedIds.size >= MAX_RUN_TESTCASES}
+                  onChange={(event) => onInclude(test.id, event.target.checked)}
+                  style={{ margin: 0, accentColor: 'var(--accent)' }}
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => onSelect(test.id)}
@@ -148,7 +197,8 @@ export function TestcasePanel({
               style={testField}
             />
           </label>
-          <RunCaseDetails result={currentResult} running={running} />
+          {caseMessage && <p style={testLabel}>{caseMessage}</p>}
+          <RunCaseDetails result={currentResult} running={Boolean(pendingCases && matches)} />
         </>
       )}
     </>

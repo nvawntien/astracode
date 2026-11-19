@@ -15,7 +15,7 @@ export function RunCaseDetails({ result, running }: RunCaseDetailsProps) {
       <div role="status" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
         <Spinner size={12} />
         <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
-          Running all visible test cases…
+          Included in the current Run…
         </span>
       </div>
     );

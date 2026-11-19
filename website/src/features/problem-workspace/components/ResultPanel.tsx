@@ -330,6 +330,12 @@ export function ResultPanel({
 
     const passed = runResult.tests.filter((test) => !isRunFailure(test)).length;
     const allPassed = runResult.tests.length > 0 && passed === runResult.tests.length;
+    const onlyCheckedResults = runResult.tests.every((test) => test.status === 'accepted');
+    const summary = allPassed
+      ? onlyCheckedResults
+        ? '✓ All selected test cases passed'
+        : '✓ No failures in selected test cases'
+      : `✕ ${runResult.tests.length - passed} failed among selected test cases`;
     return (
       <div style={{ animation: 'acFadeUp .25s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -340,7 +346,7 @@ export function ResultPanel({
               color: allPassed ? 'var(--success)' : 'var(--error)',
             }}
           >
-            {allPassed ? '✓ All test cases passed' : `✕ ${runResult.tests.length - passed} failed`}
+            {summary}
           </span>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>
             {passed}/{runResult.tests.length}
@@ -362,7 +368,9 @@ export function ResultPanel({
             >
               <span
                 role="img"
-                aria-label={isRunFailure(test) ? 'Failed' : 'Passed'}
+                aria-label={
+                  test.status === 'executed' ? 'Executed' : isRunFailure(test) ? 'Failed' : 'Passed'
+                }
                 style={{
                   width: 18,
                   height: 18,

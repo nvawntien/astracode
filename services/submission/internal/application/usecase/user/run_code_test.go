@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +25,11 @@ func TestRunCodeUseCaseValidation(t *testing.T) {
 		{
 			name: "duplicate testcase IDs",
 			req:  validRunRequest([]dto.RunTestCaseInput{{ID: "case-1", Kind: "sample", Stdin: "1\n", ExpectedOutput: stringPtr("1\n")}, {ID: "case-1", Kind: "custom", Stdin: "2\n"}}),
+			want: domain.ErrInvalidRunTestCase,
+		},
+		{
+			name: "blank testcase ID",
+			req:  validRunRequest([]dto.RunTestCaseInput{{ID: " \t", Kind: "custom"}}),
 			want: domain.ErrInvalidRunTestCase,
 		},
 		{
@@ -49,16 +55,56 @@ func TestRunCodeUseCaseValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uc := NewRunCodeUseCase(&stubProblemReader{}, &stubJudgeRunner{}, dto.RunCodeLimits{RequestTimeout: time.Second})
+			judge := &stubJudgeRunner{}
+			uc := NewRunCodeUseCase(&stubProblemReader{}, judge, dto.RunCodeLimits{RequestTimeout: time.Second})
 			_, err := uc.Execute(context.Background(), claims, tt.req)
 			if tt.want == nil {
 				if err != nil {
 					t.Fatalf("Execute() error = %v, want nil", err)
 				}
+				if judge.calls != 1 {
+					t.Fatalf("Judge calls = %d, want 1", judge.calls)
+				}
 				return
 			}
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Execute() error = %v, want %v", err, tt.want)
+			}
+			if judge.calls != 0 {
+				t.Fatalf("Judge calls = %d, want 0", judge.calls)
+			}
+		})
+	}
+}
+
+func TestRunCodeUseCaseTestcaseCount(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		configured int
+		count      int
+		wantErr    bool
+	}{
+		{name: "default accepts ten", count: 10},
+		{name: "default rejects eleven", count: 11, wantErr: true},
+		{name: "configured cap accepts two", configured: 2, count: 2},
+		{name: "configured cap rejects three", configured: 2, count: 3, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cases := make([]dto.RunTestCaseInput, tt.count)
+			for i := range cases {
+				cases[i] = dto.RunTestCaseInput{ID: fmt.Sprintf("custom-%d", i+1), Kind: "custom"}
+			}
+			judge := &stubJudgeRunner{}
+			uc := NewRunCodeUseCase(&stubProblemReader{}, judge, dto.RunCodeLimits{MaxTestCases: tt.configured})
+			result, err := uc.Execute(context.Background(), auth.Claims{UserID: "u1", Role: rbac.RoleUser}, validRunRequest(cases))
+			if tt.wantErr {
+				if !errors.Is(err, domain.ErrInvalidRunTestCase) || judge.calls != 0 {
+					t.Fatalf("Execute() error = %v, Judge calls = %d, want invalid testcase error and zero calls", err, judge.calls)
+				}
+				return
+			}
+			if err != nil || judge.calls != 1 || len(result.Tests) != tt.count {
+				t.Fatalf("Execute() error = %v, Judge calls = %d, results = %d, want success with %d cases", err, judge.calls, len(result.Tests), tt.count)
 			}
 		})
 	}
@@ -101,9 +147,10 @@ func (s *stubProblemReader) GetTestCaseMetadata(context.Context, int64) (dto.Pro
 	return dto.ProblemTestCaseMetadata{}, nil
 }
 
-type stubJudgeRunner struct{}
+type stubJudgeRunner struct{ calls int }
 
 func (s *stubJudgeRunner) RunCode(_ context.Context, req outbound.JudgeRunRequest) (dto.RunCodeResponse, error) {
+	s.calls++
 	tests := make([]dto.RunTestCaseResult, 0, len(req.TestCases))
 	for _, tc := range req.TestCases {
 		tests = append(tests, dto.RunTestCaseResult{ID: tc.ID, Kind: tc.Kind, Status: "executed"})

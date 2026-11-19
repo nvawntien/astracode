@@ -255,13 +255,13 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
       expect(text()).toContain('Running your code');
       expect(text()).not.toContain(official.compile_output);
       await act(async () => pending.resolve(runResult));
-      expect(text()).toContain('All test cases passed');
+      expect(text()).toContain('All selected test cases passed');
       expect(text()).not.toContain(official.compile_output);
       await click('View submission result');
       expect(text()).toContain(official.compile_output);
       expect(submissionApi.get).toHaveBeenCalledTimes(1);
       await click('View Run result');
-      expect(text()).toContain('All test cases passed');
+      expect(text()).toContain('All selected test cases passed');
       await click('View submission result');
       await click('View all submissions');
       expect(submissionApi.listMine).toHaveBeenCalledWith(
@@ -335,7 +335,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
       expect(text()).toContain('Running your code');
       expect(sessionStorage.getItem('astra-bottom')).toBe('310');
       await act(async () => pending.resolve(runResult));
-      expect(text()).toContain('All test cases passed');
+      expect(text()).toContain('All selected test cases passed');
       expect(panel().style.height).toBe('310px');
     },
   );
@@ -348,14 +348,14 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
     await click('Run');
     expect(text()).toContain('Running your code');
-    expect(text()).not.toContain('All test cases passed');
+    expect(text()).not.toContain('All selected test cases passed');
     await click('View submission result');
     expect(text()).toContain(official.compile_output);
     await act(async () => pending.resolve(runResult));
     expect(text()).toContain(official.compile_output);
-    expect(text()).not.toContain('All test cases passed');
+    expect(text()).not.toContain('All selected test cases passed');
     await click('View Run result');
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
   });
 
   it('selects official presentation on Submit while creation is pending and retains console', async () => {
@@ -368,7 +368,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     expect(button('Result').getAttribute('aria-selected')).toBe('true');
     expect(panel().style.height).toBe('235px');
     expect(text()).toContain('Submitting your code');
-    expect(text()).not.toContain('All test cases passed');
+    expect(text()).not.toContain('All selected test cases passed');
     await act(async () => pending.resolve({ ...created, id: 42 }));
     await act(async () => TestEventSource.instances.at(-1)!.open());
     expect(text()).toContain('Submission #42');
@@ -401,7 +401,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     expect(text()).toContain('Running your code');
     expect(text()).not.toContain(official.compile_output);
     await act(async () => pending.resolve(runResult));
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
     expect(invalidateProgress).toHaveBeenCalledExactlyOnceWith(user.id);
     expect(observed.toast).toHaveBeenCalledTimes(1);
     expect(submissionApi.get).toHaveBeenCalledTimes(1);
@@ -432,7 +432,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     await act(async () => TestEventSource.instances.at(-1)!.emit('submission.completed', event()));
     expect(text()).toContain('Verdict received');
     await click('Run');
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
     expect(text()).not.toContain('Verdict received');
     await click('View submission result');
     expect(text()).toContain('Verdict received');
@@ -441,7 +441,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     await click('Retry detail');
     await click('View Run result');
     await act(async () => recovery.resolve(official));
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
     expect(text()).not.toContain(official.compile_output);
     await click('View submission result');
     expect(text()).toContain(official.compile_output);
@@ -471,7 +471,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     expect(submissionApi.get).toHaveBeenCalledTimes(1);
 
     await click('Run');
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
     expect(text()).not.toContain('another attempt');
     await click('View submission result');
     expect(text()).toContain('another attempt');
@@ -578,7 +578,7 @@ describe('action-owned result presentation with real Workspace and ResultPanel',
     await click('Expand panel');
     expect(text()).toContain(official.compile_output);
     await click('View Run result');
-    expect(text()).toContain('All test cases passed');
+    expect(text()).toContain('All selected test cases passed');
     expect(submissionApi.run).toHaveBeenCalledTimes(1);
     expect(submissionApi.get).toHaveBeenCalledTimes(1);
   });
@@ -699,5 +699,251 @@ describe('testcase collection in the real Workspace', () => {
         'textarea[aria-label="Test input for Custom 3"]',
       )?.value,
     ).toBe('  edited\n');
+  });
+});
+
+function loadExamples(count: number) {
+  vi.mocked(problemApi.bySlug).mockImplementation(async () => ({
+    ...problem,
+    examples: Array.from({ length: count }, (_, i) => ({
+      input: `stdin ${i + 1}\n`,
+      expected_output: `stdout ${i + 1}\n`,
+    })),
+  }));
+}
+
+function checkbox(caseName: string) {
+  const input = [
+    ...view!.container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((control) => control.getAttribute('aria-label') === `Include ${caseName} in Run`);
+  expect(input, caseName).toBeDefined();
+  return input!;
+}
+
+async function toggle(caseName: string) {
+  await act(async () => checkbox(caseName).click());
+}
+
+async function editCase(label: string, value: string) {
+  const input = view!.container.querySelector<HTMLTextAreaElement>(
+    `textarea[aria-label="${label}"]`,
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
+      input,
+      value,
+    );
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('explicit Run testcase selection in the real Workspace', () => {
+  it.each(['button', 'keyboard', 'stacked keyboard', 'mobile button'] as const)(
+    'reveals zero-selection guidance and sends no request on %s Run',
+    async (mode) => {
+      loadExamples(11);
+      if (mode === 'stacked keyboard') window.innerWidth = 900;
+      if (mode === 'mobile button') window.innerWidth = 700;
+      await mount();
+      if (mode === 'stacked keyboard' || mode === 'mobile button') await click('Code');
+      if (mode !== 'mobile button') await click('Collapse panel');
+      if (mode === 'stacked keyboard') await click('Problem');
+      if (mode === 'button' || mode === 'mobile button') await click('Run');
+      else await shortcut();
+      expect(submissionApi.run).not.toHaveBeenCalled();
+      expect(submissionApi.create).not.toHaveBeenCalled();
+      if (mode === 'stacked keyboard')
+        expect(button('Code').getAttribute('aria-selected')).toBe('true');
+      if (mode !== 'mobile button') {
+        expect(button('Collapse panel').getAttribute('aria-expanded')).toBe('true');
+      }
+      expect(button('Tests (11)').getAttribute('aria-selected')).toBe('true');
+      expect(text()).toContain('Select 1–10 test cases to run.');
+      expect(checkbox('Case 11').checked).toBe(false);
+    },
+  );
+
+  it('sends only explicitly included cases in collection order and reuses inclusion until changed', async () => {
+    loadExamples(11);
+    await mount(true);
+    await toggle('Case 11');
+    await toggle('Case 5');
+    await toggle('Case 2');
+    expect(button('Case 1').getAttribute('aria-pressed')).toBe('true');
+    await click('Case 5');
+    expect(checkbox('Case 5').checked).toBe(true);
+    expect(text()).toContain('3 / 10 selected · 11 available');
+    observed.user = { ...user };
+    await view!.rerender(element(true));
+    expect(text()).toContain('3 / 10 selected · 11 available');
+
+    await click('Collapse panel');
+    vi.mocked(submissionApi.run).mockImplementation(async ({ testcases }) => ({
+      ...runResult,
+      tests: testcases.map(({ id, kind }) => ({ ...runResult.tests[0], id, kind })),
+    }));
+    await click('Run');
+    expect(button('Result').getAttribute('aria-selected')).toBe('true');
+    expect(button('Collapse panel').getAttribute('aria-expanded')).toBe('true');
+    expect(text()).toContain('All selected test cases passed');
+    const request = {
+      problem_id: problem.id,
+      language: 'CPP',
+      source_code: '// draft',
+      testcases: [2, 5, 11].map((n) => ({
+        id: `sample-${n}`,
+        kind: 'sample',
+        stdin: `stdin ${n}\n`,
+        expected_output: `stdout ${n}\n`,
+      })),
+    };
+    expect(submissionApi.run).toHaveBeenCalledExactlyOnceWith(request, expect.any(AbortSignal));
+    await shortcut();
+    expect(submissionApi.run).toHaveBeenLastCalledWith(request, expect.any(AbortSignal));
+
+    await click('Tests (11)');
+    await click('Case 1');
+    expect(text()).toContain('Not included in the last Run');
+    expect(text()).not.toContain('Actual Output');
+    await toggle('Case 5');
+    await shortcut();
+    expect(submissionApi.run).toHaveBeenCalledTimes(3);
+    expect(submissionApi.run).toHaveBeenLastCalledWith(
+      { ...request, testcases: [request.testcases[0], request.testcases[2]] },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('keeps the previous result and console after empty Run, and Submit still sends only source', async () => {
+    await mount();
+    await click('Run');
+    await click('Tests (1)');
+    await toggle('Case 1');
+    await click('Run');
+    expect(submissionApi.run).toHaveBeenCalledTimes(1);
+    expect(text()).toContain('Select 1–10 test cases to run.');
+    await click('Console');
+    expect(text()).toContain('Run console output');
+    await click('Result');
+    expect(text()).toContain('All selected test cases passed');
+    await click('Submit');
+    expect(submissionApi.create).toHaveBeenCalledExactlyOnceWith(
+      { problem_id: problem.id, language: 'CPP', source_code: '// draft' },
+      expect.any(Function),
+    );
+    expect(button('Result').getAttribute('aria-selected')).toBe('true');
+  });
+});
+
+describe('Run result attribution by submitted testcase values', () => {
+  it.each([
+    ['Test input for Custom 1', 'input Y'],
+    ['Expected output for Custom 1', 'expected B'],
+  ])('keeps a deferred verdict off the edited case after changing %s', async (field, edit) => {
+    await mount();
+    await click('Use input from example 1 as a test');
+    await editCase('Test input for Custom 1', 'input X');
+    await editCase('Expected output for Custom 1', 'expected A');
+    const pending = deferred<RunResponse>();
+    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+    await shortcut();
+    const [request] = vi.mocked(submissionApi.run).mock.calls[0];
+    expect(request.testcases[1]).toEqual({
+      id: 'custom-1',
+      kind: 'custom',
+      stdin: 'input X',
+      expected_output: 'expected A',
+    });
+
+    await click('Tests (2)');
+    await editCase(field, edit);
+    await click('Case 1');
+    await act(async () =>
+      pending.resolve({
+        ...runResult,
+        tests: [
+          ...runResult.tests,
+          {
+            ...runResult.tests[0],
+            id: 'custom-1',
+            kind: 'custom',
+            status: 'wrong_answer',
+            stdout: 'output for original values',
+            expected_output: 'expected A',
+          },
+        ],
+      }),
+    );
+
+    expect(button('Case 1').getAttribute('aria-pressed')).toBe('true');
+    expect(text()).toContain('Run console output');
+    await click('Custom 1');
+    expect(text()).not.toContain('output for original values');
+    expect(text()).toContain('Changed since the last Run');
+    await click('Console');
+    expect(text()).toContain('output for original values');
+    await click('Result');
+    expect(text()).toContain('1 failed');
+  });
+
+  it('keeps the original execution snapshot across pending inclusion, delete and add changes', async () => {
+    await mount();
+    await click('+ Add case');
+    await click('+ Add case');
+    const pending = deferred<RunResponse>();
+    vi.mocked(submissionApi.run).mockReturnValueOnce(pending.promise);
+    await click('Run');
+    const [request] = vi.mocked(submissionApi.run).mock.calls[0];
+    expect(request.testcases.map((test) => test.id)).toEqual(['sample-1', 'custom-1', 'custom-2']);
+    await click('Tests (3)');
+    await toggle('Case 1');
+    await click('Remove Custom 1');
+    await click('+ Add case');
+    expect(text()).toContain('Input — Custom 2');
+    const activeCase = () => panel().querySelector('button[aria-pressed="true"]');
+    const addedCase = activeCase();
+    await act(async () =>
+      pending.resolve({
+        ...runResult,
+        tests: request.testcases.map((test) => ({
+          ...runResult.tests[0],
+          id: test.id,
+          kind: test.kind,
+          status: test.id === 'custom-2' ? 'accepted' : 'wrong_answer',
+          stdout: `snapshot output from ${test.id}`,
+        })),
+      }),
+    );
+    expect(activeCase()).toBe(addedCase);
+    expect(text()).toContain('Not included in the last Run');
+    expect(text()).not.toContain('Actual Output');
+    await click('Console');
+    expect(text()).toContain('snapshot output from custom-1');
+    await shortcut();
+    expect(submissionApi.run).toHaveBeenLastCalledWith(
+      {
+        ...request,
+        testcases: [
+          request.testcases[2],
+          { id: 'custom-3', kind: 'custom', stdin: '', expected_output: null },
+        ],
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('shows no inline verdict for a submitted case after compilation failure', async () => {
+    await mount();
+    vi.mocked(submissionApi.run).mockResolvedValueOnce({
+      ...runResult,
+      status: 'compile_error',
+      compile_output: 'compiler diagnostic',
+      tests: [],
+    });
+    await click('Run');
+    expect(text()).toContain('compiler diagnostic');
+    await click('Tests (1)');
+    expect(text()).toContain('No result for this case in the last Run');
+    expect(text()).not.toContain('Actual Output');
   });
 });

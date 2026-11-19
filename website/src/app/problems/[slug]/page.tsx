@@ -278,6 +278,9 @@ export default function WorkspacePage() {
   const {
     tests,
     selectedTest,
+    includedIds,
+    setRunIncluded,
+    getRunCases,
     selectTest,
     updateTest,
     addTest,
@@ -346,7 +349,7 @@ export default function WorkspacePage() {
     requireAuth,
     showToast,
     onSubmitStart: () => {
-      setRunResult(null);
+      clearRunResult();
       setDiagnosticSnapshot(null);
       setJumpTarget(null);
       selectResultSource('submission');
@@ -356,18 +359,23 @@ export default function WorkspacePage() {
     onCompleted: handleSubmissionCompleted,
   });
 
-  const { running, runResult, consoleLines, run, setRunResult } = useRunCode({
+  const { running, pendingCases, lastRun, consoleLines, run, clearRunResult } = useRunCode({
     slug,
     accountId,
     checkingResult,
     problem,
     language,
     code,
-    tests,
+    getRunCases,
     submitting,
     online,
     requireAuth,
     showToast,
+    onInvalidSelection: () => {
+      setBottomTab('tests');
+      setBottomOpen(true);
+      if (stacked) setMobileView('editor');
+    },
     onStart: () => {
       setDiagnosticSnapshot(null);
       setJumpTarget(null);
@@ -415,14 +423,10 @@ export default function WorkspacePage() {
 
   const langMeta = languageMeta(language);
   const busy = running || submitting || checkingResult;
+  const runResult = lastRun?.result ?? null;
   const canViewSubmission = Boolean(
     accountId && submission?.user_id === accountId && submission?.problem_id === problemId,
   );
-  const runResultsByID = useMemo(() => {
-    const entries = runResult?.tests.map((test) => [test.id, test] as const) ?? [];
-    return new Map(entries);
-  }, [runResult]);
-
   const bottomTabs: { key: BottomTab; label: string }[] = useMemo(
     () => [
       { key: 'tests', label: `Tests (${tests.length})` },
@@ -803,9 +807,11 @@ export default function WorkspacePage() {
                       <TestcasePanel
                         tests={tests}
                         selected={selectedTest}
-                        results={runResultsByID}
-                        running={running}
+                        includedIds={includedIds}
+                        pendingCases={pendingCases}
+                        lastRun={lastRun}
                         onSelect={selectTest}
+                        onInclude={setRunIncluded}
                         onAdd={addTest}
                         onRemove={removeTest}
                         onUpdate={updateTest}

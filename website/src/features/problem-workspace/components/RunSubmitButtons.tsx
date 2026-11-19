@@ -25,6 +25,7 @@ export function RunSubmitButtons({
         <button
           type="button"
           onClick={onRun}
+          title="Run selected test cases"
           disabled={busy || !online}
           className="ac-hover-surface2"
           style={{
@@ -71,7 +72,7 @@ export function RunSubmitButtons({
         type="button"
         onClick={onRun}
         disabled={busy || !online}
-        title="Run all visible test cases (Ctrl+Enter)"
+        title="Run selected test cases (Ctrl+Enter)"
         className="ac-hover-surface2"
         style={{
           height: 30,

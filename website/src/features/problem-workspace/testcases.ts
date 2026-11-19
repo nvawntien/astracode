@@ -1,6 +1,8 @@
 import type { ProblemExample } from '../../lib/types';
 import type { TestCase } from './types';
 
+export const MAX_RUN_TESTCASES = 10;
+
 export function initialTestcases(examples: ProblemExample[] | undefined): TestCase[] {
   const fromExamples = (examples ?? []).map((example, index) => ({
     id: `sample-${index + 1}`,

@@ -42,7 +42,7 @@ function options(): Options {
     problem: { id: 1 },
     language: 'CPP',
     code: 'old source',
-    tests: [
+    getRunCases: () => [
       {
         id: 'custom-1',
         kind: 'custom',
@@ -60,6 +60,7 @@ function options(): Options {
     onStart: vi.fn(),
     onResult: vi.fn(),
     onUnavailable: vi.fn(),
+    onInvalidSelection: vi.fn(),
   };
 }
 function Probe(props: Options) {
@@ -69,7 +70,7 @@ function Probe(props: Options) {
     null,
     JSON.stringify({
       running: latest.running,
-      result: latest.runResult,
+      result: latest.lastRun?.result ?? null,
       console: latest.consoleLines,
     }),
   );
@@ -129,7 +130,7 @@ describe('Run request scope and real React lifecycle', () => {
         pending.resolve(result);
         await request.done;
       });
-      expect(latest.runResult).toBeNull();
+      expect(latest.lastRun?.result ?? null).toBeNull();
       expect(latest.consoleLines).toEqual([]);
       expect(latest.running).toBe(false);
       expect(props.onResult).not.toHaveBeenCalled();
@@ -161,6 +162,7 @@ describe('Run request scope and real React lifecycle', () => {
         onResult: vi.fn(),
         onStart: vi.fn(),
         onUnavailable: vi.fn(),
+        onInvalidSelection: vi.fn(),
         showToast: vi.fn(),
       };
       await view!.rerender(element(next));
@@ -172,7 +174,7 @@ describe('Run request scope and real React lifecycle', () => {
         await old.done;
       });
       expect(latest.running).toBe(true);
-      expect(latest.runResult).toBeNull();
+      expect(latest.lastRun?.result ?? null).toBeNull();
       expect(latest.consoleLines).toEqual([]);
       expect(props.onResult).not.toHaveBeenCalled();
       expect(props.showToast).not.toHaveBeenCalled();
@@ -187,8 +189,11 @@ describe('Run request scope and real React lifecycle', () => {
         await current.done;
       });
       expect(latest.running).toBe(false);
-      expect(latest.runResult).toEqual(final);
-      expect(next.onResult).toHaveBeenCalledExactlyOnceWith(final, result.diagnostics);
+      expect(latest.lastRun?.result ?? null).toEqual(final);
+      expect(next.onResult).toHaveBeenCalledExactlyOnceWith(
+        { result: final, cases: vi.mocked(submissionApi.run).mock.lastCall?.[0].testcases },
+        result.diagnostics,
+      );
     },
   );
 
@@ -200,12 +205,12 @@ describe('Run request scope and real React lifecycle', () => {
     const old = await start();
     await view!.rerender(element({ ...props, slug: 'problem-b', problem: { id: 2 } }));
     await act(async () => latest.run());
-    const current = latest.runResult;
+    const current = latest.lastRun?.result ?? null;
     await act(async () => {
       pending.resolve({ ...result, compile_output: 'obsolete' });
       await old.done;
     });
-    expect(latest.runResult).toBe(current);
+    expect(latest.lastRun?.result ?? null).toBe(current);
     expect(props.onResult).toHaveBeenCalledTimes(1);
   });
 
@@ -226,7 +231,7 @@ describe('Run request scope and real React lifecycle', () => {
       );
       expect(commits.at(-1)).not.toContain('old stdout');
       expect(commits.at(-1)).not.toContain('old diagnostic');
-      expect(latest.runResult).toBeNull();
+      expect(latest.lastRun?.result ?? null).toBeNull();
       expect(latest.consoleLines).toEqual([]);
     },
   );
@@ -250,9 +255,12 @@ describe('Run request scope and real React lifecycle', () => {
       pending.resolve(result);
       await request.done;
     });
-    expect(props.onResult).toHaveBeenCalledExactlyOnceWith(result, result.diagnostics);
+    expect(props.onResult).toHaveBeenCalledExactlyOnceWith(
+      { result, cases: vi.mocked(submissionApi.run).mock.lastCall?.[0].testcases },
+      result.diagnostics,
+    );
     expect(nextResult).not.toHaveBeenCalled();
-    expect(latest.runResult).toEqual(result);
+    expect(latest.lastRun?.result ?? null).toEqual(result);
   });
 
   it.each(['resolve', 'reject'] as const)(
