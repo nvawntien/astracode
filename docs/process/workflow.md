@@ -37,7 +37,7 @@ Capability owners are not assigned yet; until they are, the Orchestrator reviews
 The repository's existing release flow is kept:
 
 ```
-feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy──►  STAGING
+feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy──►  STAGING   (auto-deploy and staging: planned, M0-13)
                                          │
                               milestone release PR
                                          ▼
@@ -60,7 +60,7 @@ feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy─�
 | 5 | Apply in sessions following the `AGENTS.md` protocol; update `progress.md` each session | Change owner + agent | OpenSpec apply | All tasks ticked with evidence; CI green |
 | 6 | Cross-agent review: the **other** agent reviews the diff against the delta spec (Claude Code reviews Codex work and vice versa) | Change owner | Claude Code / Codex | Findings fixed or answered in the PR |
 | 7 | **Gate 2 — PR review** (checklist §6) | Reviewer | GitHub | Approved; CI green |
-| 8 | Merge to `develop` → auto-deploy to staging → smoke tests | Pipeline | GitHub Actions | Staging healthy |
+| 8 | Merge to `develop` → auto-deploy to staging → smoke tests (planned: M0-13) | Pipeline | GitHub Actions | Staging healthy |
 | 9 | Archive the change (specs updated) in a follow-up commit on `develop` | Change owner | OpenSpec archive | `openspec/specs` reflects the change |
 | 10 | Close the issue | Change owner | GitHub | — |
 
@@ -91,7 +91,7 @@ One verb-object title; 1–2 capabilities (max 3); 5–15 tasks; 1–4 days; one
 ## 7. Definition of done (per change)
 
 1. Gate 2 approved and merged to `develop`.
-2. Deployed to staging and smoke-tested.
+2. Deployed to staging and smoke-tested (planned: M0-13).
 3. Change archived; specs updated.
 4. Doc impact handled (architecture docs, contracts, ADRs).
 5. Issue closed.
