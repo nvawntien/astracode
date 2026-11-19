@@ -16,6 +16,10 @@ services:
     container_name: judge_envoy
     image: envoyproxy/envoy:v1.34.2
     restart: unless-stopped
+    user: "101:101"
+    entrypoint: [ "envoy" ]
+    cap_drop: [ "ALL" ]
+    security_opt: [ "no-new-privileges:true" ]
     # A full SSE stream can hold both a downstream client socket and an
     # Envoy-to-Submission upstream socket. Keep the soft and hard process
     # limits aligned so a large, controlled burst cannot inherit Docker's
@@ -28,50 +32,40 @@ services:
       - "8080:8080"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy/edge.lua:/etc/envoy/edge.lua:ro
+      - envoy_jwk:/etc/envoy/secrets:ro
     depends_on:
-      gateway:
-        condition: service_started
-      submission-service:
-        condition: service_healthy
-    networks:
-      - judge_internal
-    logging: *default-logging
-    command: [ "envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn" ]
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: [ "CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /envoy-health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q '^ok$' <&3" ]
-
-  gateway:
-    container_name: judge_gateway
-    image: devopsfaith/krakend:2.6.0
-    expose:
-      - "8080"
-    volumes:
-      - ./gateway/krakend.tmpl:/etc/krakend/krakend.tmpl:ro
-      - ./gateway/settings:/etc/krakend/settings:ro
-      - ./gateway/templates:/etc/krakend/templates:ro
-      - ${GATEWAY_JWK_FILE:-./gateway/symmetric.json}:/etc/krakend/symmetric.json:ro
-    networks:
-      - judge_internal
-    depends_on:
+      envoy-jwk:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
       problem-service:
         condition: service_healthy
       submission-service:
         condition: service_healthy
-    restart: unless-stopped
+    networks:
+      - judge_internal
     logging: *default-logging
-    environment:
-      - FC_ENABLE=1
-      - FC_SETTINGS=/etc/krakend/settings
-      - FC_TEMPLATES=/etc/krakend/templates
-    command: [ "run", "-c", "/etc/krakend/krakend.tmpl" ]
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 256M
+    command: [ "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn" ]
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: [ "CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /envoy-health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q '^ok$' <&3" ]
+
+  # Short-lived, network-isolated key provisioning. Canonical key stays 0600.
+  envoy-jwk:
+    image: envoyproxy/envoy:v1.34.2
+    user: "0:0"
+    network_mode: none
+    cap_drop: [ "ALL" ]
+    cap_add: [ "DAC_OVERRIDE", "CHOWN" ]
+    security_opt: [ "no-new-privileges:true" ]
+    entrypoint: [ "/bin/bash", "-ec" ]
+    command:
+      - 'umask 077; cp /source/symmetric.json /keys/.symmetric.tmp; chmod 0400 /keys/.symmetric.tmp; chown 101:101 /keys/.symmetric.tmp; mv -f /keys/.symmetric.tmp /keys/symmetric.json'
+    volumes:
+      - ${GATEWAY_JWK_FILE:-./envoy/symmetric.json}:/source/symmetric.json:ro
+      - envoy_jwk:/keys
+    restart: "no"
 
   postgres:
     container_name: judge_postgres
@@ -365,6 +359,7 @@ networks:
     driver: bridge
 
 volumes:
+  envoy_jwk:
   postgres_data:
     driver: local
   redis_data:

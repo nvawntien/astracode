@@ -4,8 +4,6 @@ package bootstrap
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +12,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -101,7 +97,7 @@ func Run(ctx context.Context, options Options) (credentials.File, error) {
 	if options.Output == "" {
 		return credentials.File{}, errors.New("output path is required")
 	}
-	if err := ensureOutputTarget(options.Output, options.Replace); err != nil {
+	if err := credentials.ValidateOutputTarget(options.Output, options.Replace); err != nil {
 		return credentials.File{}, err
 	}
 	concurrency := options.Concurrency
@@ -130,7 +126,7 @@ func Run(ctx context.Context, options Options) (credentials.File, error) {
 	if err := credentials.Validate(file); err != nil {
 		return credentials.File{}, errors.New("generated credential file failed validation")
 	}
-	if err := writeAtomic(options.Output, file, options.Replace); err != nil {
+	if err := credentials.WriteAtomic(options.Output, file, options.Replace); err != nil {
 		return credentials.File{}, err
 	}
 	return file, nil
@@ -309,81 +305,6 @@ func cookies(jar http.CookieJar, base *url.URL) (access, refresh string) {
 		}
 	}
 	return access, refresh
-}
-
-func writeAtomic(path string, file credentials.File, replace bool) error {
-	if err := ensureOutputTarget(path, replace); err != nil {
-		return err
-	}
-	directory := filepath.Dir(path)
-	random := make([]byte, 12)
-	if _, err := rand.Read(random); err != nil {
-		return errors.New("create output temporary name")
-	}
-	temporary := filepath.Join(directory, ".users.local."+hex.EncodeToString(random)+".tmp")
-	f, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return errors.New("create output temporary file")
-	}
-	defer func() { _ = f.Close(); _ = os.Remove(temporary) }()
-	if err := json.NewEncoder(f).Encode(file); err != nil {
-		return errors.New("write credential output")
-	}
-	if err := f.Sync(); err != nil {
-		return errors.New("sync credential output")
-	}
-	if err := f.Close(); err != nil {
-		return errors.New("close credential output")
-	}
-	if replace {
-		// Rename replaces a final symlink rather than following it, but reject a
-		// symlink that appeared after the initial inspection for a clear safety
-		// contract.
-		if err := ensureOutputTarget(path, true); err != nil {
-			return err
-		}
-		if err := os.Rename(temporary, path); err != nil {
-			return errors.New("install credential output")
-		}
-	} else if err := os.Link(temporary, path); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return errors.New("output file already exists; use --replace to renew it")
-		}
-		return errors.New("install credential output")
-	} else if err := os.Remove(temporary); err != nil {
-		return errors.New("remove credential temporary file")
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return errors.New("secure credential output permissions")
-	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return errors.New("verify credential output permissions")
-	}
-	return nil
-}
-
-func ensureOutputTarget(path string, replace bool) error {
-	if path == "" {
-		return errors.New("output path is required")
-	}
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return errors.New("inspect output path")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("output path must not be a symlink")
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("output path must be a regular file")
-	}
-	if !replace {
-		return errors.New("output file already exists; use --replace to renew it")
-	}
-	return nil
 }
 
 func isLoopback(host string) bool {

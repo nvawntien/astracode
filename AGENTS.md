@@ -8,7 +8,7 @@ Key boundaries:
 * Each service owns its PostgreSQL database (`auth_db`, `problem_db`, `submission_db`); use APIs/events, never another service's tables.
 * Preserve the submission transaction + outbox path, Kafka contracts in `pkg/judge/`, and `AttemptID` result correlation. Do not expose official testcase inputs/expected outputs.
 * Gateway JWT validation propagates `X-User-*` headers; direct service endpoints must not become an alternate untrusted auth path. Treat the privileged executor sandbox as a security boundary.
-* `gateway/settings/` must stay aligned with service routers. Proto source is in `proto/`; generated Go is `pkg/pb/`.
+* `envoy/routes.json` must stay aligned with service routers. Proto source is in `proto/`; generated Go is `pkg/pb/`.
 
 Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w <changed-go-files>` from the relevant module; `docker compose config --quiet` validates local Compose. Start the complete local stack with `docker compose --profile dev --profile worker up -d --build`. No root Makefile, migration runner, or checked-in protobuf/Wire generation command exists—do not invent one without first establishing the toolchain. CI lives in `.github/workflows/` (`ci.yml`, `openspec.yml`, `release-images.yml`, `deploy-production.yml`); see `docs/codebase/DEVELOPMENT.md`.
 

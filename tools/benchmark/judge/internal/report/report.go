@@ -89,7 +89,14 @@ Classification: **%s**
 - Status: %s
 - FD estimate / observed peak: %d / %d (starting operator limit recommendation: %d; not a guarantee)
 - Active POST / ticket / SSE peaks: %d / %d / %d
+- Transport domains are isolated: Submission POST, ticket POST, and SSE GET do not share a connection pool.
+- Shared transport max connections per host: %d (aggregate across domain shards)
+- Submission transport shards / configured aggregate max connections: %d / %d
 - HTTP response protocols H1 / H2 / other: %d / %d / %d
+- Connection-acquire p50 / p95 / p99: %s / %s / %s ms
+- Transport-dispatch p50 / p95 / p99: %s / %s / %s ms
+- Wire-to-first-byte p50 / p95 / p99: %s / %s / %s ms
+- Wire-to-response-complete p50 / p95 / p99: %s / %s / %s ms
 
 ## Post-burst probes
 
@@ -106,7 +113,11 @@ Classification: **%s**
 		realistic.SSE.PeakActiveStreams, realistic.SSE.SurvivedFullHold, realistic.SSE.ClosedEarly, realistic.SSE.TerminalDuringHold,
 		optionalInt(summary.LoadWindow.BurstSpreadMS), optionalInt(realistic.SSE.StartSpreadMS),
 		realistic.ClientQualification, summary.ClientDiagnostics.NoFileRequired, summary.ClientDiagnostics.PeakOpenFDs, summary.ClientDiagnostics.NoFileRecommended,
-		summary.ClientDiagnostics.PeakActivePosts, summary.ClientDiagnostics.PeakActiveTickets, summary.ClientDiagnostics.PeakActiveSSE, summary.ClientDiagnostics.HTTP1Responses, summary.ClientDiagnostics.HTTP2Responses, summary.ClientDiagnostics.OtherProtocolResponses,
+		summary.ClientDiagnostics.PeakActivePosts, summary.ClientDiagnostics.PeakActiveTickets, summary.ClientDiagnostics.PeakActiveSSE, summary.ClientDiagnostics.TransportMaxConnsPerHost, domainShardCount(summary.ClientDiagnostics, "submission"), summary.ClientDiagnostics.TransportMaxConnsPerHost, summary.ClientDiagnostics.HTTP1Responses, summary.ClientDiagnostics.HTTP2Responses, summary.ClientDiagnostics.OtherProtocolResponses,
+		optionalFloat(summary.Latencies.ConnectionAcquireMS.P50), optionalFloat(summary.Latencies.ConnectionAcquireMS.P95), optionalFloat(summary.Latencies.ConnectionAcquireMS.P99),
+		optionalFloat(summary.Latencies.TransportDispatchMS.P50), optionalFloat(summary.Latencies.TransportDispatchMS.P95), optionalFloat(summary.Latencies.TransportDispatchMS.P99),
+		optionalFloat(summary.Latencies.WireToFirstByteMS.P50), optionalFloat(summary.Latencies.WireToFirstByteMS.P95), optionalFloat(summary.Latencies.WireToFirstByteMS.P99),
+		optionalFloat(summary.Latencies.WireToResponseCompleteMS.P50), optionalFloat(summary.Latencies.WireToResponseCompleteMS.P95), optionalFloat(summary.Latencies.WireToResponseCompleteMS.P99),
 		healthMarkdown(summary.HealthProbes), summary.QualityFlags)
 }
 
@@ -125,6 +136,11 @@ Classification: **%s**
 - Effective accepted intake: %s submissions/s
 - POST-start spread: %v ms
 - Submit p50 / p95 / p99: %s / %s / %s ms
+- Schedule p50 / p95 / p99: %s / %s / %s ms
+- Connection-acquire p50 / p95 / p99: %s / %s / %s ms
+- Transport-dispatch p50 / p95 / p99: %s / %s / %s ms
+- Wire-to-first-byte p50 / p95 / p99: %s / %s / %s ms
+- Wire-to-response-complete p50 / p95 / p99: %s / %s / %s ms
 - HTTP 429 / other 4xx / 5xx / transport / ambiguous: %d / %d / %d / %d / %d
 
 ## Scope boundary
@@ -143,6 +159,7 @@ Classification: **%s**
 - Status: %s
 - External container/Kafka survival evidence: %s (collect externally; unavailable is not zero)
 - CLIENT_LIMITED is the run classification when direct local evidence emits a LOAD_GENERATOR_LIMITED quality flag (or reaches the configured in-flight bound). Generic TLS, connect, and deadline failures remain transport failures unless corroborating local resource evidence exists.
+- Connection-acquire and transport-dispatch delay are measured from actual POST start. Separate schedule and dispatch p95 qualification budgets are recorded in run.json; transport queueing is direct load-generator evidence.
 
 ## Quality
 
@@ -152,8 +169,22 @@ Classification: **%s**
 		percent(summary.Counts.Accepted, summary.Counts.Attempted),
 		optionalFloat(burst.AttemptedThroughputPerSec), optionalFloat(admission.EffectiveAcceptedIntakePerSec), optionalInt(admission.PostStartSpreadMS),
 		optionalFloat(summary.Latencies.SubmitMS.P50), optionalFloat(summary.Latencies.SubmitMS.P95), optionalFloat(summary.Latencies.SubmitMS.P99),
+		optionalFloat(summary.Latencies.ScheduleDelayMS.P50), optionalFloat(summary.Latencies.ScheduleDelayMS.P95), optionalFloat(summary.Latencies.ScheduleDelayMS.P99),
+		optionalFloat(summary.Latencies.ConnectionAcquireMS.P50), optionalFloat(summary.Latencies.ConnectionAcquireMS.P95), optionalFloat(summary.Latencies.ConnectionAcquireMS.P99),
+		optionalFloat(summary.Latencies.TransportDispatchMS.P50), optionalFloat(summary.Latencies.TransportDispatchMS.P95), optionalFloat(summary.Latencies.TransportDispatchMS.P99),
+		optionalFloat(summary.Latencies.WireToFirstByteMS.P50), optionalFloat(summary.Latencies.WireToFirstByteMS.P95), optionalFloat(summary.Latencies.WireToFirstByteMS.P99),
+		optionalFloat(summary.Latencies.WireToResponseCompleteMS.P50), optionalFloat(summary.Latencies.WireToResponseCompleteMS.P95), optionalFloat(summary.Latencies.WireToResponseCompleteMS.P99),
 		summary.Counts.RateLimited, summary.Counts.Other4xx, summary.Counts.ServerErrors, summary.Counts.TransportFailures, summary.Counts.AmbiguousPosts,
 		healthMarkdown(summary.HealthProbes), admission.ClientQualification, admission.ExternalSurvivalEvidence, summary.QualityFlags)
+}
+
+func domainShardCount(diagnostics model.ClientDiagnostics, name string) int {
+	for _, domain := range diagnostics.TransportDomains {
+		if domain.Domain == name {
+			return domain.Shards
+		}
+	}
+	return 0
 }
 
 func percent(value, total int) string {

@@ -19,6 +19,7 @@ import (
 	"github.com/nvawntien/go-judge-system/tools/benchmark/judge/internal/config"
 	"github.com/nvawntien/go-judge-system/tools/benchmark/judge/internal/credentials"
 	"github.com/nvawntien/go-judge-system/tools/benchmark/judge/internal/model"
+	"github.com/nvawntien/go-judge-system/tools/benchmark/judge/internal/resources"
 )
 
 func writeCredentialFile(t *testing.T, token string) string {
@@ -147,6 +148,184 @@ func TestMassiveBurstSessionHorizonIncludesBoundedPoolPreflight(t *testing.T) {
 	if got, want := requiredSessionHorizonFor(cfg, 10000), 580*time.Second; got != want {
 		t.Fatalf("horizon=%s want=%s", got, want)
 	}
+}
+
+func TestMassiveBurstTransportCapIsIndependentFromNoFileQualification(t *testing.T) {
+	cfg := config.Defaults(config.ModeBurst)
+	cfg.ObservationMode = config.ObservationRealistic
+	cfg.ClientMaxConnsPerHost = 8192
+	noFile, err := resources.EstimateNoFileForObservation(100000, resources.ObservationRealistic)
+	if err != nil || noFile != 200256 {
+		t.Fatalf("nofile estimate=%d err=%v", noFile, err)
+	}
+	domains := newTransportDomains(cfg)
+	defer domains.Close()
+	if got := domains.submission.maxConnsPerHostPerShard; got != 512 {
+		t.Fatalf("submission per-shard max connections=%d want=512", got)
+	}
+	if got := len(domains.submission.shards); got != 16 {
+		t.Fatalf("submission shards=%d want=16", got)
+	}
+	if got := domains.ticket.maxConnsPerHostPerShard; got != 512 {
+		t.Fatalf("ticket per-shard max connections=%d want=512", got)
+	}
+	if got := domains.sse.maxConnsPerHostPerShard; got != 512 {
+		t.Fatalf("SSE per-shard max connections=%d want=512", got)
+	}
+	if domains.submission.maxConnsPerHostPerShard == int(noFile) {
+		t.Fatalf("transport cap was coupled to nofile=%d", noFile)
+	}
+}
+
+func TestTransportDomainsShardDeterministicallyAndRemainSeparated(t *testing.T) {
+	cfg := config.Defaults(config.ModeBurst)
+	cfg.ClientMaxConnsPerHost = 8192
+	cfg.SubmissionTransportShards, cfg.TicketTransportShards, cfg.SSETransportShards = 16, 4, 4
+	domains := newTransportDomains(cfg)
+	defer domains.Close()
+	if domains.submission.shard(0).transport != domains.submission.shard(16).transport {
+		t.Fatal("submission shard selection is not deterministic")
+	}
+	if domains.submission.shard(0).transport == domains.ticket.shard(0).transport || domains.submission.shard(0).transport == domains.sse.shard(0).transport {
+		t.Fatal("submission transport was shared with ticket or SSE")
+	}
+	if domains.submission.shard(0).transport.ForceAttemptHTTP2 == false {
+		t.Fatal("submission transport intentionally disabled HTTP/2")
+	}
+}
+
+func TestTransportShardValidationAndSeparateQualificationBudgets(t *testing.T) {
+	cfg := config.Defaults(config.ModeBurst)
+	for _, mutate := range []func(*config.Config){
+		func(v *config.Config) { v.SubmissionTransportShards = 0 },
+		func(v *config.Config) { v.TicketTransportShards = 129 },
+		func(v *config.Config) { v.SSETransportShards = 0 },
+		func(v *config.Config) { v.DispatchDelayP95Budget = 0 },
+	} {
+		copy := cfg
+		mutate(&copy)
+		if err := copy.Validate(); err == nil {
+			t.Fatal("invalid transport configuration accepted")
+		}
+	}
+	if exceedsP95Budget([]float64{400}, cfg.DispatchDelayP95Budget) {
+		t.Fatal("dispatch budget did not remain independently configurable")
+	}
+}
+
+func TestPrewarmUsesEveryDomainBeforeMeasuredPostWithoutCreatingState(t *testing.T) {
+	var publicGets, submissions atomic.Int32
+	var sawSubmissionBeforePrewarm atomic.Bool
+	prewarmDone := atomic.Bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/me":
+			_, _ = w.Write([]byte(`{"status":"success","code":20000,"data":{"id":"real-user-id","role":"user","is_active":true}}`))
+		case "/api/v1/problems/sample":
+			publicGets.Add(1)
+			if publicGets.Load() >= 5 {
+				prewarmDone.Store(true)
+			} // preflight + control/submission/ticket/SSE
+			_, _ = w.Write([]byte(`{"status":"success","code":20000,"data":{"id":7}}`))
+		case "/api/v1/submissions":
+			if !prewarmDone.Load() {
+				sawSubmissionBeforePrewarm.Store(true)
+			}
+			submissions.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"status":"success","code":20100,"data":{"id":9,"status":"PENDING"}}`))
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	source := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(source, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := baseConfig(t, server.URL, writeCredentialFile(t, futureJWT()), source)
+	cfg.Objective, cfg.ObservationMode, cfg.ErrorPolicy = config.ObjectiveMassiveBurst, config.ObservationAdmissionOnly, config.ErrorPolicyContinue
+	cfg.UserCount, cfg.BurstSize, cfg.MaxInFlight, cfg.MaxSubmissions = 1, 1, 1, 1
+	cfg.AdmissionPreflightSample = 1
+	cfg.SubmissionTransportShards, cfg.TicketTransportShards, cfg.SSETransportShards = 1, 1, 1
+	prepared, err := Preflight(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), prepared); err != nil {
+		t.Fatal(err)
+	}
+	if publicGets.Load() < 5 || sawSubmissionBeforePrewarm.Load() || submissions.Load() != 1 {
+		t.Fatalf("public GETs=%d submitted-before-prewarm=%t submissions=%d", publicGets.Load(), sawSubmissionBeforePrewarm.Load(), submissions.Load())
+	}
+}
+
+func TestTransportDispatchDelayIsSummarizedAndQualifiesClientLimit(t *testing.T) {
+	start := time.Now()
+	gotConn, wrote := start.Add(time.Millisecond), start.Add(80*time.Millisecond)
+	records := []model.SubmissionRecord{{Phase: model.PhaseLoad, Attempted: true, PostStartedAt: &start, TransportGotConnAt: &gotConn, TransportWroteAt: &wrote, ConnectionAcquireMS: floatPtr(1), TransportDispatchMS: floatPtr(80)}}
+	summary := summarize(config.Defaults(config.ModeBurst), records, nil, start, start.Add(time.Second), start, start, map[string]struct{}{}, 1)
+	if summary.Latencies.ConnectionAcquireMS.P50 == nil || *summary.Latencies.ConnectionAcquireMS.P50 != 1 || summary.Latencies.TransportDispatchMS.P50 == nil || *summary.Latencies.TransportDispatchMS.P50 != 80 {
+		t.Fatalf("transport latencies=%+v", summary.Latencies)
+	}
+	if !exceedsP95Budget([]float64{80}, 25*time.Millisecond) {
+		t.Fatal("excessive transport dispatch delay did not qualify the load generator")
+	}
+	quality := map[string]struct{}{"LOAD_GENERATOR_LIMITED": {}}
+	metrics := admissionMetrics(summary, nil, quality)
+	if metrics.ClientQualification != "CLIENT_LIMITED" || metrics.SystemSurvival != string(model.ClassificationClientLimited) {
+		t.Fatalf("metrics=%+v", metrics)
+	}
+}
+
+func TestMissingHTTPTraceTimestampsRemainUnavailable(t *testing.T) {
+	start := time.Now()
+	records := []model.SubmissionRecord{{Phase: model.PhaseLoad, Attempted: true, PostStartedAt: &start}}
+	summary := summarize(config.Defaults(config.ModeBurst), records, nil, start, start.Add(time.Second), start, start, map[string]struct{}{}, 1)
+	if summary.Latencies.ConnectionAcquireMS.Count != 0 || summary.Latencies.TransportDispatchMS.Count != 0 || summary.Latencies.WireToFirstByteMS.Count != 0 || summary.Latencies.WireToResponseCompleteMS.Count != 0 {
+		t.Fatalf("missing trace timestamps became measurements: %+v", summary.Latencies)
+	}
+}
+
+func TestSessionValidationHorizonUsesParticipatingSessions(t *testing.T) {
+	newConfig := func(mode config.ObservationMode) config.Config {
+		cfg := config.Defaults(config.ModeBurst)
+		cfg.ObservationMode = mode
+		cfg.AdmissionPreflightSample = 32
+		cfg.PreflightConcurrency = 256
+		cfg.APITimeout = 5 * time.Second // The ordinary measured API timeout.
+		cfg.BurstStartTimeout = 2 * time.Minute
+		cfg.AuthValidityMargin = time.Minute
+		return cfg
+	}
+
+	for _, mode := range []config.ObservationMode{config.ObservationAdmissionOnly, config.ObservationRealistic} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := newConfig(mode)
+			indexes := sessionValidationIndexes(cfg, 100000)
+			if got, want := len(indexes), 32; got != want {
+				t.Fatalf("validation sessions=%d want=%d", got, want)
+			}
+			// ceil(32 / 256) == 1: refresh plus /me, then burst start and margin.
+			if got, want := requiredSessionHorizonFor(cfg, len(indexes)), 190*time.Second; got != want {
+				t.Fatalf("sampled horizon=%s want=%s", got, want)
+			}
+			if got := requiredSessionHorizonFor(cfg, 100000); got <= 190*time.Second {
+				t.Fatalf("full-pool horizon=%s unexpectedly matches sampled horizon", got)
+			}
+		})
+	}
+
+	t.Run("full", func(t *testing.T) {
+		cfg := newConfig(config.ObservationFull)
+		indexes := sessionValidationIndexes(cfg, 100000)
+		if got, want := len(indexes), 100000; got != want {
+			t.Fatalf("validation sessions=%d want=%d", got, want)
+		}
+		if got, want := requiredSessionHorizonFor(cfg, len(indexes)), requiredSessionHorizonFor(cfg, 100000); got != want {
+			t.Fatalf("full horizon=%s want=%s", got, want)
+		}
+	})
 }
 
 func TestRunMakesOnePOSTAndRedactsSource(t *testing.T) {

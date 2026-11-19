@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"math/big"
 	"net/url"
 	"strings"
@@ -206,6 +207,56 @@ func TestRealisticObservationRequiresMassiveBurstAndPositiveHold(t *testing.T) {
 	cfg.ObservationMode = ObservationRealistic
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("realistic mode outside massive burst accepted")
+	}
+}
+
+func TestClientMaxConnsPerHostHasIndependentSafeBounds(t *testing.T) {
+	cfg := valid(t, ModeBurst)
+	if got, want := cfg.ClientMaxConnsPerHost, 8192; got != want {
+		t.Fatalf("default client max connections per host=%d want=%d", got, want)
+	}
+	for _, value := range []int{0, -1, 65537} {
+		copy := cfg
+		copy.ClientMaxConnsPerHost = value
+		if err := copy.Validate(); err == nil {
+			t.Fatalf("client max connections per host=%d accepted", value)
+		}
+	}
+}
+
+func TestBindParsesClientMaxConnsPerHost(t *testing.T) {
+	cfg := Defaults(ModeBurst)
+	flags := flag.NewFlagSet("benchmark", flag.ContinueOnError)
+	Bind(flags, &cfg)
+	if err := flags.Parse([]string{"--client-max-conns-per-host=8192"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientMaxConnsPerHost != 8192 {
+		t.Fatalf("client max connections per host=%d", cfg.ClientMaxConnsPerHost)
+	}
+}
+
+func TestTransportShardAndQualificationFlags(t *testing.T) {
+	cfg := Defaults(ModeBurst)
+	flags := flag.NewFlagSet("benchmark", flag.ContinueOnError)
+	Bind(flags, &cfg)
+	if err := flags.Parse([]string{"--submission-transport-shards=16", "--ticket-transport-shards=4", "--sse-transport-shards=4", "--client-schedule-p95-budget=500ms", "--client-dispatch-p95-budget=500ms"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubmissionTransportShards != 16 || cfg.TicketTransportShards != 4 || cfg.SSETransportShards != 4 || cfg.ScheduleDelayP95Budget != 500*time.Millisecond || cfg.DispatchDelayP95Budget != 500*time.Millisecond {
+		t.Fatalf("transport flags=%+v", cfg)
+	}
+	for _, mutate := range []func(*Config){
+		func(v *Config) { v.SubmissionTransportShards = 0 },
+		func(v *Config) { v.TicketTransportShards = 129 },
+		func(v *Config) { v.SSETransportShards = 0 },
+		func(v *Config) { v.DispatchDelayP95Budget = 0 },
+	} {
+		candidate := valid(t, ModeBurst)
+		mutate(&candidate)
+		if err := candidate.Validate(); err == nil {
+			t.Fatal("invalid transport qualification accepted")
+		}
 	}
 }
 

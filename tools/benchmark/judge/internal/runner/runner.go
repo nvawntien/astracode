@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -35,19 +36,139 @@ import (
 )
 
 type Prepared struct {
-	Config               config.Config
-	Sessions             []*credentials.Session
-	Clients              map[string]*client.API
-	Source               []byte
-	SourceText           string
-	SourceSHA256         string
-	Subjects             map[string]string // alias -> real ID; memory-only
-	RequiredUsers        int
-	ConfiguredUsers      int
-	NoFile               resources.NoFileStatus
-	TransportDiagnostics *client.Diagnostics
-	validationIndexes    []int
-	closeTransport       func()
+	Config            config.Config
+	Sessions          []*credentials.Session
+	Clients           map[string]*client.API
+	SubmissionShards  map[string]int
+	Source            []byte
+	SourceText        string
+	SourceSHA256      string
+	Subjects          map[string]string // alias -> real ID; memory-only
+	RequiredUsers     int
+	ConfiguredUsers   int
+	NoFile            resources.NoFileStatus
+	Transports        *transportDomains
+	validationIndexes []int
+	closeTransport    func()
+}
+
+type transportShard struct {
+	transport   *http.Transport
+	diagnostics *client.Diagnostics
+}
+
+type transportDomain struct {
+	name                    client.Domain
+	maxConnsPerHostPerShard int
+	shards                  []transportShard
+}
+
+// transportDomains separates short admission writes from ticket requests and
+// long-held event streams. It shares transports only within a domain/shard;
+// individual sessions still receive their own cookie jar.
+type transportDomains struct {
+	control    transportDomain
+	submission transportDomain
+	ticket     transportDomain
+	sse        transportDomain
+}
+
+func ceilDivide(value, divisor int) int {
+	if divisor <= 0 {
+		return 0
+	}
+	return (value + divisor - 1) / divisor
+}
+
+func newTransportDomain(name client.Domain, shardCount, totalMaxConns int) transportDomain {
+	perShard := max(1, ceilDivide(totalMaxConns, shardCount))
+	domain := transportDomain{name: name, maxConnsPerHostPerShard: perShard, shards: make([]transportShard, shardCount)}
+	for index := range domain.shards {
+		domain.shards[index] = transportShard{transport: credentials.NewBenchmarkTransport(perShard), diagnostics: &client.Diagnostics{}}
+	}
+	return domain
+}
+
+func newTransportDomains(cfg config.Config) *transportDomains {
+	return &transportDomains{
+		// The admission transport gets the operator-configured aggregate cap.
+		// Ticket/SSE are deliberately lower: they are observer traffic and must
+		// not multiply the theoretical TCP fan-out by the number of domains.
+		control:    newTransportDomain(client.DomainControl, 1, min(cfg.ClientMaxConnsPerHost, 64)),
+		submission: newTransportDomain(client.DomainSubmission, cfg.SubmissionTransportShards, cfg.ClientMaxConnsPerHost),
+		ticket:     newTransportDomain(client.DomainTicket, cfg.TicketTransportShards, min(cfg.ClientMaxConnsPerHost, 2048)),
+		sse:        newTransportDomain(client.DomainSSE, cfg.SSETransportShards, min(cfg.ClientMaxConnsPerHost, 2048)),
+	}
+}
+
+func (d transportDomain) shard(index int) transportShard { return d.shards[index%len(d.shards)] }
+
+func (d *transportDomains) clientsFor(session *credentials.Session, index int) client.DomainClients {
+	control, submission := d.control.shard(index), d.submission.shard(index)
+	ticket, sse := d.ticket.shard(index), d.sse.shard(index)
+	return client.DomainClients{
+		Control: benchmarkHTTPClient(session, control.transport), Submission: benchmarkHTTPClient(session, submission.transport), Ticket: benchmarkHTTPClient(session, ticket.transport), SSE: benchmarkHTTPClient(session, sse.transport),
+		ControlDiagnostics: control.diagnostics, SubmissionDiagnostics: submission.diagnostics, TicketDiagnostics: ticket.diagnostics, SSEDiagnostics: sse.diagnostics,
+	}
+}
+
+func benchmarkHTTPClient(session *credentials.Session, transport http.RoundTripper) *http.Client {
+	return &http.Client{Transport: transport, Jar: session.Client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+func (d *transportDomains) Close() {
+	if d == nil {
+		return
+	}
+	for _, domain := range []transportDomain{d.control, d.submission, d.ticket, d.sse} {
+		for _, shard := range domain.shards {
+			shard.transport.CloseIdleConnections()
+		}
+	}
+}
+
+func snapshotTransportDomain(domain transportDomain) model.TransportDomainDiagnostics {
+	result := model.TransportDomainDiagnostics{Domain: string(domain.name), Shards: len(domain.shards), MaxConnsPerHostPerShard: domain.maxConnsPerHostPerShard, ShardDiagnostics: make([]model.TransportShardDiagnostics, 0, len(domain.shards))}
+	var connectionAcquire, dispatch []float64
+	for index, shard := range domain.shards {
+		snapshot := shard.diagnostics.Snapshot()
+		result.NewConnections += snapshot.NewConnections
+		result.ReusedConnections += snapshot.ReusedConnections
+		result.HTTP1Responses += snapshot.HTTP1Responses
+		result.HTTP2Responses += snapshot.HTTP2Responses
+		result.OtherProtocolResponses += snapshot.OtherProtocolResponses
+		if snapshot.PeakActiveRequests > result.PeakActiveRequests {
+			result.PeakActiveRequests = snapshot.PeakActiveRequests
+		}
+		connectionAcquire = append(connectionAcquire, snapshot.ConnectionAcquireMS...)
+		dispatch = append(dispatch, snapshot.DispatchMS...)
+		result.ShardDiagnostics = append(result.ShardDiagnostics, model.TransportShardDiagnostics{Shard: index, NewConnections: snapshot.NewConnections, ReusedConnections: snapshot.ReusedConnections, HTTP1Responses: snapshot.HTTP1Responses, HTTP2Responses: snapshot.HTTP2Responses, OtherProtocolResponses: snapshot.OtherProtocolResponses, PeakActiveRequests: snapshot.PeakActiveRequests, ConnectionAcquireMS: stats.Distribution(snapshot.ConnectionAcquireMS), TransportDispatchMS: stats.Distribution(snapshot.DispatchMS)})
+	}
+	result.ConnectionAcquireMS = stats.Distribution(connectionAcquire)
+	result.TransportDispatchMS = stats.Distribution(dispatch)
+	return result
+}
+
+func (d *transportDomains) Snapshot() []model.TransportDomainDiagnostics {
+	if d == nil {
+		return nil
+	}
+	return []model.TransportDomainDiagnostics{snapshotTransportDomain(d.control), snapshotTransportDomain(d.submission), snapshotTransportDomain(d.ticket), snapshotTransportDomain(d.sse)}
+}
+
+func (d *transportDomains) shardCount(domain client.Domain) int {
+	switch domain {
+	case client.DomainControl:
+		return len(d.control.shards)
+	case client.DomainSubmission:
+		return len(d.submission.shards)
+	case client.DomainTicket:
+		return len(d.ticket.shards)
+	case client.DomainSSE:
+		return len(d.sse.shards)
+	default:
+		return 0
+	}
 }
 
 // maxSourceBytes mirrors the public submission contract (256 KiB) without
@@ -83,8 +204,8 @@ func Preflight(ctx context.Context, cfg config.Config) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	transport := credentials.NewBenchmarkTransport(int(noFile.Required))
-	sessions, err := credentials.NewSessions(file, cfg.BaseURL, transport)
+	domains := newTransportDomains(cfg)
+	sessions, err := credentials.NewSessions(file, cfg.BaseURL, domains.control.shards[0].transport)
 	if err != nil {
 		return nil, err
 	}
@@ -100,20 +221,20 @@ func Preflight(ctx context.Context, cfg config.Config) (*Prepared, error) {
 		return nil, fmt.Errorf("read source file: %w", err)
 	}
 	hash := sha256.Sum256(source)
-	diagnostics := &client.Diagnostics{}
-	prepared := &Prepared{Config: cfg, Sessions: sessions, Clients: make(map[string]*client.API, len(sessions)), Source: source, SourceText: string(source), SourceSHA256: fmt.Sprintf("%x", hash[:]), Subjects: make(map[string]string), ConfiguredUsers: configuredUsers, NoFile: noFile, TransportDiagnostics: diagnostics, closeTransport: transport.CloseIdleConnections}
+	prepared := &Prepared{Config: cfg, Sessions: sessions, Clients: make(map[string]*client.API, len(sessions)), SubmissionShards: make(map[string]int, len(sessions)), Source: source, SourceText: string(source), SourceSHA256: fmt.Sprintf("%x", hash[:]), Subjects: make(map[string]string), ConfiguredUsers: configuredUsers, NoFile: noFile, Transports: domains, closeTransport: domains.Close}
 	keepTransport := false
 	defer func() {
 		if !keepTransport && prepared.closeTransport != nil {
 			prepared.closeTransport()
 		}
 	}()
-	for _, session := range sessions {
-		api, err := client.NewWithDiagnostics(cfg.BaseURL, session, diagnostics)
+	for index, session := range sessions {
+		api, err := client.NewWithDomainClients(cfg.BaseURL, session, domains.clientsFor(session, index))
 		if err != nil {
 			return nil, err
 		}
 		prepared.Clients[session.Alias] = api
+		prepared.SubmissionShards[session.Alias] = index % cfg.SubmissionTransportShards
 	}
 	prepared.validationIndexes = sessionValidationIndexes(cfg, len(sessions))
 	subjects, err := validatePreflightSessions(ctx, prepared, prepared.validationIndexes)
@@ -155,6 +276,12 @@ func Preflight(ctx context.Context, cfg config.Config) (*Prepared, error) {
 	return prepared, nil
 }
 
+// benchmarkTransport remains for narrow compatibility tests. Production
+// preflight uses newTransportDomains so submission/ticket/SSE never share it.
+func benchmarkTransport(cfg config.Config) *http.Transport {
+	return credentials.NewBenchmarkTransport(cfg.ClientMaxConnsPerHost)
+}
+
 // PrepareSessions makes one final bounded refresh/lifetime decision and
 // revalidates the preflight-authenticated identity immediately before warmup.
 // It remains before measured load/drain and never writes refreshed cookies to
@@ -164,7 +291,7 @@ func PrepareSessions(ctx context.Context, prepared *Prepared) error {
 	cfg := prepared.Config
 	return parallelSessionIndexes(ctx, prepared.Sessions, prepared.validationIndexes, cfg.PreflightConcurrency, func(index int, session *credentials.Session) error {
 		api := prepared.Clients[session.Alias]
-		if err := prepareAccessSessionFinalFor(ctx, cfg, len(prepared.Sessions), session, api); err != nil {
+		if err := prepareAccessSessionFinalFor(ctx, cfg, len(prepared.validationIndexes), session, api); err != nil {
 			return fmt.Errorf("prepared session %q: %w", session.Alias, err)
 		}
 		me, err := meWithTimeout(ctx, api, cfg.APITimeout)
@@ -180,7 +307,7 @@ func validatePreflightSessions(ctx context.Context, prepared *Prepared, indexes 
 	var subjectsMu sync.Mutex
 	err := parallelSessionIndexes(ctx, prepared.Sessions, indexes, prepared.Config.PreflightConcurrency, func(index int, session *credentials.Session) error {
 		api := prepared.Clients[session.Alias]
-		if err := prepareAccessSessionFor(ctx, prepared.Config, len(prepared.Sessions), session, api); err != nil {
+		if err := prepareAccessSessionFor(ctx, prepared.Config, len(prepared.validationIndexes), session, api); err != nil {
 			return fmt.Errorf("preflight session %q: %w", session.Alias, err)
 		}
 		me, err := meWithTimeout(ctx, api, prepared.Config.APITimeout)
@@ -349,7 +476,13 @@ func Run(ctx context.Context, prepared *Prepared) (*RunResult, error) {
 	run.metadata.ClientDiagnostics.NoFileRequired = prepared.NoFile.Required
 	run.metadata.ClientDiagnostics.NoFileRecommended = prepared.NoFile.Recommended
 	run.metadata.ClientDiagnostics.ConnectionsPerLogicalSubmission = prepared.NoFile.ConnectionsPerLogicalSubmission
+	run.metadata.ClientDiagnostics.TransportMaxConnsPerHost = cfg.ClientMaxConnsPerHost
+	run.metadata.ClientDiagnostics.ScheduleP95BudgetMS = cfg.ScheduleDelayP95Budget.Milliseconds()
+	run.metadata.ClientDiagnostics.DispatchP95BudgetMS = cfg.DispatchDelayP95Budget.Milliseconds()
 	run.metadata.ClientDiagnostics.RuntimeCPUCount = runtime.NumCPU()
+	if err := run.prewarmTransports(); err != nil {
+		return nil, err
+	}
 	if cfg.Mode == config.ModeBurst {
 		burstSize, jitter := cfg.BurstSize, cfg.Jitter.Milliseconds()
 		run.metadata.Workload.BurstSize = &burstSize
@@ -383,6 +516,48 @@ func Run(ctx context.Context, prepared *Prepared) (*RunResult, error) {
 		run.sustained()
 	}
 	return run.finish()
+}
+
+// prewarmTransports establishes DNS/TCP/TLS/HTTP2 state before the common
+// release barrier. The only request is a safe public problem GET per domain
+// shard; submission creation, tickets, and SSE are never touched here.
+func (r *benchmarkRun) prewarmTransports() error {
+	cfg := r.prepared.Config
+	result := model.TransportPrewarm{Enabled: cfg.TransportPrewarm, Protocols: map[string]int{}}
+	if !cfg.TransportPrewarm {
+		r.metadata.TransportPrewarm = result
+		return nil
+	}
+	if len(r.prepared.Sessions) == 0 || r.prepared.Transports == nil {
+		return errors.New("transport prewarm requires prepared sessions and transports")
+	}
+	started := time.Now()
+	session := r.prepared.Sessions[0]
+	for _, domain := range []client.Domain{client.DomainControl, client.DomainSubmission, client.DomainTicket, client.DomainSSE} {
+		for index := 0; index < r.prepared.Transports.shardCount(domain); index++ {
+			result.Attempts++
+			api, err := client.NewWithDomainClients(cfg.BaseURL, session, r.prepared.Transports.clientsFor(session, index))
+			if err != nil {
+				return err
+			}
+			requestCtx, cancel := context.WithTimeout(r.parentCtx, cfg.APITimeout)
+			protocol, err := api.Prewarm(requestCtx, domain, cfg.ProblemSlug)
+			cancel()
+			if err != nil {
+				result.Failures++
+				result.DurationMS = time.Since(started).Milliseconds()
+				r.metadata.TransportPrewarm = result
+				return fmt.Errorf("prewarm %s shard %d: %w", domain, index, err)
+			}
+			result.Successes++
+			if protocol != "" {
+				result.Protocols[protocol]++
+			}
+		}
+	}
+	result.DurationMS = time.Since(started).Milliseconds()
+	r.metadata.TransportPrewarm = result
+	return nil
 }
 
 type benchmarkRun struct {
@@ -688,6 +863,7 @@ func (r *benchmarkRun) launch(ctx context.Context, phase model.Phase, sequence i
 		return record, done
 	}
 	record.UserAlias = user.Alias
+	record.SubmissionTransportShard = r.prepared.SubmissionShards[user.Alias]
 	r.records = append(r.records, record)
 	r.activePosts++
 	if r.activePosts > r.peakPosts {
@@ -703,6 +879,7 @@ func (r *benchmarkRun) launch(ctx context.Context, phase model.Phase, sequence i
 		requestCtx, cancel := context.WithTimeout(ctx, r.prepared.Config.APITimeout)
 		response, err := r.prepared.Clients[user.Alias].Submit(requestCtx, client.SubmissionRequest{ProblemID: r.prepared.Config.ProblemID, Language: r.prepared.Config.Language, SourceCode: r.prepared.SourceText})
 		cancel()
+		r.setTransportTiming(record, response.GotConnAt, response.WroteRequestAt, response.FirstResponseAt)
 		completed := time.Now()
 		r.setCompleted(record, completed)
 		r.mu.Lock()
@@ -1074,13 +1251,19 @@ func (r *benchmarkRun) finish() (*RunResult, error) {
 	if (r.prepared.Config.ObservationMode == config.ObservationAdmissionOnly || r.prepared.Config.ObservationMode == config.ObservationRealistic) && r.parentCtx.Err() == nil {
 		health = r.admissionHealthProbes()
 	}
-	var scheduleDelays []float64
+	var scheduleDelays, transportDispatchDelays []float64
 	for _, record := range values {
 		if record.Phase == model.PhaseLoad && record.ScheduleDelayMS != nil {
 			scheduleDelays = append(scheduleDelays, *record.ScheduleDelayMS)
 		}
+		if record.Phase == model.PhaseLoad && record.TransportDispatchMS != nil {
+			transportDispatchDelays = append(transportDispatchDelays, *record.TransportDispatchMS)
+		}
 	}
-	if schedule := stats.Distribution(scheduleDelays); schedule.P95 != nil && time.Duration(*schedule.P95*float64(time.Millisecond)) > r.prepared.Config.ScheduleDelayP95Budget {
+	if exceedsP95Budget(scheduleDelays, r.prepared.Config.ScheduleDelayP95Budget) {
+		r.addQuality("LOAD_GENERATOR_LIMITED")
+	}
+	if exceedsP95Budget(transportDispatchDelays, r.prepared.Config.DispatchDelayP95Budget) {
 		r.addQuality("LOAD_GENERATOR_LIMITED")
 	}
 	loadPhase := model.PhaseLoad
@@ -1101,6 +1284,7 @@ func (r *benchmarkRun) finish() (*RunResult, error) {
 		r.metadata.ClientDiagnostics.PeakActivePosts = r.peakPosts
 		r.metadata.ClientDiagnostics.PeakActiveTickets = r.peakTickets
 		r.metadata.ClientDiagnostics.PeakActiveSSE = r.peakSSE
+		r.metadata.ClientDiagnostics.TransportMaxConnsPerHost = r.prepared.Config.ClientMaxConnsPerHost
 	}
 	if r.prepared.Config.ObservationMode == config.ObservationAdmissionOnly {
 		summary.Admission = admissionMetrics(summary, health, r.quality)
@@ -1116,13 +1300,16 @@ func (r *benchmarkRun) finish() (*RunResult, error) {
 		classification, reasons := stats.Classify(stats.ClassificationInput{Mode: model.Mode(r.prepared.Config.Mode), Objective: r.prepared.Config.Objective, TargetRate: rateFloat(r.prepared.Config.Rate), Windows: loadWindows, Summary: summary})
 		summary.Classification, summary.ClassificationReasons = classification, reasons
 	}
-	if r.prepared.TransportDiagnostics != nil {
-		diagnostics := r.prepared.TransportDiagnostics.Snapshot()
-		r.metadata.ClientDiagnostics.TransportNewConnections = diagnostics.NewConnections
-		r.metadata.ClientDiagnostics.TransportReusedConnections = diagnostics.ReusedConnections
-		r.metadata.ClientDiagnostics.HTTP1Responses = diagnostics.HTTP1Responses
-		r.metadata.ClientDiagnostics.HTTP2Responses = diagnostics.HTTP2Responses
-		r.metadata.ClientDiagnostics.OtherProtocolResponses = diagnostics.OtherProtocolResponses
+	if r.prepared.Transports != nil {
+		domains := r.prepared.Transports.Snapshot()
+		r.metadata.ClientDiagnostics.TransportDomains = domains
+		for _, domain := range domains {
+			r.metadata.ClientDiagnostics.TransportNewConnections += domain.NewConnections
+			r.metadata.ClientDiagnostics.TransportReusedConnections += domain.ReusedConnections
+			r.metadata.ClientDiagnostics.HTTP1Responses += domain.HTTP1Responses
+			r.metadata.ClientDiagnostics.HTTP2Responses += domain.HTTP2Responses
+			r.metadata.ClientDiagnostics.OtherProtocolResponses += domain.OtherProtocolResponses
+		}
 	}
 	summary.ClientDiagnostics = r.metadata.ClientDiagnostics
 	if r.metadata.State != model.RunAborted && r.metadata.State != model.RunCancelled {
@@ -1153,6 +1340,11 @@ func (r *benchmarkRun) finish() (*RunResult, error) {
 		return &RunResult{Dir: r.writer.Dir, Summary: summary}, fmt.Errorf("write run metadata: %w", err)
 	}
 	return &RunResult{Dir: r.writer.Dir, Summary: summary}, nil
+}
+
+func exceedsP95Budget(values []float64, budget time.Duration) bool {
+	distribution := stats.Distribution(values)
+	return distribution.P95 != nil && time.Duration(*distribution.P95*float64(time.Millisecond)) > budget
 }
 
 func (r *benchmarkRun) abort(reason string) {
@@ -1198,6 +1390,36 @@ func (r *benchmarkRun) setCompleted(record *model.SubmissionRecord, at time.Time
 	if record.PostStartedAt != nil {
 		latency := at.Sub(*record.PostStartedAt).Seconds() * 1000
 		record.SubmitLatencyMS = &latency
+	}
+	if record.TransportWroteAt != nil {
+		latency := at.Sub(*record.TransportWroteAt).Seconds() * 1000
+		record.WireToResponseCompleteMS = &latency
+	}
+}
+
+func (r *benchmarkRun) setTransportTiming(record *model.SubmissionRecord, gotConnAt, wroteRequestAt, firstResponseAt *time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if gotConnAt != nil {
+		record.TransportGotConnAt = gotConnAt
+		if record.PostStartedAt != nil {
+			delay := gotConnAt.Sub(*record.PostStartedAt).Seconds() * 1000
+			record.ConnectionAcquireMS = &delay
+		}
+	}
+	if wroteRequestAt != nil {
+		record.TransportWroteAt = wroteRequestAt
+		if record.PostStartedAt != nil {
+			delay := wroteRequestAt.Sub(*record.PostStartedAt).Seconds() * 1000
+			record.TransportDispatchMS = &delay
+		}
+	}
+	if firstResponseAt != nil {
+		record.TransportFirstResponseAt = firstResponseAt
+		if wroteRequestAt != nil {
+			delay := firstResponseAt.Sub(*wroteRequestAt).Seconds() * 1000
+			record.WireToFirstByteMS = &delay
+		}
 	}
 }
 func (r *benchmarkRun) recordFailure(record *model.SubmissionRecord, outcome model.Outcome, class, message string) {
@@ -1270,7 +1492,7 @@ func summarize(cfg config.Config, records []model.SubmissionRecord, windows []mo
 		JudgeCore: model.JudgeCoreMetrics{Definition: "compile_success_to_all_required_testcase_execution_batches_completed", Availability: "UNAVAILABLE", Reason: "judge-bench artifacts do not record compile completion and testcase execution completion timestamps"},
 		Pipeline:  model.PipelineMetrics{TerminalThroughputSemantics: "observed terminal completion rate across the submission pipeline; not Judge Core throughput"},
 	}
-	var submit, e2e, delay []float64
+	var submit, e2e, delay, connectionAcquire, transportDispatch, wireFirstByte, wireComplete []float64
 	for _, record := range records {
 		if record.Phase != model.PhaseLoad {
 			continue
@@ -1316,6 +1538,18 @@ func summarize(cfg config.Config, records []model.SubmissionRecord, windows []mo
 		}
 		if record.ScheduleDelayMS != nil {
 			delay = append(delay, *record.ScheduleDelayMS)
+		}
+		if record.ConnectionAcquireMS != nil {
+			connectionAcquire = append(connectionAcquire, *record.ConnectionAcquireMS)
+		}
+		if record.TransportDispatchMS != nil {
+			transportDispatch = append(transportDispatch, *record.TransportDispatchMS)
+		}
+		if record.WireToFirstByteMS != nil {
+			wireFirstByte = append(wireFirstByte, *record.WireToFirstByteMS)
+		}
+		if record.WireToResponseCompleteMS != nil {
+			wireComplete = append(wireComplete, *record.WireToResponseCompleteMS)
 		}
 	}
 	duration := loadEnd.Sub(loadStart).Seconds()
@@ -1380,7 +1614,7 @@ func summarize(cfg config.Config, records []model.SubmissionRecord, windows []mo
 		summary.Drain.PipelineTerminalCompletionRatePerSecond = &rate
 	}
 	summary.Outstanding = model.Outstanding{Peak: peak, EndOfLoad: summary.LoadWindow.OutstandingAtEnd, EndOfDrain: summary.Drain.Remaining}
-	summary.Latencies = model.Latencies{SubmitMS: stats.Distribution(submit), EndToEndMS: stats.Distribution(e2e), ScheduleDelayMS: stats.Distribution(delay)}
+	summary.Latencies = model.Latencies{SubmitMS: stats.Distribution(submit), EndToEndMS: stats.Distribution(e2e), ScheduleDelayMS: stats.Distribution(delay), ConnectionAcquireMS: stats.Distribution(connectionAcquire), TransportDispatchMS: stats.Distribution(transportDispatch), WireToFirstByteMS: stats.Distribution(wireFirstByte), WireToResponseCompleteMS: stats.Distribution(wireComplete)}
 	if summary.Counts.Accepted > 0 {
 		coverage := float64(summary.Counts.Terminal) / float64(summary.Counts.Accepted)
 		summary.Pipeline.TerminalObservationCoverage = &coverage

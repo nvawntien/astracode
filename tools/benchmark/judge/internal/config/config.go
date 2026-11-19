@@ -60,59 +60,65 @@ const (
 )
 
 type Config struct {
-	Mode                     Mode
-	BaseURL                  *url.URL
-	BaseURLRaw               string
-	UsersFile                string
-	ProblemID                int64
-	ProblemSlug              string
-	Language                 string
-	SourceFile               string
-	ExpectedVerdict          string
-	ResultRoot               string
-	RunID                    string
-	Repetition               int
-	Seed                     int64
-	WarmupCount              int
-	WarmupTimeout            time.Duration
-	SubmitCooldown           time.Duration
-	CooldownGuard            time.Duration
-	SubmitLatencyBudget      time.Duration
-	PoolHeadroomPercent      float64
-	APITimeout               time.Duration
-	SubmissionTimeout        time.Duration
-	DrainTimeout             time.Duration
-	Window                   time.Duration
-	MaxSubmissions           int
-	MaxInFlight              int
-	UserCount                int
-	PreflightConcurrency     int
-	BurstStartTimeout        time.Duration
-	ErrorPolicy              ErrorPolicy
-	Objective                Objective
-	ObservationMode          ObservationMode
-	AdmissionPreflightSample int
-	SSEHoldDuration          time.Duration
-	SSEConnectTimeout        time.Duration
-	SSEIdleTimeout           time.Duration
-	SSEMaxReconnects         int
-	SSEBackoffBase           time.Duration
-	SSEBackoffMax            time.Duration
-	SafetyReconcileInterval  time.Duration
-	ReconcileMaxQPS          float64
-	RefreshMode              RefreshMode
-	AuthValidityMargin       time.Duration
-	AllowRemote              bool
-	ConfirmTargetHost        string
-	BurstSize                int
-	Jitter                   time.Duration
-	ScheduleDelayP95Budget   time.Duration
-	Rate                     *big.Rat
-	RateRaw                  string
-	Duration                 time.Duration
-	TotalSubmissions         int
-	SystemConfigFile         string
-	SystemConfig             *model.SystemConfig
+	Mode                      Mode
+	BaseURL                   *url.URL
+	BaseURLRaw                string
+	UsersFile                 string
+	ProblemID                 int64
+	ProblemSlug               string
+	Language                  string
+	SourceFile                string
+	ExpectedVerdict           string
+	ResultRoot                string
+	RunID                     string
+	Repetition                int
+	Seed                      int64
+	WarmupCount               int
+	WarmupTimeout             time.Duration
+	SubmitCooldown            time.Duration
+	CooldownGuard             time.Duration
+	SubmitLatencyBudget       time.Duration
+	PoolHeadroomPercent       float64
+	APITimeout                time.Duration
+	SubmissionTimeout         time.Duration
+	DrainTimeout              time.Duration
+	Window                    time.Duration
+	MaxSubmissions            int
+	MaxInFlight               int
+	ClientMaxConnsPerHost     int
+	SubmissionTransportShards int
+	TicketTransportShards     int
+	SSETransportShards        int
+	TransportPrewarm          bool
+	UserCount                 int
+	PreflightConcurrency      int
+	BurstStartTimeout         time.Duration
+	ErrorPolicy               ErrorPolicy
+	Objective                 Objective
+	ObservationMode           ObservationMode
+	AdmissionPreflightSample  int
+	SSEHoldDuration           time.Duration
+	SSEConnectTimeout         time.Duration
+	SSEIdleTimeout            time.Duration
+	SSEMaxReconnects          int
+	SSEBackoffBase            time.Duration
+	SSEBackoffMax             time.Duration
+	SafetyReconcileInterval   time.Duration
+	ReconcileMaxQPS           float64
+	RefreshMode               RefreshMode
+	AuthValidityMargin        time.Duration
+	AllowRemote               bool
+	ConfirmTargetHost         string
+	BurstSize                 int
+	Jitter                    time.Duration
+	ScheduleDelayP95Budget    time.Duration
+	DispatchDelayP95Budget    time.Duration
+	Rate                      *big.Rat
+	RateRaw                   string
+	Duration                  time.Duration
+	TotalSubmissions          int
+	SystemConfigFile          string
+	SystemConfig              *model.SystemConfig
 }
 
 func Defaults(mode Mode) Config {
@@ -129,6 +135,16 @@ func Defaults(mode Mode) Config {
 		DrainTimeout:        5 * time.Minute,
 		Window:              30 * time.Second,
 		MaxInFlight:         100,
+		// This limits TCP connections to one origin. It is intentionally separate
+		// from the conservative descriptor qualification estimate: HTTP/2 can
+		// multiplex many logical users over a shared connection.
+		ClientMaxConnsPerHost: 8192,
+		// Shards lower Go net/http and HTTP/2 internal contention without
+		// changing logical user concurrency or identity isolation.
+		SubmissionTransportShards: 16,
+		TicketTransportShards:     4,
+		SSETransportShards:        4,
+		TransportPrewarm:          true,
 		// Session validation is bounded, but a 100k pool must complete its
 		// authenticated preflight before short-lived access sessions age out.
 		PreflightConcurrency:     256,
@@ -147,7 +163,11 @@ func Defaults(mode Mode) Config {
 		ReconcileMaxQPS:          2,
 		RefreshMode:              RefreshAuto,
 		AuthValidityMargin:       time.Minute,
-		ScheduleDelayP95Budget:   25 * time.Millisecond,
+		// A massive burst is released in userspace, not by a kernel packet
+		// scheduler. These are qualification bounds for the client generator,
+		// not server-latency SLOs.
+		ScheduleDelayP95Budget: 500 * time.Millisecond,
+		DispatchDelayP95Budget: 500 * time.Millisecond,
 	}
 }
 
@@ -177,6 +197,11 @@ func Bind(fs *flag.FlagSet, cfg *Config) {
 	fs.DurationVar(&cfg.Window, "window", cfg.Window, "statistics window duration")
 	fs.IntVar(&cfg.MaxSubmissions, "max-submissions", 0, "hard cap for all submissions including warmup")
 	fs.IntVar(&cfg.MaxInFlight, "max-in-flight", cfg.MaxInFlight, "logical submission cap; unresolved accepted work in full/realistic observation, active POSTs in admission-only")
+	fs.IntVar(&cfg.ClientMaxConnsPerHost, "client-max-conns-per-host", cfg.ClientMaxConnsPerHost, "shared HTTP transport TCP connection cap per origin; independent from nofile qualification")
+	fs.IntVar(&cfg.SubmissionTransportShards, "submission-transport-shards", cfg.SubmissionTransportShards, "independent shared HTTP transport shards for Submission POSTs (1..128)")
+	fs.IntVar(&cfg.TicketTransportShards, "ticket-transport-shards", cfg.TicketTransportShards, "independent shared HTTP transport shards for ticket POSTs (1..128)")
+	fs.IntVar(&cfg.SSETransportShards, "sse-transport-shards", cfg.SSETransportShards, "independent shared HTTP transport shards for SSE GETs (1..128)")
+	fs.BoolVar(&cfg.TransportPrewarm, "transport-prewarm", cfg.TransportPrewarm, "prewarm every benchmark transport shard before the measured release")
 	fs.IntVar(&cfg.UserCount, "user-count", 0, "select first N canonical benchmark sessions; required for massive burst")
 	fs.IntVar(&cfg.PreflightConcurrency, "preflight-concurrency", cfg.PreflightConcurrency, "bounded concurrent session validation/refresh work")
 	fs.DurationVar(&cfg.BurstStartTimeout, "burst-start-timeout", cfg.BurstStartTimeout, "burst launch and event-ticket acquisition lifetime horizon")
@@ -198,7 +223,9 @@ func Bind(fs *flag.FlagSet, cfg *Config) {
 	fs.StringVar(&cfg.ConfirmTargetHost, "confirm-target-host", "", "exact non-loopback target hostname")
 	fs.IntVar(&cfg.BurstSize, "burst-size", 0, "distinct simultaneous burst users")
 	fs.DurationVar(&cfg.Jitter, "jitter", 0, "deterministic uniform burst jitter")
-	fs.DurationVar(&cfg.ScheduleDelayP95Budget, "schedule-delay-p95-budget", cfg.ScheduleDelayP95Budget, "burst p95 scheduling budget")
+	fs.DurationVar(&cfg.ScheduleDelayP95Budget, "schedule-delay-p95-budget", cfg.ScheduleDelayP95Budget, "deprecated alias for --client-schedule-p95-budget")
+	fs.DurationVar(&cfg.ScheduleDelayP95Budget, "client-schedule-p95-budget", cfg.ScheduleDelayP95Budget, "p95 logical-release to POST-start client qualification budget")
+	fs.DurationVar(&cfg.DispatchDelayP95Budget, "client-dispatch-p95-budget", cfg.DispatchDelayP95Budget, "p95 POST-start to WroteRequest client qualification budget")
 	fs.StringVar(&cfg.RateRaw, "rate", "", "sustained constant arrival rate per second")
 	fs.DurationVar(&cfg.Duration, "duration", 0, "sustained arrival duration")
 	fs.IntVar(&cfg.TotalSubmissions, "total-submissions", 0, "exact measured submissions in sustained mode; excludes warmup")
@@ -355,10 +382,10 @@ func validateRequired(c Config) error {
 	if c.SubmitCooldown <= 0 || c.CooldownGuard < 0 || c.SubmitLatencyBudget < 0 {
 		return errors.New("cooldown values must be non-negative and --submit-cooldown must be positive")
 	}
-	if c.WarmupCount < 0 || c.Repetition <= 0 || c.MaxInFlight <= 0 || c.UserCount < 0 || c.UserCount > 100000 || c.PreflightConcurrency <= 0 || c.PreflightConcurrency > 512 || c.PoolHeadroomPercent < 0 {
+	if c.WarmupCount < 0 || c.Repetition <= 0 || c.MaxInFlight <= 0 || c.ClientMaxConnsPerHost <= 0 || c.ClientMaxConnsPerHost > 65536 || c.SubmissionTransportShards <= 0 || c.SubmissionTransportShards > 128 || c.TicketTransportShards <= 0 || c.TicketTransportShards > 128 || c.SSETransportShards <= 0 || c.SSETransportShards > 128 || c.UserCount < 0 || c.UserCount > 100000 || c.PreflightConcurrency <= 0 || c.PreflightConcurrency > 512 || c.PoolHeadroomPercent < 0 {
 		return errors.New("counts and pool headroom are invalid")
 	}
-	if c.APITimeout <= 0 || c.SubmissionTimeout <= 0 || c.DrainTimeout <= 0 || c.Window <= 0 || c.WarmupTimeout <= 0 || c.BurstStartTimeout <= 0 {
+	if c.APITimeout <= 0 || c.SubmissionTimeout <= 0 || c.DrainTimeout <= 0 || c.Window <= 0 || c.WarmupTimeout <= 0 || c.BurstStartTimeout <= 0 || c.ScheduleDelayP95Budget <= 0 || c.DispatchDelayP95Budget <= 0 {
 		return errors.New("timeouts and --window must be positive")
 	}
 	if c.SSEConnectTimeout <= 0 || c.SSEIdleTimeout <= 0 || c.SSEMaxReconnects < 0 || c.SSEBackoffBase <= 0 || c.SSEBackoffMax < c.SSEBackoffBase {

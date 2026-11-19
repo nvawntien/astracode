@@ -19,3 +19,8 @@ api-tests/
 /tools/benchmark/system-config.local.json
 /tools/benchmark/api/bench-results/
 tools/benchmark/judge/bench-results/
+
+# Locally generated HS256 JWK; production uses an externally mounted secret.
+/envoy/symmetric.json
+/envoy/__pycache__/
+/envoy/tests/__pycache__/

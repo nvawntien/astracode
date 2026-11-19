@@ -61,6 +61,19 @@ the repository, or edited by a deployment script:
 No database, Kafka, Redis, MinIO, JWT, SMTP, WireGuard, or sandbox secret is a
 GitHub Actions secret or deployment-bundle file.
 
+## Gateway configuration cutover
+
+Envoy now routes APIs directly and verifies the existing HS256 cookie JWT. Keep
+`GATEWAY_JWK_FILE` pointing at the node-owned JWK; no key is included in bundles.
+The bundle must contain `envoy/envoy.prod.yaml` and `envoy/edge.lua`. Review the
+external override for stale gateway services, mounts and Envoy entrypoint overrides.
+The App host needs Python 3.12+. Before the first cutover verify the on-disk
+baseline matches the serving configuration, key and release tag, and save an
+independent protected backup. The bundle controller snapshots configuration and
+image version together before extraction, and explicitly recreates Envoy even
+for same-image YAML/Lua/JWK changes. Follow the
+[cutover and configuration rollback procedure](../envoy/README.md#cutover-and-rollback).
+
 ## App Node
 
 The App Node owns these services:
@@ -68,7 +81,6 @@ The App Node owns these services:
 ```text
 website
 envoy
-gateway
 postgres
 redis
 minio
@@ -114,7 +126,7 @@ Max open files            65536                65536                files
 
 This change does not alter Envoy worker concurrency, circuit breakers,
 connection pools, HTTP protocol settings, access logging, SSE timeouts,
-KrakenD, or application services. It only raises the descriptor ceiling so a
+or application services. It only raises the descriptor ceiling so a
 subsequent benchmark can measure those components without the known 1024-FD
 failure mode.
 
@@ -376,6 +388,14 @@ The manual **Deploy production** workflow:
 4. deploys and verifies the Judge Node first;
 5. deploys and verifies the App Node second.
 
+The App workflow streams the candidate `scripts/deploy-app-bundle.py` into host
+Python before extracting the upload. That controller locks App deployment,
+validates the allowlisted archive, snapshots the current non-secret bundle and
+image tag, then runs activation. The serving Envoy is non-root; a networkless
+initializer provisions a read-only UID-101 key copy without changing canonical
+0600 permissions. Configuration validation and forced recreation are shared in
+`scripts/envoy-runtime.sh`.
+
 Judge-first ordering ensures the new App release is not made live before its
 compatible Worker/Sandbox release is ready.
 
@@ -385,22 +405,30 @@ Each node can be rolled back independently:
 
 ```bash
 # Run on the relevant node.
-/opt/astracode/scripts/deploy-app-node.sh --rollback
+python3 /opt/astracode/scripts/deploy-app-bundle.py --rollback
 /opt/astracode/scripts/deploy-judge-node.sh --rollback
 ```
 
-On local activation failure, each script attempts its own previous valid
-semantic release and still exits nonzero to report that the requested release
-failed.
+App rollback restores the previous non-secret configuration bundle AND semantic
+image tag, reruns activation/health checks and explicitly recreates Envoy. The
+controller can restore a partially updated image fleet. State and archives live
+under `/opt/astracode/.deploy/app` by default; retain them and the previous images
+for the rollback window. If the old bundle predates this controller, use the
+controller from the reviewed release. `deploy-app-node.sh --rollback` remains a
+legacy image-only operation and is unsuitable for configuration rollback.
 
-App rollback changes the AstraCode application image tag while reusing the
-currently deployed Compose bundle and node-owned override. It does not restore
-an earlier base Compose infrastructure configuration, including prior Kafka
-heap, resource-limit, or healthcheck settings; those require an explicit bundle
-rollback by an operator when necessary.
+External stack/override/JWK and referenced environment files are fingerprinted,
+never bundled or restored. Rollback refuses a changed fingerprint before
+mutating configuration: an operator must explicitly restore compatible protected
+node inputs (including Auth's matching signing secret), or deploy a compatible
+recovery bundle. Automatic rollback must not resurrect a revoked signing key.
+Do not change external inputs during deployment. An activation failure restores
+the previous bundle/tag when those external inputs still match; recovery errors
+or an interrupted process require operator recovery. This is not crash-atomic.
+Judge rollback retains its existing image-tag behavior.
 
 If Judge deployment fails, the workflow stops before touching App. If Judge
-succeeds but App deployment fails, the App script performs its own rollback and
+succeeds but App deployment fails, the App bundle controller attempts paired rollback and
 the workflow explicitly requests Judge rollback. A failed Judge rollback is a
 visible workflow failure requiring operator intervention.
 

@@ -78,7 +78,7 @@ graph TD
 ### Local Access Note
 
 Protected routes trust `X-User-ID`, `X-Username`, `X-Role`, and `X-Token-Iat`
-only because Envoy removes client-supplied identity headers and KrakenD recreates
+only because Envoy removes client-supplied identity headers and recreates
 them from a validated access token. For realistic local testing of authenticated
 endpoints, call the service through the gateway on `http://localhost:8080`.
 Supplying these headers directly is appropriate only for isolated middleware

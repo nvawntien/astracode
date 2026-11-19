@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// This black-box test must target the public Envoy listener, not KrakenD or
+// This black-box test must target the public Envoy listener, not Envoy or
 // Auth directly. It proves that rotating client-supplied IP-related headers
 // cannot create fresh Login IP+identifier limiter buckets.
 //

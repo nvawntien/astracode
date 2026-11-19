@@ -93,6 +93,7 @@ type RunMetadata struct {
 	ObservationMode    string            `json:"observation_mode"`
 	SessionValidation  SessionValidation `json:"session_validation"`
 	ClientDiagnostics  ClientDiagnostics `json:"client_diagnostics"`
+	TransportPrewarm   TransportPrewarm  `json:"transport_prewarm"`
 }
 
 type Repository struct {
@@ -128,27 +129,69 @@ type SessionValidation struct {
 // ClientDiagnostics records only local generator capacity evidence. It has no
 // credentials, identifiers, or host-sensitive data.
 type ClientDiagnostics struct {
-	GoroutinesBeforeBurst           int    `json:"goroutines_before_burst,omitempty"`
-	GoroutinesAfterLaunch           int    `json:"goroutines_after_burst_launch,omitempty"`
-	PeakLogicalInFlight             int    `json:"peak_logical_in_flight,omitempty"`
-	PeakActiveObservers             int    `json:"peak_active_observers,omitempty"`
-	PeakActivePosts                 int    `json:"peak_active_posts,omitempty"`
-	PeakActiveTickets               int    `json:"peak_active_tickets,omitempty"`
-	PeakActiveSSE                   int    `json:"peak_active_sse_streams,omitempty"`
-	PeakOpenFDs                     int    `json:"peak_open_fds,omitempty"`
-	OpenFDSamples                   int    `json:"open_fd_samples,omitempty"`
-	OpenFDStatus                    string `json:"open_fd_status,omitempty"`
-	NoFileSoftLimit                 uint64 `json:"nofile_soft_limit,omitempty"`
-	NoFileHardLimit                 uint64 `json:"nofile_hard_limit,omitempty"`
-	NoFileRequired                  uint64 `json:"nofile_required,omitempty"`
-	NoFileRecommended               uint64 `json:"nofile_recommended,omitempty"`
-	ConnectionsPerLogicalSubmission uint64 `json:"connections_per_logical_submission,omitempty"`
-	RuntimeCPUCount                 int    `json:"runtime_cpu_count,omitempty"`
-	TransportNewConnections         uint64 `json:"transport_new_connections,omitempty"`
-	TransportReusedConnections      uint64 `json:"transport_reused_connections,omitempty"`
-	HTTP1Responses                  uint64 `json:"http1_responses,omitempty"`
-	HTTP2Responses                  uint64 `json:"http2_responses,omitempty"`
-	OtherProtocolResponses          uint64 `json:"other_protocol_responses,omitempty"`
+	GoroutinesBeforeBurst           int                          `json:"goroutines_before_burst,omitempty"`
+	GoroutinesAfterLaunch           int                          `json:"goroutines_after_burst_launch,omitempty"`
+	PeakLogicalInFlight             int                          `json:"peak_logical_in_flight,omitempty"`
+	PeakActiveObservers             int                          `json:"peak_active_observers,omitempty"`
+	PeakActivePosts                 int                          `json:"peak_active_posts,omitempty"`
+	PeakActiveTickets               int                          `json:"peak_active_tickets,omitempty"`
+	PeakActiveSSE                   int                          `json:"peak_active_sse_streams,omitempty"`
+	PeakOpenFDs                     int                          `json:"peak_open_fds,omitempty"`
+	OpenFDSamples                   int                          `json:"open_fd_samples,omitempty"`
+	OpenFDStatus                    string                       `json:"open_fd_status,omitempty"`
+	NoFileSoftLimit                 uint64                       `json:"nofile_soft_limit,omitempty"`
+	NoFileHardLimit                 uint64                       `json:"nofile_hard_limit,omitempty"`
+	NoFileRequired                  uint64                       `json:"nofile_required,omitempty"`
+	NoFileRecommended               uint64                       `json:"nofile_recommended,omitempty"`
+	ConnectionsPerLogicalSubmission uint64                       `json:"connections_per_logical_submission,omitempty"`
+	TransportMaxConnsPerHost        int                          `json:"transport_max_conns_per_host,omitempty"`
+	ScheduleP95BudgetMS             int64                        `json:"schedule_p95_budget_ms,omitempty"`
+	DispatchP95BudgetMS             int64                        `json:"dispatch_p95_budget_ms,omitempty"`
+	RuntimeCPUCount                 int                          `json:"runtime_cpu_count,omitempty"`
+	TransportNewConnections         uint64                       `json:"transport_new_connections,omitempty"`
+	TransportReusedConnections      uint64                       `json:"transport_reused_connections,omitempty"`
+	HTTP1Responses                  uint64                       `json:"http1_responses,omitempty"`
+	HTTP2Responses                  uint64                       `json:"http2_responses,omitempty"`
+	OtherProtocolResponses          uint64                       `json:"other_protocol_responses,omitempty"`
+	TransportDomains                []TransportDomainDiagnostics `json:"transport_domains,omitempty"`
+}
+
+// TransportDomainDiagnostics identifies connection-pool behavior without
+// recording targets, cookies, tickets, or user identities.
+type TransportDomainDiagnostics struct {
+	Domain                  string                      `json:"domain"`
+	Shards                  int                         `json:"shards"`
+	MaxConnsPerHostPerShard int                         `json:"max_conns_per_host_per_shard"`
+	NewConnections          uint64                      `json:"new_connections"`
+	ReusedConnections       uint64                      `json:"reused_connections"`
+	HTTP1Responses          uint64                      `json:"http1_responses"`
+	HTTP2Responses          uint64                      `json:"http2_responses"`
+	OtherProtocolResponses  uint64                      `json:"other_protocol_responses"`
+	PeakActiveRequests      int                         `json:"peak_active_requests"`
+	ConnectionAcquireMS     Distribution                `json:"connection_acquire_delay_ms"`
+	TransportDispatchMS     Distribution                `json:"transport_dispatch_delay_ms"`
+	ShardDiagnostics        []TransportShardDiagnostics `json:"shard_diagnostics,omitempty"`
+}
+
+type TransportShardDiagnostics struct {
+	Shard                  int          `json:"shard"`
+	NewConnections         uint64       `json:"new_connections"`
+	ReusedConnections      uint64       `json:"reused_connections"`
+	HTTP1Responses         uint64       `json:"http1_responses"`
+	HTTP2Responses         uint64       `json:"http2_responses"`
+	OtherProtocolResponses uint64       `json:"other_protocol_responses"`
+	PeakActiveRequests     int          `json:"peak_active_requests"`
+	ConnectionAcquireMS    Distribution `json:"connection_acquire_delay_ms"`
+	TransportDispatchMS    Distribution `json:"transport_dispatch_delay_ms"`
+}
+
+type TransportPrewarm struct {
+	Enabled    bool           `json:"enabled"`
+	Attempts   int            `json:"attempts"`
+	Successes  int            `json:"successes"`
+	Failures   int            `json:"failures"`
+	DurationMS int64          `json:"duration_ms"`
+	Protocols  map[string]int `json:"protocols,omitempty"`
 }
 
 // ClientResourceSample is intentionally small and credential-free. It helps
@@ -242,55 +285,63 @@ type JudgeNodeConfig struct {
 // SubmissionRecord has only safe aliases and API-visible identifiers. It never
 // carries a source program, ticket, cookie, token, or real authenticated ID.
 type SubmissionRecord struct {
-	RunID                 string           `json:"run_id"`
-	Phase                 Phase            `json:"phase"`
-	Sequence              int              `json:"sequence"`
-	UserAlias             string           `json:"user_alias"`
-	IntendedAt            *time.Time       `json:"intended_at,omitempty"`
-	IntendedOffsetMS      *int64           `json:"intended_offset_ms,omitempty"`
-	PostStartedAt         *time.Time       `json:"post_started_at,omitempty"`
-	PostStartOffsetMS     *int64           `json:"post_start_offset_ms,omitempty"`
-	PostCompletedAt       *time.Time       `json:"post_completed_at,omitempty"`
-	PostCompletedOffsetMS *int64           `json:"post_completed_offset_ms,omitempty"`
-	ScheduleDelayMS       *float64         `json:"schedule_delay_ms,omitempty"`
-	SubmitLatencyMS       *float64         `json:"submit_latency_ms,omitempty"`
-	Attempted             bool             `json:"attempted"`
-	Accepted              bool             `json:"accepted"`
-	HTTPStatus            *int             `json:"http_status,omitempty"`
-	HTTPProtocol          string           `json:"http_protocol,omitempty"`
-	APICode               *int             `json:"api_code,omitempty"`
-	SubmissionID          *int64           `json:"submission_id,omitempty"`
-	InitialStatus         string           `json:"initial_status,omitempty"`
-	TerminalStatus        string           `json:"terminal_status,omitempty"`
-	TerminalObservedAt    *time.Time       `json:"terminal_observed_at,omitempty"`
-	TerminalOffsetMS      *int64           `json:"terminal_offset_ms,omitempty"`
-	EndToEndLatencyMS     *float64         `json:"end_to_end_latency_ms,omitempty"`
-	AcceptedToTerminalMS  *float64         `json:"accepted_to_terminal_ms,omitempty"`
-	ObserverStartedAt     *time.Time       `json:"observer_started_at,omitempty"`
-	ObserverEndedAt       *time.Time       `json:"observer_ended_at,omitempty"`
-	CompletionSource      CompletionSource `json:"completion_source,omitempty"`
-	SSEConnections        int              `json:"sse_connections"`
-	SSEFailures           int              `json:"sse_failures"`
-	GETReconciliations    int              `json:"get_reconciliations"`
-	TicketStartedAt       *time.Time       `json:"ticket_started_at,omitempty"`
-	TicketCompletedAt     *time.Time       `json:"ticket_completed_at,omitempty"`
-	TicketLatencyMS       *float64         `json:"ticket_latency_ms,omitempty"`
-	TicketAttempted       bool             `json:"ticket_attempted"`
-	TicketSucceeded       bool             `json:"ticket_succeeded"`
-	SSEStartedAt          *time.Time       `json:"sse_started_at,omitempty"`
-	SSEEstablishedAt      *time.Time       `json:"sse_established_at,omitempty"`
-	SSEClosedAt           *time.Time       `json:"sse_closed_at,omitempty"`
-	SSEEstablishLatencyMS *float64         `json:"sse_establishment_latency_ms,omitempty"`
-	SSEAttempted          bool             `json:"sse_attempted"`
-	SSEEstablished        bool             `json:"sse_established"`
-	SSECloseReason        string           `json:"sse_close_reason,omitempty"`
-	SSETerminalDuringHold bool             `json:"sse_terminal_during_hold"`
-	SSESurvivedFullHold   bool             `json:"sse_survived_full_hold"`
-	RateLimited           bool             `json:"rate_limited"`
-	RetryAfterMS          *int64           `json:"retry_after_ms,omitempty"`
-	Outcome               Outcome          `json:"outcome"`
-	ErrorClass            string           `json:"error_class,omitempty"`
-	Error                 string           `json:"error,omitempty"`
+	RunID                    string           `json:"run_id"`
+	Phase                    Phase            `json:"phase"`
+	Sequence                 int              `json:"sequence"`
+	UserAlias                string           `json:"user_alias"`
+	IntendedAt               *time.Time       `json:"intended_at,omitempty"`
+	IntendedOffsetMS         *int64           `json:"intended_offset_ms,omitempty"`
+	PostStartedAt            *time.Time       `json:"post_started_at,omitempty"`
+	PostStartOffsetMS        *int64           `json:"post_start_offset_ms,omitempty"`
+	PostCompletedAt          *time.Time       `json:"post_completed_at,omitempty"`
+	PostCompletedOffsetMS    *int64           `json:"post_completed_offset_ms,omitempty"`
+	ScheduleDelayMS          *float64         `json:"schedule_delay_ms,omitempty"`
+	TransportGotConnAt       *time.Time       `json:"transport_got_conn_at,omitempty"`
+	TransportWroteAt         *time.Time       `json:"transport_wrote_at,omitempty"`
+	TransportFirstResponseAt *time.Time       `json:"transport_first_response_at,omitempty"`
+	ConnectionAcquireMS      *float64         `json:"connection_acquire_delay_ms,omitempty"`
+	TransportDispatchMS      *float64         `json:"transport_dispatch_delay_ms,omitempty"`
+	WireToFirstByteMS        *float64         `json:"wire_to_first_byte_ms,omitempty"`
+	WireToResponseCompleteMS *float64         `json:"wire_to_response_complete_ms,omitempty"`
+	SubmissionTransportShard int              `json:"submission_transport_shard,omitempty"`
+	SubmitLatencyMS          *float64         `json:"submit_latency_ms,omitempty"`
+	Attempted                bool             `json:"attempted"`
+	Accepted                 bool             `json:"accepted"`
+	HTTPStatus               *int             `json:"http_status,omitempty"`
+	HTTPProtocol             string           `json:"http_protocol,omitempty"`
+	APICode                  *int             `json:"api_code,omitempty"`
+	SubmissionID             *int64           `json:"submission_id,omitempty"`
+	InitialStatus            string           `json:"initial_status,omitempty"`
+	TerminalStatus           string           `json:"terminal_status,omitempty"`
+	TerminalObservedAt       *time.Time       `json:"terminal_observed_at,omitempty"`
+	TerminalOffsetMS         *int64           `json:"terminal_offset_ms,omitempty"`
+	EndToEndLatencyMS        *float64         `json:"end_to_end_latency_ms,omitempty"`
+	AcceptedToTerminalMS     *float64         `json:"accepted_to_terminal_ms,omitempty"`
+	ObserverStartedAt        *time.Time       `json:"observer_started_at,omitempty"`
+	ObserverEndedAt          *time.Time       `json:"observer_ended_at,omitempty"`
+	CompletionSource         CompletionSource `json:"completion_source,omitempty"`
+	SSEConnections           int              `json:"sse_connections"`
+	SSEFailures              int              `json:"sse_failures"`
+	GETReconciliations       int              `json:"get_reconciliations"`
+	TicketStartedAt          *time.Time       `json:"ticket_started_at,omitempty"`
+	TicketCompletedAt        *time.Time       `json:"ticket_completed_at,omitempty"`
+	TicketLatencyMS          *float64         `json:"ticket_latency_ms,omitempty"`
+	TicketAttempted          bool             `json:"ticket_attempted"`
+	TicketSucceeded          bool             `json:"ticket_succeeded"`
+	SSEStartedAt             *time.Time       `json:"sse_started_at,omitempty"`
+	SSEEstablishedAt         *time.Time       `json:"sse_established_at,omitempty"`
+	SSEClosedAt              *time.Time       `json:"sse_closed_at,omitempty"`
+	SSEEstablishLatencyMS    *float64         `json:"sse_establishment_latency_ms,omitempty"`
+	SSEAttempted             bool             `json:"sse_attempted"`
+	SSEEstablished           bool             `json:"sse_established"`
+	SSECloseReason           string           `json:"sse_close_reason,omitempty"`
+	SSETerminalDuringHold    bool             `json:"sse_terminal_during_hold"`
+	SSESurvivedFullHold      bool             `json:"sse_survived_full_hold"`
+	RateLimited              bool             `json:"rate_limited"`
+	RetryAfterMS             *int64           `json:"retry_after_ms,omitempty"`
+	Outcome                  Outcome          `json:"outcome"`
+	ErrorClass               string           `json:"error_class,omitempty"`
+	Error                    string           `json:"error,omitempty"`
 }
 
 type WindowRecord struct {
@@ -535,9 +586,13 @@ type Outstanding struct {
 }
 
 type Latencies struct {
-	SubmitMS        Distribution `json:"submit_ms"`
-	EndToEndMS      Distribution `json:"end_to_end_ms"`
-	ScheduleDelayMS Distribution `json:"schedule_delay_ms"`
+	SubmitMS                 Distribution `json:"submit_ms"`
+	EndToEndMS               Distribution `json:"end_to_end_ms"`
+	ScheduleDelayMS          Distribution `json:"schedule_delay_ms"`
+	ConnectionAcquireMS      Distribution `json:"connection_acquire_delay_ms"`
+	TransportDispatchMS      Distribution `json:"transport_dispatch_delay_ms"`
+	WireToFirstByteMS        Distribution `json:"wire_to_first_byte_ms"`
+	WireToResponseCompleteMS Distribution `json:"wire_to_response_complete_ms"`
 }
 
 type ObserverTotals struct {

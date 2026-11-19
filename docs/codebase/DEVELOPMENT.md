@@ -6,7 +6,7 @@ Use Go 1.25.8 (the workspace and Docker builders declare it), Docker Engine/Comp
 
 ## Run the full stack
 
-From repository root, the checked-in quick start is:
+From repository root, provision the ignored `envoy/symmetric.json` using `envoy/gen_jwk.go` and the same `JWT_ACCESS_SECRET` as Auth (see [gateway setup](../../envoy/README.md)). Then:
 
 ```bash
 docker compose --profile dev --profile worker up -d --build
@@ -58,4 +58,4 @@ For website development, the scripts in `website/package.json` are `npm run dev`
 
 ## Migrations and operational checks
 
-There is no migration runner. Startup repository constructors call GORM `AutoMigrate`, and `infra/postgres/init.sql` only creates the three databases. Before introducing a migration tool or altering schemas, consult [DATA.md](DATA.md) and preserve service database ownership. Validate gateway configuration with the Compose-provided KrakenD image when infrastructure is running; do not assume all service-local routes are gateway-exposed.
+There is no migration runner. Startup repository constructors call GORM `AutoMigrate`, and `infra/postgres/init.sql` only creates the three databases. Before introducing a migration tool or altering schemas, consult [DATA.md](DATA.md) and preserve service database ownership. Validate gateway configuration with the pinned Envoy image using `python3 envoy/tests/integration.py`; do not assume all service-local routes are gateway-exposed.

@@ -38,6 +38,23 @@ exhaustion, or measured local scheduling/resource collapse. App-node
 container/restart and Kafka-lag collectors are external evidence; missing
 collector input is unavailable, never zero.
 
+`--client-max-conns-per-host` (default `8192`) is an aggregate cap per
+transport domain, separate from descriptor qualification. Benchmark requests
+use isolated transport domains: Submission POST defaults to 16 deterministic
+shared shards, ticket POST to 4, and SSE GET to 4. Ticket and SSE are each
+bounded to 2048 aggregate connections (control to 64) while Submission retains
+the configured 8192 aggregate cap. This prevents long-lived SSE
+streams from sharing a Go transport/HTTP2 pool with admission writes without
+splitting the common logical-user release or cookie jars. A safe public GET
+prewarms every shard before measurement when `--transport-prewarm` is enabled.
+For every Submission POST, the harness records logical release, POST start,
+`GotConn`, `WroteRequest`, first response byte, and response completion. Thus
+schedule, connection-acquire, dispatch, wire-to-first-byte, wire-to-complete,
+and total submit timings remain distinct. Missing trace timestamps are
+unavailable, never zero. Separate schedule and dispatch p95 budgets qualify
+the generator; excessive dispatch delay is direct local evidence rather than
+hidden transport queueing.
+
 ## Canonical latency domains
 
 **Compile overhead** is the wall time spent compiling a submission. It is

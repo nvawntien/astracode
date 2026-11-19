@@ -13,7 +13,7 @@ readonly PREVIOUS_TAG_FILE="$STATE_DIR/previous-image-tag"
 readonly HEALTH_CHECK_ATTEMPTS="${ASTRACODE_APP_HEALTH_CHECK_ATTEMPTS:-24}"
 readonly HEALTH_CHECK_INTERVAL_SECONDS="${ASTRACODE_APP_HEALTH_CHECK_INTERVAL_SECONDS:-5}"
 readonly APP_SERVICES=(
-  website envoy gateway postgres redis minio kafka
+  website envoy postgres redis minio kafka
   auth-service problem-service submission-service
 )
 readonly APP_RELEASE_SERVICES=(
@@ -114,6 +114,15 @@ if [[ -z "${ASTRACODE_IMAGE_ROOT:-}" ]]; then
   exit 1
 fi
 
+require_readable_file "$APP_DIR/envoy/envoy.prod.yaml" "Envoy production configuration"
+require_readable_file "$APP_DIR/envoy/edge.lua" "Envoy identity sanitizer"
+if [[ -z "${GATEWAY_JWK_FILE:-}" || ! -f "$GATEWAY_JWK_FILE" ]]; then
+  echo "GATEWAY_JWK_FILE must reference an existing node-owned secret file" >&2
+  exit 1
+fi
+# The deploy user need not read a root-owned 0600 key. The validation container
+# below verifies readability and parsing using the actual Envoy permissions.
+
 if [[ -z "$APP_COMPOSE_PROJECT" ]]; then
   echo "ASTRACODE_APP_COMPOSE_PROJECT must not be empty" >&2
   exit 1
@@ -155,6 +164,9 @@ compose() {
     -f "$APP_OVERRIDE" \
     "$@"
 }
+
+# shellcheck source=scripts/envoy-runtime.sh
+source "$APP_DIR/scripts/envoy-runtime.sh"
 
 smoke_test() {
   local edge_bind="${ASTRACODE_EDGE_BIND:-127.0.0.1}"
@@ -255,6 +267,9 @@ configure_avatar_bucket() {
 
 activate() {
   compose config --quiet || return 1
+  # Validate with the pinned runtime and actual read-only secret mounts before
+  # replacing the serving edge. No backend or data migrations run in this check.
+  validate_envoy_runtime || return 1
   compose pull "${APP_RELEASE_SERVICES[@]}" || return 1
   compose up -d --pull never --timeout "${COMPOSE_STOP_TIMEOUT:-30}" kafka || return 1
   # Force a fresh foreground execution of the actual Compose service. Keeping
@@ -267,6 +282,7 @@ activate() {
   # Images for upstream/stateful services are intentionally not pulled as part
   # of an AstraCode application release.
   compose up -d --pull never --timeout "${COMPOSE_STOP_TIMEOUT:-30}" "${APP_SERVICES[@]}" || return 1
+  activate_envoy_runtime || return 1
   compose ps || return 1
   smoke_test || return 1
   wait_for_services || return 1
@@ -291,6 +307,10 @@ persist_release_state() {
 }
 
 rollback_to_previous() {
+  if [[ "${ASTRACODE_BUNDLE_TRANSACTION:-0}" == "1" ]]; then
+    echo "Image/config rollback is owned by the enclosing bundle transaction." >&2
+    return 1
+  fi
   if [[ -z "$previous" || "$previous" == "$ASTRACODE_IMAGE_TAG" ]] || ! valid_tag "$previous"; then
     echo "No distinct previous App release is available for automatic rollback." >&2
     return 1

@@ -8,13 +8,13 @@ AstraCode is an online-judge backend. It manages identities, authoring and servi
 
 The repository is a Go workspace with six modules (`go.work`): the shared `pkg/` module, `services/auth`, `services/problem`, `services/submission`, `workers/judge`, and `tools/benchmark/judge` (a load-testing harness, not a runtime service). Each Go service uses a ports-and-adapters shape: `cmd/server` composes dependencies with Google Wire; `internal/domain` holds entities/errors; `internal/application` exposes use cases and port interfaces; and `internal/adapter` implements HTTP/gRPC/Kafka/storage concerns.
 
-Public traffic enters Envoy on port 8080, then KrakenD. KrakenD validates HS256 JWTs on protected endpoints and propagates identity headers. Auth, Problem, and Submission are independently deployable HTTP services. Auth, Problem and Judge Worker additionally expose internal gRPC servers. The durable judging path is Kafka-based and uses a submission-side transactional outbox.
+Public traffic enters Envoy on port 8080 and routes directly to the backend services. Envoy validates HS256 JWTs on protected endpoints and propagates identity headers. Auth, Problem, and Submission are independently deployable HTTP services. Auth, Problem and Judge Worker additionally expose internal gRPC servers. The durable judging path is Kafka-based and uses a submission-side transactional outbox.
 
 ## Components
 
 | Component | Role | Main evidence |
 | --- | --- | --- |
-| Envoy + KrakenD | Public edge, gateway routing, JWT validation/claim propagation | `envoy/envoy.yaml`, `gateway/krakend.tmpl`, `gateway/settings/` |
+| Envoy | Public edge, gateway routing, JWT validation/claim propagation | `envoy/envoy.yaml`, `envoy/envoy.prod.yaml`, `envoy/routes.json` |
 | Auth Service | Accounts, credentials, JWTs, verification/reset mail, profiles/avatars, roles | `services/auth/` |
 | Problem Service | Problems, tags, testcase bundle metadata and object storage | `services/problem/` |
 | Submission Service | Submission/attempt/result persistence, outbox, Kafka result consumption, SSE, ad-hoc run-code orchestration | `services/submission/` |
@@ -30,10 +30,9 @@ Public traffic enters Envoy on port 8080, then KrakenD. KrakenD validates HS256 
 ```mermaid
 flowchart LR
   client[Client / Next.js] --> envoy[Envoy :8080]
-  envoy --> gateway[KrakenD]
-  gateway --> auth[Auth :8081]
-  gateway --> problem[Problem HTTP :8082]
-  gateway --> submission[Submission :8083]
+  envoy --> auth[Auth :8081]
+  envoy --> problem[Problem HTTP :8082]
+  envoy --> submission[Submission :8083]
   submission -->|ResolvePublicUser| authgrpc[Auth gRPC :9091]
   submission -->|transactional outbox| jobs[(Kafka jobs)]
   jobs --> worker[Judge Worker]

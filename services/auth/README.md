@@ -98,8 +98,8 @@ graph TD
 
 ### Authenticated Endpoints
 
-Protected routes are expected to be called through Envoy and the gateway. Envoy
-removes client-supplied `X-User-*` headers, then KrakenD validates the access
+Protected routes are expected to be called through Envoy. Envoy
+removes client-supplied identity headers, validates the access
 token and injects claim-derived identity for the Auth service. Direct service
 requests with manually supplied identity headers are valid only in isolated
 middleware unit tests, not as an authentication integration test.
