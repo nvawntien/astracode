@@ -42,7 +42,7 @@ scripts/verify.sh           # before claiming done
 ## Session protocol
 
 Start:
-1. Read this file, then the `AGENTS.md` of the module you will touch.
+1. Read this file, then the `AGENTS.md` of the module you will touch, if one exists.
 2. Read `openspec/changes/<change-id>/progress.md`, then `tasks.md`; read `proposal.md`, `design.md` and delta specs as needed.
 3. Run the verify commands. If the baseline is red, stop and report; do not build on red.
 
