@@ -46,8 +46,8 @@ promotion to `main` is handled separately by maintainers.
 
 ## Development architecture
 
-AstraCode is a Go 1.25.8 workspace with five modules and a separate Next.js
-frontend:
+AstraCode is a Go 1.25.8 workspace (`go.work`) with six modules and a separate
+Next.js frontend:
 
 - `website/` — Next.js user interface;
 - `services/auth/` — identities, sessions, profiles, and roles;
@@ -55,6 +55,7 @@ frontend:
 - `services/submission/` — submissions, attempts, results, outbox, and SSE;
 - `workers/judge/` — asynchronous judging and interactive Run Code;
 - `pkg/` — shared Go packages and generated service contracts;
+- `tools/benchmark/judge/` — judge load-testing harness (a Go module, not a runtime service);
 - `proto/` — source protocol definitions;
 - `gateway/` — KrakenD routes, JWT validation, and API composition; and
 - `envoy/` — public edge routing.
@@ -73,7 +74,7 @@ documentation before changing service boundaries.
 
 Follow the [README Quick start](README.md#quick-start) for the local stack. Go
 checks are module-scoped; there is no single root-module `go test ./...`
-substitute for all five modules.
+substitute for all workspace modules.
 
 Run the checks relevant to your change. The full CI-equivalent Go and frontend
 set is:
