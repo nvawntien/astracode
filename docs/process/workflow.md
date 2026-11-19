@@ -54,7 +54,7 @@ feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy─�
 | # | Step | Who | Tool | Exit criterion |
 |---|---|---|---|---|
 | 1 | Pick the next unblocked change from the delivery plan; create/assign the GitHub issue | Change owner | GitHub | Dependencies archived |
-| 2 | `git worktree add` on `feature/<change-id>` | Change owner | git | Clean worktree; `make verify` (or the per-module checks) green |
+| 2 | `git worktree add` on `feature/<change-id>` | Change owner | git | Clean worktree; `scripts/verify.sh` green |
 | 3 | Propose: give the agent the F-xx user stories and acceptance (pasted from the PRD), related NFR IDs and ADRs; run the OpenSpec propose command | Change owner + agent | OpenSpec | `openspec validate <id> --strict` passes |
 | 4 | **Gate 1 — spec review** (checklist §5) on a draft PR | Reviewer (Orchestrator for hotspots / cross-capability) | GitHub | Approved |
 | 5 | Apply in sessions following the `AGENTS.md` protocol; update `progress.md` each session | Change owner + agent | OpenSpec apply | All tasks ticked with evidence; CI green |
