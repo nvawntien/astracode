@@ -6,12 +6,15 @@ table, and run it in a fresh agent session inside the change's own worktree.
 ## Prompt
 
 ```text
-Use the OpenSpec propose workflow to create the change `baseline-<capability>`.
+Change name: <change name>        (the change name from the boundary table, e.g. baseline-identity-session)
+Capabilities: <capabilities>      (the Capability column from the boundary table; one or more spec domains)
 
-Goal: record the CURRENT behaviour of the capability `<capability>` as it exists in the code today.
+Use the OpenSpec propose workflow to create the change `<change name>`.
+
+Goal: record the CURRENT behaviour of the capabilities listed above as it exists in the code today.
 This is a baseline: every requirement is ADDED; there is NO code change.
 
-In scope (this capability owns): <in-scope list from the boundary table>
+In scope (these capabilities own): <in-scope list from the boundary table>
 Out of scope (owned by other baselines — do not specify, only reference by name): <out-of-scope list>
 
 Sources to read: <code paths>, docs/codebase/<relevant files>, the AGENTS.md of the touched modules, if one exists.
@@ -23,9 +26,9 @@ Rules:
 3. If you cannot confirm a behaviour from the code, do not write it as a requirement. List it under "Open questions" in proposal.md.
 4. Describe what the code does, not what it should do. If you find a likely bug, keep the requirement truthful and list the bug under "Findings" in proposal.md.
 5. Keep the spec under ~25 requirements. Use terms from docs/process/glossary.md.
-6. tasks.md contains review tasks only: verify evidence for each requirement group, answer open questions, run `openspec validate baseline-<capability> --strict`.
-7. Modify nothing outside openspec/changes/baseline-<capability>/. Do not edit docs/, code, or other changes.
-8. Finish by running `openspec validate baseline-<capability> --strict` and report the result.
+6. tasks.md contains review tasks only: verify evidence for each requirement group, answer open questions, run `openspec validate <change name> --strict`.
+7. Modify nothing outside openspec/changes/<change name>/. Do not edit docs/, code, or other changes.
+8. Finish by running `openspec validate <change name> --strict` and report the result.
 ```
 
 ## Boundary table
@@ -45,8 +48,8 @@ Draft boundaries from the README and `docs/codebase/*`; the reviewer of each bas
 
 ## Running baselines in parallel
 
-- One worktree and one agent session per baseline; branches `feature/baseline-<capability>`.
-- Collisions are not expected: each change writes only its own folder `openspec/changes/baseline-<capability>/` and a distinct spec domain.
+- One worktree and one agent session per baseline; branches `feature/<change name>`.
+- Collisions are not expected: each change writes only its own folder `openspec/changes/<change name>/` and distinct spec domains.
 - The real risk is **overlap**, two baselines specifying the same behaviour. The boundary table prevents it; reviewers reject requirements that belong to another capability.
 - Alternate tools: write half the baselines with Claude Code and half with Codex; cross-review evidence with the other tool.
 - Archive in any order; the spec domains are disjoint.
