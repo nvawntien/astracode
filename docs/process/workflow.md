@@ -102,7 +102,7 @@ One verb-object title; 1–2 capabilities (max 3); 5–15 tasks; 1–4 days; one
 |---|---|
 | Instructions | Both follow `AGENTS.md` (Codex reads it directly; Claude Code reads `CLAUDE.md`, which imports `AGENTS.md`). Agent-specific notes go only in `CLAUDE.md`. |
 | OpenSpec commands | Installed for both tools by `openspec init`; regenerated with `openspec update` after upgrading OpenSpec. |
-| Context | A session starts from `AGENTS.md`, the module `AGENTS.md`, the change folder and `progress.md`; product documents: During implementation, do not read prd.md or frd.md. Read nfr.md only for the NFR IDs cited in the change. At propose time, use only the F-xx section given in the prompt. |
+| Context | A session starts from `AGENTS.md`, the module `AGENTS.md`, if one exists, the change folder and `progress.md`; product documents: During implementation, do not read prd.md or frd.md. Read nfr.md only for the NFR IDs cited in the change. At propose time, use only the F-xx section given in the prompt. |
 | Parallelism | One agent session per worktree; never two agents in one worktree. |
 | Autonomous loops | Allowed only for changes with automated tests as the stop condition, with an iteration cap, on a feature branch, outside sandbox, authentication, outbox and production-deployment code. |
 | Reviewing | The agent that wrote the code does not review it; the other tool does (step 6), then a human (Gate 2). |
