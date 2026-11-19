@@ -11,3 +11,15 @@ type TestCaseRepository interface {
 	DeleteByProblemID(ctx context.Context, problemID int64) error
 	ListAllZipObjectKeys(ctx context.Context) ([]string, error)
 }
+
+type OfficialTestCaseMetadata struct {
+	ZipObjectKey string
+	TestCount    int
+	Version      int
+	TimeLimit    float64
+	MemoryLimit  int
+}
+
+type OfficialTestCaseMetadataRepository interface {
+	GetOfficialTestCaseMetadata(ctx context.Context, problemID int64) (OfficialTestCaseMetadata, error)
+}

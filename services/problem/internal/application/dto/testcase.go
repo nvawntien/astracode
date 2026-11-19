@@ -19,4 +19,6 @@ type InternalTestCaseResponse struct {
 	TestCount      int    `json:"test_count"`
 	Version        int    `json:"version"`
 	ZipDownloadURL string `json:"zip_download_url"`
+	TimeLimitMS    int64  `json:"time_limit_ms"`
+	MemoryLimitKB  int64  `json:"memory_limit_kb"`
 }

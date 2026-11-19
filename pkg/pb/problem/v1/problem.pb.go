@@ -70,6 +70,8 @@ type GetTestCaseResponse struct {
 	ZipDownloadUrl string                 `protobuf:"bytes,1,opt,name=zip_download_url,json=zipDownloadUrl,proto3" json:"zip_download_url,omitempty"`
 	TestCount      int32                  `protobuf:"varint,2,opt,name=test_count,json=testCount,proto3" json:"test_count,omitempty"`
 	Version        int32                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	TimeLimitMs    int64                  `protobuf:"varint,4,opt,name=time_limit_ms,json=timeLimitMs,proto3" json:"time_limit_ms,omitempty"`
+	MemoryLimitKb  int64                  `protobuf:"varint,5,opt,name=memory_limit_kb,json=memoryLimitKb,proto3" json:"memory_limit_kb,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -121,6 +123,20 @@ func (x *GetTestCaseResponse) GetTestCount() int32 {
 func (x *GetTestCaseResponse) GetVersion() int32 {
 	if x != nil {
 		return x.Version
+	}
+	return 0
+}
+
+func (x *GetTestCaseResponse) GetTimeLimitMs() int64 {
+	if x != nil {
+		return x.TimeLimitMs
+	}
+	return 0
+}
+
+func (x *GetTestCaseResponse) GetMemoryLimitKb() int64 {
+	if x != nil {
+		return x.MemoryLimitKb
 	}
 	return 0
 }
@@ -269,12 +285,14 @@ const file_proto_problem_v1_problem_proto_rawDesc = "" +
 	"problem.v1\"3\n" +
 	"\x12GetTestCaseRequest\x12\x1d\n" +
 	"\n" +
-	"problem_id\x18\x01 \x01(\x03R\tproblemId\"x\n" +
+	"problem_id\x18\x01 \x01(\x03R\tproblemId\"\xc4\x01\n" +
 	"\x13GetTestCaseResponse\x12(\n" +
 	"\x10zip_download_url\x18\x01 \x01(\tR\x0ezipDownloadUrl\x12\x1d\n" +
 	"\n" +
 	"test_count\x18\x02 \x01(\x05R\ttestCount\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x05R\aversion\"u\n" +
+	"\aversion\x18\x03 \x01(\x05R\aversion\x12\"\n" +
+	"\rtime_limit_ms\x18\x04 \x01(\x03R\vtimeLimitMs\x12&\n" +
+	"\x0fmemory_limit_kb\x18\x05 \x01(\x03R\rmemoryLimitKb\"u\n" +
 	"\x11GetProblemRequest\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\x03R\tproblemId\x12\"\n" +

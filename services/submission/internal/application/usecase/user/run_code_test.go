@@ -128,6 +128,43 @@ func TestRunCodeUseCasePreservesResultOrder(t *testing.T) {
 	}
 }
 
+func TestRunCodeUseCaseForwardsNormalizedProblemLimits(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		time   float64
+		memory int
+		wantMS int64
+		wantKB int64
+	}{
+		{"fractional seconds", 0.5, 128, 500, 131_072},
+		{"one second", 1, 512, 1_000, 524_288},
+		{"two seconds", 2, 256, 2_000, 262_144},
+		{"legacy one second", 1000, 1024, 1_000, 1_048_576},
+		{"legacy two seconds", 2000, 512, 2_000, 524_288},
+		{"legacy threshold", 50, 512, 50, 524_288},
+		{"configured defaults", 0, -1, 3_100, 65_536},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &stubJudgeRunner{}
+			metadata := dto.ProblemMetadata{TimeLimit: tt.time, MemoryLimit: tt.memory}
+			uc := NewRunCodeUseCase(&stubProblemReader{metadata: &metadata}, runner, dto.RunCodeLimits{
+				DefaultTimeLimit: 3100 * time.Millisecond, DefaultMemoryLimitKB: 65_536,
+			})
+			_, err := uc.Execute(
+				context.Background(),
+				auth.Claims{UserID: "u1", Role: rbac.RoleUser},
+				validRunRequest([]dto.RunTestCaseInput{{ID: "custom-1", Kind: "custom"}}),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := runner.request; got.TimeLimitMS != tt.wantMS || got.MemoryLimitKB != tt.wantKB {
+				t.Fatalf("Run request limits = %d ms / %d KiB, want %d / %d", got.TimeLimitMS, got.MemoryLimitKB, tt.wantMS, tt.wantKB)
+			}
+		})
+	}
+}
+
 func validRunRequest(testCases []dto.RunTestCaseInput) dto.RunCodeRequest {
 	return dto.RunCodeRequest{
 		ProblemID:  1,
@@ -137,9 +174,12 @@ func validRunRequest(testCases []dto.RunTestCaseInput) dto.RunCodeRequest {
 	}
 }
 
-type stubProblemReader struct{}
+type stubProblemReader struct{ metadata *dto.ProblemMetadata }
 
 func (s *stubProblemReader) GetProblem(context.Context, int64, dto.ProblemActor) (dto.ProblemMetadata, error) {
+	if s.metadata != nil {
+		return *s.metadata, nil
+	}
 	return dto.ProblemMetadata{ID: 1, Title: "Two Sum", Slug: "two-sum", TimeLimit: 2, MemoryLimit: 256}, nil
 }
 
@@ -147,10 +187,14 @@ func (s *stubProblemReader) GetTestCaseMetadata(context.Context, int64) (dto.Pro
 	return dto.ProblemTestCaseMetadata{}, nil
 }
 
-type stubJudgeRunner struct{ calls int }
+type stubJudgeRunner struct {
+	calls   int
+	request outbound.JudgeRunRequest
+}
 
 func (s *stubJudgeRunner) RunCode(_ context.Context, req outbound.JudgeRunRequest) (dto.RunCodeResponse, error) {
 	s.calls++
+	s.request = req
 	tests := make([]dto.RunTestCaseResult, 0, len(req.TestCases))
 	for _, tc := range req.TestCases {
 		tests = append(tests, dto.RunTestCaseResult{ID: tc.ID, Kind: tc.Kind, Status: "executed"})

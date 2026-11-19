@@ -81,7 +81,9 @@ func TestProcessJudgeJobUsesOfficialLoaderSharedExecutorAndSanitizesResult(t *te
 	useCase := NewProcessJudgeJobUseCase(
 		executor,
 		publisher,
-		&fakeMetadataReader{metadata: outbound.ProblemTestCaseMetadata{ProblemID: 42, TestCount: 1, Version: 1}},
+		&fakeMetadataReader{metadata: outbound.ProblemTestCaseMetadata{
+			ProblemID: 42, TestCount: 1, Version: 1, TimeLimitMS: 1_000, MemoryLimitKB: 524_288,
+		}},
 		&fakeOfficialLoader{testCases: []outbound.ExecutionTestCase{{Index: 1, Stdin: input, ExpectedOutput: &expected}}},
 		zap.NewNop(),
 	)
@@ -102,11 +104,42 @@ func TestProcessJudgeJobUsesOfficialLoaderSharedExecutorAndSanitizesResult(t *te
 	if !executor.req.StopOnFirstFailure {
 		t.Fatal("StopOnFirstFailure = false, want true for submission")
 	}
+	wantLimits := outbound.ExecutionLimits{TimeLimitMS: 1_000, MemoryLimitKB: 524_288}
+	if executor.req.Limits != wantLimits {
+		t.Errorf("execution limits = %+v, want %+v", executor.req.Limits, wantLimits)
+	}
 	if executor.req.TestcaseDataset == nil || executor.req.TestcaseDataset.ProblemID != 42 || executor.req.TestcaseDataset.Version != 1 || executor.req.TestcaseDataset.DatasetChecksum != "checksum-test" {
 		t.Fatalf("testcase dataset identity = %#v, want authoritative loader provenance", executor.req.TestcaseDataset)
 	}
 	if publisher.result.TestCases[0].Input != nil || publisher.result.TestCases[0].ExpectedOutput != nil {
 		t.Fatalf("hidden testcase data leaked in result: %#v", publisher.result.TestCases[0])
+	}
+}
+
+func TestProcessJudgeJobDoesNotExecuteWithoutOfficialLimits(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeExecutor{result: &outbound.ExecutionResult{Status: "ACCEPTED"}}
+	publisher := &fakeResultPublisher{}
+	useCase := NewProcessJudgeJobUseCase(
+		executor,
+		publisher,
+		&fakeMetadataReader{metadata: outbound.ProblemTestCaseMetadata{ProblemID: 42, TestCount: 1, Version: 1}},
+		&fakeOfficialLoader{testCases: []outbound.ExecutionTestCase{{Index: 1}}},
+		zap.NewNop(),
+	)
+
+	err := useCase.Execute(context.Background(), &pkgjudge.JobMessage{
+		SubmissionID: 99, ProblemID: 42, AttemptID: "attempt-a", Language: "CPP",
+	})
+	if err == nil || workerdomain.IsNonRetryable(err) {
+		t.Errorf("Execute() error = %v, want retryable missing-limit error", err)
+	}
+	if len(executor.req.TestCases) != 0 {
+		t.Error("executor was called without official limits")
+	}
+	if publisher.result != nil {
+		t.Errorf("published %s without official limits", publisher.result.Status)
 	}
 }
 
@@ -180,7 +213,9 @@ func TestProcessJudgeJobPublishesUserCodeVerdictsWithoutSystemError(t *testing.T
 			useCase := NewProcessJudgeJobUseCase(
 				&fakeExecutor{result: tt.result},
 				publisher,
-				&fakeMetadataReader{metadata: outbound.ProblemTestCaseMetadata{ProblemID: 42, TestCount: 1, Version: 1}},
+				&fakeMetadataReader{metadata: outbound.ProblemTestCaseMetadata{
+					ProblemID: 42, TestCount: 1, Version: 1, TimeLimitMS: 2_000, MemoryLimitKB: 262_144,
+				}},
 				&fakeOfficialLoader{testCases: []outbound.ExecutionTestCase{{Index: 1, Stdin: "1\n"}}},
 				zap.NewNop(),
 			)

@@ -44,6 +44,7 @@ var OutboundProviderSet = wire.NewSet(
 	postgres.NewSubmissionProblemRepository,
 	postgres.NewTagRepository,
 	postgres.NewTestCaseRepository,
+	postgres.NewOfficialTestCaseMetadataRepository,
 	submissionproblemcache.NewSubmissionProblemCache,
 	testcasestorage.NewTestCaseStorage,
 	auth.NewRedisLogoutAllIATStore,

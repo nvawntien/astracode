@@ -9,6 +9,8 @@ type ProblemTestCaseMetadata struct {
 	ZipDownloadURL string
 	TestCount      int
 	Version        int
+	TimeLimitMS    int64
+	MemoryLimitKB  int64
 }
 
 type ProblemTestCaseMetadataReader interface {

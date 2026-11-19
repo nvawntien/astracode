@@ -2,20 +2,23 @@ package worker
 
 import (
 	"context"
+	"time"
+
+	"go-judge-system/pkg/judge"
 	"go-judge-system/services/problem/internal/application/dto"
 	"go-judge-system/services/problem/internal/application/port/inbound/worker"
 	"go-judge-system/services/problem/internal/application/port/outbound"
-	"time"
+	"go-judge-system/services/problem/internal/domain"
 )
 
 const presignedURLexpiry = 15 * time.Minute
 
 type getTestCaseUseCase struct {
-	tcRepo    outbound.TestCaseRepository
+	tcRepo    outbound.OfficialTestCaseMetadataRepository
 	tcStorage outbound.TestCaseStorage
 }
 
-func NewGetTestCaseUseCase(tcRepo outbound.TestCaseRepository, tcStorage outbound.TestCaseStorage) worker.GetTestCaseUseCase {
+func NewGetTestCaseUseCase(tcRepo outbound.OfficialTestCaseMetadataRepository, tcStorage outbound.TestCaseStorage) worker.GetTestCaseUseCase {
 	return &getTestCaseUseCase{
 		tcRepo:    tcRepo,
 		tcStorage: tcStorage,
@@ -23,9 +26,18 @@ func NewGetTestCaseUseCase(tcRepo outbound.TestCaseRepository, tcStorage outboun
 }
 
 func (uc *getTestCaseUseCase) Execute(ctx context.Context, problemID int64) (*dto.InternalTestCaseResponse, error) {
-	testcase, err := uc.tcRepo.GetByProblemID(ctx, problemID)
+	testcase, err := uc.tcRepo.GetOfficialTestCaseMetadata(ctx, problemID)
 	if err != nil {
 		return nil, err
+	}
+
+	timeLimitMS := judge.ProblemTimeLimitMS(testcase.TimeLimit)
+	if timeLimitMS == 0 {
+		return nil, domain.ErrInvalidTimeLimit
+	}
+	memoryLimitKB := judge.ProblemMemoryLimitKB(testcase.MemoryLimit)
+	if memoryLimitKB == 0 {
+		return nil, domain.ErrInvalidMemoryLimit
 	}
 
 	downloadURL, err := uc.tcStorage.GetPresignedURL(ctx, testcase.ZipObjectKey, presignedURLexpiry)
@@ -37,5 +49,7 @@ func (uc *getTestCaseUseCase) Execute(ctx context.Context, problemID int64) (*dt
 		TestCount:      testcase.TestCount,
 		Version:        testcase.Version,
 		ZipDownloadURL: downloadURL,
+		TimeLimitMS:    timeLimitMS,
+		MemoryLimitKB:  memoryLimitKB,
 	}, nil
 }

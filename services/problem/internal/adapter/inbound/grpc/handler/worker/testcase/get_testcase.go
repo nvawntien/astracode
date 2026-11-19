@@ -35,6 +35,9 @@ func (h *GetTestCaseHandler) Handle(
 		if errors.Is(err, domain.ErrTestCaseNotFound) {
 			return nil, status.Error(codes.NotFound, "test case not found")
 		}
+		if errors.Is(err, domain.ErrInvalidTimeLimit) || errors.Is(err, domain.ErrInvalidMemoryLimit) {
+			return nil, status.Error(codes.FailedPrecondition, "problem has invalid execution limits")
+		}
 
 		return nil, status.Error(codes.Internal, "failed to get test case")
 	}
@@ -46,5 +49,7 @@ func (h *GetTestCaseHandler) Handle(
 		ZipDownloadUrl: result.ZipDownloadURL,
 		TestCount:      int32(result.TestCount),
 		Version:        int32(result.Version),
+		TimeLimitMs:    result.TimeLimitMS,
+		MemoryLimitKb:  result.MemoryLimitKB,
 	}, nil
 }

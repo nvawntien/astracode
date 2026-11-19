@@ -20,6 +20,8 @@ message GetTestCaseResponse {
   string zip_download_url = 1;
   int32 test_count = 2;
   int32 version = 3;
+  int64 time_limit_ms = 4;
+  int64 memory_limit_kb = 5;
 }
 
 message GetProblemRequest {
