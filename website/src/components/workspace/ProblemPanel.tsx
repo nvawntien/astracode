@@ -85,7 +85,7 @@ export function ProblemPanel({
   onTabChange,
   solved,
   attempted,
-  signedIn,
+  accountId,
   onUseExample,
   onUseSubmissionCode,
   historyRefreshKey,
@@ -95,13 +95,16 @@ export function ProblemPanel({
   onTabChange: (tab: ProblemTab) => void;
   solved: boolean;
   attempted: boolean;
-  signedIn: boolean;
+  accountId: string | null;
   onUseExample: (input: string, expected: string) => void;
   onUseSubmissionCode: (submission: SubmissionDetail) => void;
   historyRefreshKey: number;
 }) {
   const { showToast } = useToast();
   const diff = difficultyMeta(problem.difficulty);
+  // Replace only private history/detail state on account or problem changes,
+  // before old data can render under the new owner. Same-ID refreshes keep it.
+  const historyOwnerKey = JSON.stringify([accountId, problem.id]);
 
   const status = solved ? 'Solved' : attempted ? 'Attempted' : 'Not attempted';
   const statusColor = solved ? 'var(--success)' : attempted ? 'var(--warn)' : 'var(--border2)';
@@ -387,8 +390,9 @@ export function ProblemPanel({
 
         {tab === 'submissions' && (
           <ProblemSubmissions
+            key={historyOwnerKey}
             problemId={problem.id}
-            signedIn={signedIn}
+            accountId={accountId}
             refreshKey={historyRefreshKey}
             onUseSubmissionCode={onUseSubmissionCode}
           />
@@ -477,12 +481,12 @@ const DETAIL_POLL_INTERVAL_MS = 1500;
 
 function ProblemSubmissions({
   problemId,
-  signedIn,
+  accountId,
   refreshKey,
   onUseSubmissionCode,
 }: {
   problemId: number;
-  signedIn: boolean;
+  accountId: string | null;
   refreshKey: number;
   onUseSubmissionCode: (submission: SubmissionDetail) => void;
 }) {
@@ -499,28 +503,35 @@ function ProblemSubmissions({
   }, [problemId, refreshKey]);
 
   useEffect(() => {
-    if (!signedIn) {
+    if (!accountId) {
       setItems(null);
       setFailed('');
       return;
     }
     const controller = new AbortController();
+    // Each effect owns its response; abort alone cannot stop an already-resolved
+    // promise (or a transport that ignores cancellation) from applying old data.
+    let active = true;
     setItems(null);
     setFailed('');
     submissionApi
       .listMine({ problem_id: problemId, page, limit: SUBMISSIONS_PAGE_SIZE }, controller.signal)
       .then((res) => {
+        if (!active) return;
         setItems(res.items ?? []);
         setTotalPages(res.pagination.total_pages ?? 0);
       })
       .catch((err) => {
-        if (controller.signal.aborted) return;
+        if (!active || controller.signal.aborted) return;
         if (err instanceof NetworkError) setFailed('AstraCode is temporarily unreachable. Check your connection and try again.');
         else if (err instanceof ApiError) setFailed(err.message || 'Submission history request failed.');
         else setFailed('Submission history request failed.');
       });
-    return () => controller.abort();
-  }, [page, problemId, refreshKey, retryKey, signedIn]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [accountId, page, problemId, refreshKey, retryKey]);
 
   const updateListItem = useCallback((detail: SubmissionDetail) => {
     setItems((current) => {
@@ -540,7 +551,7 @@ function ProblemSubmissions({
     });
   }, []);
 
-  if (!signedIn) {
+  if (!accountId) {
     return (
       <EmptyState
         title="Sign in to see your submissions"
@@ -698,6 +709,7 @@ function ProblemSubmissions({
 
       {selectedID !== null && (
         <SubmissionDetailPanel
+          key={selectedID}
           submissionID={selectedID}
           onUseSubmissionCode={onUseSubmissionCode}
           onClose={() => setSelectedID(null)}
@@ -727,30 +739,34 @@ function SubmissionDetailPanel({
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
     let timeout: ReturnType<typeof setTimeout> | null = null;
 
     const load = async () => {
+      if (!active) return;
       setLoading(true);
       setFailed('');
       try {
         const next = await submissionApi.get(submissionID, controller.signal);
+        if (!active) return;
         setDetail(next);
         onUpdateListItem(next);
         if (isPendingStatus(next.status) && !controller.signal.aborted) {
           timeout = setTimeout(load, DETAIL_POLL_INTERVAL_MS);
         }
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (!active || controller.signal.aborted) return;
         if (err instanceof NetworkError) setFailed('AstraCode is temporarily unreachable. Check your connection and try again.');
         else if (err instanceof ApiError) setFailed(err.message || 'Submission detail request failed.');
         else setFailed('Submission detail request failed.');
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active && !controller.signal.aborted) setLoading(false);
       }
     };
 
     void load();
     return () => {
+      active = false;
       controller.abort();
       if (timeout) clearTimeout(timeout);
     };

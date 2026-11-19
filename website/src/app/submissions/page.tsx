@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { AppShell, PageHeading } from '@/components/AppShell';
 import { useAuth } from '@/components/AuthProvider';
 import { SubmissionDetail } from '@/components/submission/SubmissionDetail';
@@ -18,11 +18,7 @@ import {
   verdictMeta,
 } from '@/lib/format';
 import { useViewportWidth } from '@/lib/hooks';
-import type {
-  LanguageCode,
-  SubmissionListItem,
-  SubmissionStatus,
-} from '@/lib/types';
+import type { LanguageCode, ListSubmissionsResponse, Role, SubmissionStatus } from '@/lib/types';
 
 const PAGE_SIZE = 20;
 const GRID = 'minmax(200px,1fr) 190px 100px 110px 130px 24px';
@@ -30,72 +26,87 @@ const GRID = 'minmax(200px,1fr) 190px 100px 110px 130px 24px';
 export default function SubmissionsPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const width = useViewportWidth();
-  const isMobile = width < 760;
+  const accountId = user?.id;
 
+  useEffect(() => {
+    if (!authLoading && !accountId) router.replace('/login?next=/submissions');
+  }, [authLoading, accountId, router]);
+
+  if (authLoading || !user) return null;
+
+  return (
+    <AppShell maxWidth={1100}>
+      <SubmissionHistory key={user.id} accountId={user.id} role={user.role} />
+    </AppShell>
+  );
+}
+
+function SubmissionHistory({ accountId, role }: { accountId: string; role: Role }) {
+  const isMobile = useViewportWidth() < 760;
   const [status, setStatus] = useState<SubmissionStatus | ''>('');
   const [language, setLanguage] = useState<LanguageCode | ''>('');
   const [page, setPage] = useState(1);
-
-  const [items, setItems] = useState<SubmissionListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!authLoading && !user) router.replace('/login?next=/submissions');
-  }, [authLoading, user, router]);
+  const query = useMemo(() => ({ page, status, language, nonce }), [page, status, language, nonce]);
+  const [snapshot, setSnapshot] = useState<{
+    query: typeof query;
+    response?: ListSubmissionsResponse;
+    error?: string;
+  } | null>(null);
+  const current = snapshot?.query === query ? snapshot : null;
+  const items = current?.response?.items ?? [];
+  const total = current?.response?.pagination?.total ?? 0;
+  const totalPages = Math.max(1, current?.response?.pagination?.total_pages ?? 1);
+  const loading = current === null;
+  const error = current?.error ?? null;
 
-  useEffect(() => {
-    if (!user) return;
+  useLayoutEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
+    let active = true;
 
     submissionApi
-      .listMine({ page, limit: PAGE_SIZE, status, language }, controller.signal)
-      .then((res) => {
-        setItems(res.items ?? []);
-        setTotal(res.pagination?.total ?? 0);
-        setTotalPages(Math.max(1, res.pagination?.total_pages ?? 1));
+      .listMine(
+        { page: query.page, limit: PAGE_SIZE, status: query.status, language: query.language },
+        controller.signal,
+      )
+      .then((response) => {
+        if (active) setSnapshot({ query, response });
       })
       .catch((err) => {
-        if (controller.signal.aborted) return;
-        setError(
+        if (!active) return;
+        const error =
           err instanceof NetworkError
             ? 'AstraCode is temporarily unreachable. Check your connection and try again.'
             : err instanceof ApiError
               ? err.message || 'Could not load your submissions.'
-              : 'Could not load your submissions.',
-        );
-        setItems([]);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+              : 'Could not load your submissions.';
+        setSnapshot({ query, error });
       });
 
-    return () => controller.abort();
-  }, [user, page, status, language, nonce]);
+    // Revoke the request at commit so a pending 401 refresh cannot replay
+    // after this owner or query has been replaced.
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [query]);
 
   // Anything still queued/judging is polled until it settles.
   const hasPending = items.some((item) => isPendingStatus(item.status));
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!hasPending) return;
     const id = setTimeout(() => setNonce((n) => n + 1), 4000);
     return () => clearTimeout(id);
-  }, [hasPending, items]);
+  }, [hasPending, current]);
 
   const toggle = useCallback((id: number) => {
     setExpanded((current) => (current === id ? null : id));
   }, []);
 
-  if (!user) return null;
-
   return (
-    <AppShell maxWidth={1100}>
+    <>
       <PageHeading
         title="Submissions"
         subtitle="Review your submission history"
@@ -435,7 +446,7 @@ export default function SubmissionsPage() {
                         )}
                       </div>
 
-                      {open && <SubmissionDetail id={item.id} />}
+                      {open && <SubmissionDetail id={item.id} accountId={accountId} role={role} />}
                     </div>
                   );
                 })}
@@ -474,7 +485,7 @@ export default function SubmissionsPage() {
           </div>
         )}
       </section>
-    </AppShell>
+    </>
   );
 }
 

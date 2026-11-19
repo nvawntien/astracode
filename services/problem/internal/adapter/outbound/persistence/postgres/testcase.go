@@ -36,6 +36,10 @@ func NewTestCaseRepository(db *gorm.DB) outbound.TestCaseRepository {
 	return &testCaseRepository{db: db}
 }
 
+func NewOfficialTestCaseMetadataRepository(db *gorm.DB) outbound.OfficialTestCaseMetadataRepository {
+	return &testCaseRepository{db: db}
+}
+
 func (r *testCaseRepository) Upsert(ctx context.Context, tc *entity.TestCase) error {
 	dao := toTestCaseDAO(tc)
 
@@ -79,6 +83,21 @@ func (r *testCaseRepository) GetByProblemID(ctx context.Context, problemID int64
 	}
 
 	return toTestCaseEntity(&dao), nil
+}
+
+func (r *testCaseRepository) GetOfficialTestCaseMetadata(ctx context.Context, problemID int64) (outbound.OfficialTestCaseMetadata, error) {
+	var metadata outbound.OfficialTestCaseMetadata
+	// Read dataset metadata and limits from the same statement snapshot.
+	err := r.db.WithContext(ctx).
+		Table("test_cases AS tc").
+		Select("tc.zip_object_key, tc.test_count, tc.version, p.time_limit, p.memory_limit").
+		Joins("JOIN problems AS p ON p.id = tc.problem_id").
+		Where("tc.problem_id = ?", problemID).
+		Take(&metadata).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return outbound.OfficialTestCaseMetadata{}, domain.ErrTestCaseNotFound
+	}
+	return metadata, err
 }
 
 func (r *testCaseRepository) DeleteByProblemID(ctx context.Context, problemID int64) error {

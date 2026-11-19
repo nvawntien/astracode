@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -16,47 +17,34 @@ import (
 )
 
 type fakeGetSubmissionRepository struct {
-	*fakeSubmissionRepository
-	submission   *entity.Submission
-	err          error
-	summaryErr   error
-	summaries    map[int64]outbound.SubmissionResultSummary
-	calls        int
-	summaryCalls int
-	id           int64
+	submission *entity.Submission
+	err        error
+	summary    outbound.SubmissionResultSummary
+	calls      int
+	id         int64
+	ownerID    *string
 }
 
 func newFakeGetSubmissionRepository(submission *entity.Submission) *fakeGetSubmissionRepository {
-	return &fakeGetSubmissionRepository{
-		fakeSubmissionRepository: &fakeSubmissionRepository{},
-		submission:               submission,
-	}
+	return &fakeGetSubmissionRepository{submission: submission}
 }
 
-func (r *fakeGetSubmissionRepository) GetByID(ctx context.Context, id int64) (*entity.Submission, error) {
+func (r *fakeGetSubmissionRepository) GetCurrentDetail(
+	ctx context.Context, id int64, ownerID *string,
+) (*entity.Submission, outbound.SubmissionResultSummary, error) {
 	r.calls++
 	r.id = id
+	r.ownerID = ownerID
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, outbound.SubmissionResultSummary{}, err
 	}
-	return r.submission, r.err
-}
-
-func (r *fakeGetSubmissionRepository) ResultSummaries(
-	ctx context.Context,
-	submissionIDs []int64,
-) (map[int64]outbound.SubmissionResultSummary, error) {
-	r.summaryCalls++
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if r.err != nil {
+		return nil, outbound.SubmissionResultSummary{}, r.err
 	}
-	if r.summaryErr != nil {
-		return nil, r.summaryErr
+	if r.submission == nil || r.submission.ID != id || (ownerID != nil && *ownerID != r.submission.UserID) {
+		return nil, outbound.SubmissionResultSummary{}, domain.ErrSubmissionNotFound
 	}
-	if r.summaries == nil {
-		return map[int64]outbound.SubmissionResultSummary{}, nil
-	}
-	return r.summaries, nil
+	return r.submission, r.summary, nil
 }
 
 func submissionDetailFixture(ownerID string) *entity.Submission {
@@ -100,10 +88,9 @@ func TestGetSubmissionAccessMatrix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			submission := submissionDetailFixture("owner")
+			submission.CurrentAttemptID = "attempt-77"
 			repo := newFakeGetSubmissionRepository(submission)
-			repo.summaries = map[int64]outbound.SubmissionResultSummary{
-				submission.ID: {SubmissionID: submission.ID, Passed: 4, Total: 20},
-			}
+			repo.summary = outbound.SubmissionResultSummary{SubmissionID: submission.ID, Passed: 4, Total: 20}
 			uc := NewGetSubmissionUseCase(repo)
 
 			got, err := uc.Execute(
@@ -117,21 +104,22 @@ func TestGetSubmissionAccessMatrix(t *testing.T) {
 			if repo.calls != 1 || repo.id != submission.ID {
 				t.Fatalf("repository calls/id = %d/%d, want 1/%d", repo.calls, repo.id, submission.ID)
 			}
-			if tt.wantErr != nil {
-				if repo.summaryCalls != 0 {
-					t.Fatalf("summary calls = %d, want 0 when access denied", repo.summaryCalls)
+			if tt.role == rbac.RoleUser || tt.role == rbac.RoleContributor {
+				if repo.ownerID == nil || *repo.ownerID != tt.actorUserID {
+					t.Fatalf("restricted read has wrong owner filter: %v", repo.ownerID)
 				}
+			} else if repo.ownerID != nil {
+				t.Fatalf("privileged read has an owner filter: %v", repo.ownerID)
+			}
+			if tt.wantErr != nil {
 				if got != (dto.GetSubmissionResponse{}) {
 					t.Fatalf("response = %+v, want zero value", got)
 				}
 				return
 			}
-			if repo.summaryCalls != 1 {
-				t.Fatalf("summary calls = %d, want 1", repo.summaryCalls)
-			}
-
 			want := dto.GetSubmissionResponse{
 				ID:              submission.ID,
+				AttemptID:       &submission.CurrentAttemptID,
 				ProblemID:       submission.ProblemID,
 				ProblemTitle:    submission.ProblemName,
 				UserID:          submission.UserID,
@@ -246,6 +234,7 @@ func TestGetSubmissionRepositoryErrors(t *testing.T) {
 	}{
 		{name: "missing submission", repoErr: domain.ErrSubmissionNotFound, wantErr: domain.ErrSubmissionNotFound},
 		{name: "repository failure", repoErr: databaseErr, wantErr: domain.ErrInternalServer},
+		{name: "repository deadline", repoErr: context.DeadlineExceeded, wantErr: context.DeadlineExceeded},
 	}
 
 	for _, tt := range tests {
@@ -272,18 +261,42 @@ func TestGetSubmissionRepositoryErrors(t *testing.T) {
 	}
 }
 
-func TestGetSubmissionSummaryErrorIsMappedSafely(t *testing.T) {
-	databaseErr := errors.New("summary unavailable")
-	repo := newFakeGetSubmissionRepository(submissionDetailFixture("actor"))
-	repo.summaryErr = databaseErr
-
-	_, err := NewGetSubmissionUseCase(repo).Execute(
-		context.Background(),
-		auth.Claims{UserID: "actor", Role: rbac.RoleUser},
-		dto.GetSubmissionRequest{SubmissionID: 77},
-	)
-	if !errors.Is(err, domain.ErrInternalServer) || !errors.Is(err, databaseErr) {
-		t.Fatalf("Execute() error = %v, want safely wrapped summary error", err)
+func TestGetSubmissionPreservesSummaryAndLegacySemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name, attemptID       string
+		status                entity.Status
+		passed, total         int
+		wantPassed, wantTotal *int
+	}{
+		{"pending without results", "attempt-77", entity.StatusPending, 0, 0, nil, nil},
+		{"terminal without results", "attempt-77", entity.StatusCompilationError, 0, 0, intPointer(0), intPointer(0)},
+		{"current attempt with zero passing", "attempt-77", entity.StatusWrongAnswer, 0, 3, intPointer(0), intPointer(3)},
+		{"legacy with result rows", "", entity.StatusAccepted, 2, 3, intPointer(2), intPointer(3)},
+		{"blank legacy identity", "  ", entity.StatusAccepted, 0, 0, intPointer(0), intPointer(0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			submission := submissionDetailFixture("actor")
+			submission.Status = tc.status
+			submission.CurrentAttemptID = tc.attemptID
+			repo := newFakeGetSubmissionRepository(submission)
+			repo.summary = outbound.SubmissionResultSummary{SubmissionID: submission.ID, Passed: tc.passed, Total: tc.total}
+			got, err := NewGetSubmissionUseCase(repo).Execute(
+				context.Background(),
+				auth.Claims{UserID: "actor", Role: rbac.RoleUser},
+				dto.GetSubmissionRequest{SubmissionID: submission.ID},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wantAttempt *string
+			if tc.attemptID == "attempt-77" {
+				wantAttempt = &tc.attemptID
+			}
+			if got.Status != string(tc.status) || !reflect.DeepEqual(got.AttemptID, wantAttempt) ||
+				!reflect.DeepEqual(got.PassedTestCases, tc.wantPassed) || !reflect.DeepEqual(got.TotalTestCases, tc.wantTotal) {
+				t.Fatalf("unexpected response: %+v", got)
+			}
+		})
 	}
 }
 
@@ -304,5 +317,30 @@ func TestGetSubmissionPreservesContextCancellation(t *testing.T) {
 	}
 	if errors.Is(err, domain.ErrInternalServer) {
 		t.Fatalf("context cancellation must not be remapped to internal error: %v", err)
+	}
+}
+
+func TestGetSubmissionReportsCurrentAttempt(t *testing.T) {
+	submission := submissionDetailFixture("owner")
+	submission.CurrentAttemptID = "attempt-77"
+	repo := newFakeGetSubmissionRepository(submission)
+	got, err := NewGetSubmissionUseCase(repo).Execute(
+		context.Background(),
+		auth.Claims{UserID: "owner", Role: rbac.RoleUser},
+		dto.GetSubmissionRequest{SubmissionID: submission.ID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if field, present := fields["attempt_id"]; !present || string(field) != `"attempt-77"` {
+		t.Fatalf("attempt_id = %q (present=%t), want current attempt", []byte(field), present)
 	}
 }

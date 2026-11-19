@@ -3,6 +3,7 @@ package problem
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,8 @@ func TestGRPCMetadataReaderGetTestCaseMetadata(t *testing.T) {
 			ZipDownloadUrl: " http://minio/testcases.zip ",
 			TestCount:      3,
 			Version:        7,
+			TimeLimitMs:    500,
+			MemoryLimitKb:  524_288,
 		},
 	}
 	reader := NewGRPCMetadataReader(client, time.Second, zap.NewNop())
@@ -60,6 +63,9 @@ func TestGRPCMetadataReaderGetTestCaseMetadata(t *testing.T) {
 	}
 	if got.ProblemID != 42 || got.ZipDownloadURL != "http://minio/testcases.zip" || got.TestCount != 3 || got.Version != 7 {
 		t.Fatalf("metadata = %#v", got)
+	}
+	if got.TimeLimitMS != 500 || got.MemoryLimitKB != 524_288 {
+		t.Fatalf("execution limits = %d ms / %d KiB, want 500 / 524288", got.TimeLimitMS, got.MemoryLimitKB)
 	}
 }
 
@@ -76,6 +82,53 @@ func TestGRPCMetadataReaderMarksNotFoundNonRetryable(t *testing.T) {
 	}
 	if !workerdomain.IsNonRetryable(err) {
 		t.Fatalf("IsNonRetryable(%v) = false, want true", err)
+	}
+}
+
+func TestGRPCMetadataReaderRejectsLegacyResponseWithoutExecutionLimits(t *testing.T) {
+	t.Parallel()
+
+	reader := NewGRPCMetadataReader(&fakeProblemServiceClient{
+		resp: &problemv1.GetTestCaseResponse{
+			ZipDownloadUrl: "http://minio.local/testcases.zip",
+			TestCount:      24,
+			Version:        1,
+		},
+	}, time.Second, zap.NewNop())
+
+	_, err := reader.GetTestCaseMetadata(context.Background(), 42)
+	if err == nil || workerdomain.IsNonRetryable(err) {
+		t.Fatalf("GetTestCaseMetadata() error = %v, want retryable missing-limit error", err)
+	}
+}
+
+func TestGRPCMetadataReaderRejectsUnusableExecutionLimits(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		timeMS       int64
+		memoryKB     int64
+		nonRetryable bool
+	}{
+		{"missing time", 0, 524_288, false},
+		{"missing memory", 1_000, 0, false},
+		{"negative time", -1, 524_288, true},
+		{"negative memory", 1_000, -1, true},
+		{"clock overflow", math.MaxInt64, 524_288, true},
+		{"memory byte overflow", 1_000, math.MaxInt64, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := NewGRPCMetadataReader(&fakeProblemServiceClient{
+				resp: &problemv1.GetTestCaseResponse{
+					ZipDownloadUrl: "http://minio.local/testcases.zip", TestCount: 24, Version: 1,
+					TimeLimitMs: tt.timeMS, MemoryLimitKb: tt.memoryKB,
+				},
+			}, time.Second, zap.NewNop())
+
+			_, err := reader.GetTestCaseMetadata(context.Background(), 42)
+			if err == nil || workerdomain.IsNonRetryable(err) != tt.nonRetryable {
+				t.Fatalf("GetTestCaseMetadata() error = %v, want error with non-retryable = %v", err, tt.nonRetryable)
+			}
+		})
 	}
 }
 

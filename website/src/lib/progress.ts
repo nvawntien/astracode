@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, submissionApi } from './api';
 import type { SubmissionListItem } from './types';
 
@@ -8,8 +8,8 @@ import type { SubmissionListItem } from './types';
  * Detailed per-problem progress is derived from the caller's own submission
  * history for routes that need solved/attempted problem IDs. Profile aggregate
  * statistics use Submission's dedicated /me/profile-stats endpoint instead.
- * Results are memoised per page-session; `invalidateProgress()` is called
- * after a new submission lands.
+ * One account's results are memoised per page-session. Changing accounts
+ * discards that entry; completion invalidates only its owning account.
  */
 
 const MAX_PAGES = 10;
@@ -24,15 +24,23 @@ export interface Progress {
   truncated: boolean;
 }
 
-let progressCache: { at: number; value: Promise<Progress> } | null = null;
+let progressCache: {
+  accountId: string;
+  at: number;
+  value: Promise<Progress>;
+  controller: AbortController;
+} | null = null;
 
-async function loadProgress(): Promise<Progress> {
+async function loadProgress(signal: AbortSignal, isCurrent: () => boolean): Promise<Progress> {
   const submissions: SubmissionListItem[] = [];
   let page = 1;
   let truncated = false;
 
   for (; page <= MAX_PAGES; page += 1) {
-    const res = await submissionApi.listMine({ page, limit: PAGE_SIZE });
+    const res = await submissionApi.listMine({ page, limit: PAGE_SIZE }, signal);
+    // Transport cancellation saves work; entry identity prevents obsolete
+    // results or further pagination even when the transport ignores abort.
+    if (!isCurrent()) throw new DOMException('Progress request superseded', 'AbortError');
     submissions.push(...res.items);
     if (page >= (res.pagination?.total_pages ?? 1)) break;
     if (page === MAX_PAGES) truncated = true;
@@ -48,20 +56,29 @@ async function loadProgress(): Promise<Progress> {
   return { submissions, solvedIds, attemptedIds, truncated };
 }
 
-export function fetchProgress(force = false): Promise<Progress> {
-  const fresh = progressCache && Date.now() - progressCache.at < TTL_MS;
+export function fetchProgress(accountId: string, force = false): Promise<Progress> {
+  const fresh = progressCache?.accountId === accountId && Date.now() - progressCache.at < TTL_MS;
   if (!force && fresh && progressCache) return progressCache.value;
 
-  const value = loadProgress().catch((err) => {
-    progressCache = null;
+  if (progressCache) invalidateProgress(progressCache.accountId);
+  const controller = new AbortController();
+  const value: Promise<Progress> = loadProgress(
+    controller.signal,
+    () => progressCache?.value === value,
+  ).catch((err) => {
+    // An old rejection must not evict a newer account/refresh request.
+    if (progressCache?.value === value) progressCache = null;
     throw err;
   });
-  progressCache = { at: Date.now(), value };
+  progressCache = { accountId, at: Date.now(), value, controller };
   return value;
 }
 
-export function invalidateProgress() {
+export function invalidateProgress(accountId: string) {
+  if (progressCache?.accountId !== accountId) return;
+  const previous = progressCache;
   progressCache = null;
+  previous.controller.abort();
 }
 
 const EMPTY: Progress = {
@@ -72,48 +89,72 @@ const EMPTY: Progress = {
 };
 
 /** Loads the signed-in user's progress; resolves to empty sets when signed out. */
-export function useProgress(enabled: boolean): {
+export function useProgress(accountId: string | null): {
   progress: Progress;
   loading: boolean;
   reload: () => void;
 } {
-  const [progress, setProgress] = useState<Progress>(EMPTY);
-  const [loading, setLoading] = useState(enabled);
+  const [snapshot, setSnapshot] = useState<{
+    accountId: string;
+    progress: Progress;
+    loading: boolean;
+  } | null>(null);
+  const previousAccountRef = useRef<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
-  useEffect(() => {
-    if (!enabled) {
-      setProgress(EMPTY);
-      setLoading(false);
+  useLayoutEffect(() => {
+    const previous = previousAccountRef.current;
+    if (previous && previous !== accountId) invalidateProgress(previous);
+    previousAccountRef.current = accountId;
+    if (!accountId) {
+      setSnapshot(null);
       return;
     }
 
+    // Invalidate this subscriber at commit, including unmount/StrictMode replay.
+    // Its cleanup does not abort shared same-account cache work for other subscribers.
     let active = true;
-    setLoading(true);
-    fetchProgress(nonce > 0)
+    setSnapshot((current) => ({
+      accountId,
+      progress: current?.accountId === accountId ? current.progress : EMPTY,
+      loading: true,
+    }));
+    fetchProgress(accountId, nonce > 0)
       .then((value) => {
-        if (active) setProgress(value);
+        if (active) setSnapshot({ accountId, progress: value, loading: false });
       })
       .catch((err) => {
+        if (!active || (err instanceof DOMException && err.name === 'AbortError')) return;
         if (!(err instanceof ApiError && err.isUnauthorized)) {
           // Progress is decorative — a failure must not break the page.
           console.warn('progress load failed', err);
         }
-        if (active) setProgress(EMPTY);
+        setSnapshot({ accountId, progress: EMPTY, loading: false });
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setSnapshot((current) =>
+            current?.accountId === accountId ? { ...current, loading: false } : current,
+          );
+        }
       });
 
     return () => {
       active = false;
     };
-  }, [enabled, nonce]);
+  }, [accountId, nonce]);
 
   const reload = useCallback(() => {
-    invalidateProgress();
+    if (!accountId || previousAccountRef.current !== accountId) return;
+    invalidateProgress(accountId);
     setNonce((n) => n + 1);
-  }, []);
+  }, [accountId]);
 
-  return { progress, loading, reload };
+  // Effect-only clearing would expose the previous owner's flags during commit.
+  const owned = snapshot?.accountId === accountId ? snapshot : null;
+  return {
+    progress: owned?.progress ?? EMPTY,
+    loading: Boolean(accountId) && (owned?.loading ?? true),
+    reload,
+  };
 }

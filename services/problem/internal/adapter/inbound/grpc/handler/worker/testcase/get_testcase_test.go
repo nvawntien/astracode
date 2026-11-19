@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type fakeGetTestCaseUseCase struct {
@@ -37,6 +38,8 @@ func TestGetTestCaseHandlerHandle(t *testing.T) {
 			TestCount:      12,
 			Version:        3,
 			ZipDownloadURL: "https://storage.internal/testcases.zip",
+			TimeLimitMS:    1_000,
+			MemoryLimitKB:  524_288,
 		},
 	}
 	handler := NewGetTestCaseHandler(useCase)
@@ -56,6 +59,15 @@ func TestGetTestCaseHandlerHandle(t *testing.T) {
 	}
 	if response.GetVersion() != int32(useCase.result.Version) {
 		t.Fatalf("version = %d, want %d", response.GetVersion(), useCase.result.Version)
+	}
+	message := response.ProtoReflect()
+	for field, want := range map[protoreflect.Name]int64{"time_limit_ms": 1_000, "memory_limit_kb": 524_288} {
+		descriptor := message.Descriptor().Fields().ByName(field)
+		if descriptor == nil {
+			t.Errorf("GetTestCase response has no %s field", field)
+		} else if got := message.Get(descriptor).Int(); got != want {
+			t.Errorf("%s = %d, want %d", field, got, want)
+		}
 	}
 }
 
@@ -89,6 +101,8 @@ func TestGetTestCaseHandlerMapsUseCaseErrors(t *testing.T) {
 		code codes.Code
 	}{
 		{name: "test case not found", err: domain.ErrTestCaseNotFound, code: codes.NotFound},
+		{name: "invalid stored time", err: domain.ErrInvalidTimeLimit, code: codes.FailedPrecondition},
+		{name: "invalid stored memory", err: domain.ErrInvalidMemoryLimit, code: codes.FailedPrecondition},
 		{name: "unexpected error", err: errors.New("storage unavailable"), code: codes.Internal},
 	}
 

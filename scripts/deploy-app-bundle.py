@@ -143,11 +143,21 @@ def main():
     STATE.mkdir(parents=True, exist_ok=True)
     with (STATE / "bundle.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if len(sys.argv) in (2, 3) and sys.argv[1] == "--current-tag":
+            if len(sys.argv) == 3:
+                inspect_archive(Path(sys.argv[2]))
+                external_inputs()
+            print(active_tag())
+            return
+        if os.environ.get("ASTRACODE_PROTECTED_ROLLOUT") != "1":
+            raise RuntimeError("Use the protected production workflow for App activation and paired rollback")
         current = STATE / "current-bundle.json"
         previous = STATE / "previous-bundle.json"
         inputs = external_inputs()
-        if len(sys.argv) == 2 and sys.argv[1] == "--rollback":
+        if len(sys.argv) in (2, 4) and sys.argv[1] == "--rollback":
             target = json.loads(previous.read_text())
+            if len(sys.argv) == 4 and (active_tag() != tag(sys.argv[2]) or target["tag"] != tag(sys.argv[3])):
+                raise RuntimeError("App rollback references changed since rollout preflight")
             if target["external_inputs"] != inputs:
                 raise RuntimeError("External credentials/override changed; refuse automatic rollback. Restore compatible node inputs explicitly first.")
             release, bundle = target["tag"], Path(target["bundle"])

@@ -31,6 +31,58 @@ npm run dev            # http://localhost:3000
 | `npm run build` | Production build |
 | `npm run start` | Serve the production build (run `npm run build` first) |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | Next.js, TypeScript and React hooks lint checks |
+| `npm test` | Run the pure-helper Vitest suite once, without watch mode |
+| `npm run format:check` | Read-only formatting check across the frontend |
+| `npm run format:check:tooling` | Formatting gate for tooling, manifest and unit tests |
+| `npm run format` | Format the frontend; do not run across legacy source as part of unrelated work |
+
+## Quality gates and incremental adoption
+
+Use Node.js 22 LTS (22.12+); CI and the pinned Docker image use Node 22.
+The package engine also permits Node 24+. Install reproducibly with `npm ci`.
+ESLint uses the Next.js 15 flat-config bridge with `next/core-web-vitals` and
+`next/typescript`; Prettier owns formatting. Vitest runs TypeScript tests in a
+Node environment without a DOM, backend, or component-testing framework.
+
+```bash
+npm ci
+npm run typecheck
+npm run lint -- --max-warnings 6
+npm run format:check:tooling
+npm test
+node --test ../envoy/tests/frontend.mjs
+npm run build
+```
+
+The existing gateway contract tests remain separate: they cover refresh/retry and
+cookie behavior. Unit tests in `tests/` cover query encoding/URL origins, display
+fallbacks and measurement boundaries, and role inheritance versus dedicated
+contributor-workspace membership. Tests do not grant or verify backend permissions.
+
+Initial lint baseline: one empty-interface error and six warnings. The equivalent
+type alias fixes the error. The six existing warnings remain visible: two native
+image elements (`admin/users` pages), two unused bindings (problem workspace and
+submission stream), and two effect dependency warnings (`profile`). They require
+separate review; changing effect dependencies or image handling is outside this
+tooling task. CI runs the full linter with a budget of six warnings, so errors or
+an increased warning count fail. Reduce that budget as the warnings are resolved;
+it is a count limit, not a per-diagnostic ratchet. No rule is suppressed for debt.
+
+The first Prettier check found formatting drift in **49 pre-existing files**.
+`npm run format:check` intentionally reports that debt and is **not yet a required
+CI gate**. CI checks the new tooling/tests instead. For incremental adoption,
+format explicitly selected files when their changes are reviewed, for example
+`npx prettier --write tests/format.test.ts`. Avoid `npm run format` over the whole
+frontend during unrelated work. Enable the full formatting gate after a separately
+reviewed formatting cleanup; do not hide legacy files in `.prettierignore`.
+Generated outputs, lockfile and local environment files are ignored by Prettier.
+
+Dependencies are pinned for reproducibility; Next.js and React are unchanged.
+ESLint 9 is the newest major accepted by the pinned Next.js 15 configuration, but
+npm marks it unsupported. A supported-major upgrade needs a separate framework/
+lint compatibility review. Existing runtime dependency advisories are also outside
+this task; do not run `npm audit fix --force` as part of tooling setup.
 
 ## Environment
 

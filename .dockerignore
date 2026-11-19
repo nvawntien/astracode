@@ -11,3 +11,13 @@ website/.env*
 **/logs
 *.log
 *.log.*
+
+# Local benchmark credentials/results and compiled worker output are not build inputs.
+tools/benchmark/judge/users.local.json
+tools/benchmark/judge/users-*.local.json
+tools/benchmark/system-config.json
+tools/benchmark/system-config.local.json
+bench-results/
+tools/benchmark/api/bench-results/
+tools/benchmark/judge/bench-results/
+workers/judge/server

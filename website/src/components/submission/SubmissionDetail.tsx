@@ -1,33 +1,61 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { ApiError, NetworkError, submissionApi } from '@/lib/api';
 import { formatDateTime, verdictMeta } from '@/lib/format';
-import type { Submission } from '@/lib/types';
+import type { Role, SubmissionDetail as SubmissionDetailResponse } from '@/lib/types';
 import { ErrorState, SkeletonBar } from '@/components/ui';
 
-export function SubmissionDetail({ id, standalone = false }: { id: number; standalone?: boolean }) {
-  const [detail, setDetail] = useState<Submission | null>(null);
+interface SubmissionDetailProps {
+  id: number;
+  accountId: string;
+  role: Role;
+  standalone?: boolean;
+}
+
+export function SubmissionDetail({
+  id,
+  accountId,
+  role,
+  standalone = false,
+}: SubmissionDetailProps) {
+  // A role change can revoke access to another user's submission, even
+  // when the viewer and URL are unchanged.
+  return (
+    <SubmissionDetailRequest
+      key={JSON.stringify([accountId, role, id])}
+      id={id}
+      standalone={standalone}
+    />
+  );
+}
+
+function SubmissionDetailRequest({ id, standalone }: { id: number; standalone: boolean }) {
+  const [detail, setDetail] = useState<SubmissionDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const controller = new AbortController();
+    let active = true;
     setDetail(null);
     setError(null);
 
     submissionApi
       .get(id, controller.signal)
       .then((submission) => {
-        if (!controller.signal.aborted) setDetail(submission);
+        if (active) setDetail(submission);
       })
       .catch((cause) => {
-        if (controller.signal.aborted) return;
+        if (!active) return;
         setError(submissionDetailError(cause, id));
       });
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [id, reload]);
 
   if (error) {

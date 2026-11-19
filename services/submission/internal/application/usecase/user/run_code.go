@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go-judge-system/pkg/auth"
+	"go-judge-system/pkg/judge"
 	"go-judge-system/pkg/response"
 	"go-judge-system/services/submission/internal/application/dto"
 	inbound "go-judge-system/services/submission/internal/application/port/inbound/user"
@@ -167,15 +168,12 @@ func problemTimeLimitMS(value float64, fallback time.Duration) int64 {
 	if value <= 0 {
 		return int64(fallback / time.Millisecond)
 	}
-	if value >= 50 {
-		return int64(value)
-	}
-	return int64(value * 1000)
+	return judge.ProblemTimeLimitMS(value)
 }
 
 func problemMemoryLimitKB(value int, fallback int64) int64 {
 	if value <= 0 {
 		return fallback
 	}
-	return int64(value) * 1024
+	return judge.ProblemMemoryLimitKB(value)
 }

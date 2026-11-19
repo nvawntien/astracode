@@ -73,7 +73,7 @@ public class Main {
 `,
 };
 
-/** Key for the per-problem, per-language draft kept in localStorage. */
-export function draftKey(problemId: number, language: LanguageCode): string {
-  return `astra-draft:${problemId}:${language}`;
+/** Only authenticated owners have a persistent draft key. */
+export function draftKey(accountId: string, problemId: number, language: LanguageCode): string {
+  return `astra-draft:v2:${JSON.stringify([accountId, problemId, language])}`;
 }

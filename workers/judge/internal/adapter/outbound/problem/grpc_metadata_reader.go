@@ -60,6 +60,8 @@ func (r *GRPCMetadataReader) GetTestCaseMetadata(ctx context.Context, problemID 
 		ZipDownloadURL: strings.TrimSpace(resp.GetZipDownloadUrl()),
 		TestCount:      int(resp.GetTestCount()),
 		Version:        int(resp.GetVersion()),
+		TimeLimitMS:    resp.GetTimeLimitMs(),
+		MemoryLimitKB:  resp.GetMemoryLimitKb(),
 	}
 	if metadata.ZipDownloadURL == "" {
 		return outbound.ProblemTestCaseMetadata{}, workerdomain.MarkNonRetryable(
@@ -75,6 +77,9 @@ func (r *GRPCMetadataReader) GetTestCaseMetadata(ctx context.Context, problemID 
 		return outbound.ProblemTestCaseMetadata{}, workerdomain.MarkNonRetryable(
 			fmt.Errorf("problem-service returned invalid version=%d for problem_id=%d", metadata.Version, problemID),
 		)
+	}
+	if err := workerdomain.ValidateOfficialExecutionLimits(metadata.TimeLimitMS, metadata.MemoryLimitKB); err != nil {
+		return outbound.ProblemTestCaseMetadata{}, fmt.Errorf("problem_id=%d: %w", problemID, err)
 	}
 
 	r.logger.Debug(

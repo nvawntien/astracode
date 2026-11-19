@@ -32,7 +32,7 @@ import type {
   RejudgeAdminSubmissionResponse,
   RunCodeRequest,
   RunResponse,
-  Submission,
+  SubmissionDetail,
   SubmissionStreamTicketResponse,
   UpdateAdminProblemRequest,
   UpdateAdminTagRequest,
@@ -105,9 +105,29 @@ interface RequestOptions {
   signal?: AbortSignal;
   /** Skip the refresh-token retry (used by auth endpoints themselves). */
   noRetry?: boolean;
+  /** Recheck ownership before retrying a request that carries editor source. */
+  canRetry?: () => boolean;
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+let sessionVersion = 0;
+let sessionChange: Promise<void> | null = null;
+let refreshInFlight: { version: number; response: Promise<boolean> } | null = null;
+
+function changeSession(request: () => Promise<void>): Promise<void> {
+  sessionVersion++;
+  // Finish older cookie writes before dispatching login or logout. Ignoring a
+  // response in React cannot undo Set-Cookie already applied by the browser.
+  const previous = sessionChange ?? refreshInFlight?.response;
+  const result = previous ? previous.then(request) : request();
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  sessionChange = settled;
+  return result.finally(() => {
+    if (sessionChange === settled) sessionChange = null;
+  });
+}
 
 /**
  * The gateway validates a JWT taken from the `access_token` cookie
@@ -115,27 +135,27 @@ let refreshInFlight: Promise<boolean> | null = null;
  * so every request just needs `credentials: 'include'`; on a 401 we try the
  * refresh endpoint once and replay the original request.
  */
-async function refreshSession(): Promise<boolean> {
-  if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      try {
-        const res = await fetch(buildApiUrl('/api/v1/auth/refresh-token'), {
-          method: 'POST',
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        });
-        return res.ok;
-      } catch {
-        return false;
-      } finally {
-        // Allow a fresh attempt on the next 401 wave.
-        setTimeout(() => {
-          refreshInFlight = null;
-        }, 0);
-      }
-    })();
-  }
-  return refreshInFlight;
+function refreshSession(version: number): Promise<boolean> {
+  if (refreshInFlight?.version === version) return refreshInFlight.response;
+  const response = (async () => {
+    try {
+      const res = await fetch(buildApiUrl('/api/v1/auth/refresh-token'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      // Deduplicate the same 401 wave without clearing a newer session's refresh.
+      setTimeout(() => {
+        if (refreshInFlight?.version === version) refreshInFlight = null;
+      }, 0);
+    }
+  })();
+  refreshInFlight = { version, response };
+  return response;
 }
 
 async function rawRequest(path: string, options: RequestOptions): Promise<Response> {
@@ -165,11 +185,19 @@ async function rawRequest(path: string, options: RequestOptions): Promise<Respon
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const version = sessionVersion;
+  const startedDuringSessionChange = sessionChange !== null;
   let res = await rawRequest(path, options);
 
-  if (res.status === 401 && !options.noRetry) {
-    const refreshed = await refreshSession();
-    if (refreshed) res = await rawRequest(path, options);
+  const canRetry = () =>
+    !startedDuringSessionChange &&
+    !sessionChange &&
+    sessionVersion === version &&
+    !options.signal?.aborted &&
+    options.canRetry?.() !== false;
+  if (res.status === 401 && !options.noRetry && canRetry()) {
+    const refreshed = await refreshSession(version);
+    if (refreshed && canRetry()) res = await rawRequest(path, options);
   }
 
   const text = await res.text();
@@ -197,12 +225,15 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
 export const authApi = {
   login: (body: LoginRequest) =>
-    apiRequest<void>('/api/v1/auth/login', { method: 'POST', body, noRetry: true }),
+    changeSession(() =>
+      apiRequest<void>('/api/v1/auth/login', { method: 'POST', body, noRetry: true }),
+    ),
 
   register: (body: RegisterRequest) =>
     apiRequest<void>('/api/v1/auth/register', { method: 'POST', body, noRetry: true }),
 
-  logout: () => apiRequest<void>('/api/v1/auth/logout', { method: 'POST', noRetry: true }),
+  logout: () =>
+    changeSession(() => apiRequest<void>('/api/v1/auth/logout', { method: 'POST', noRetry: true })),
 
   logoutAll: () => apiRequest<void>('/api/v1/auth/logout-all', { method: 'POST' }),
 
@@ -437,11 +468,11 @@ export const adminUserApi = {
 /* ------------------------------------------------------------ submission */
 
 export const submissionApi = {
-  create: (body: CreateSubmissionRequest) =>
-    apiRequest<CreateSubmissionResponse>('/api/v1/submissions', { method: 'POST', body }),
+  create: (body: CreateSubmissionRequest, canRetry?: () => boolean) =>
+    apiRequest<CreateSubmissionResponse>('/api/v1/submissions', { method: 'POST', body, canRetry }),
 
   get: (id: number, signal?: AbortSignal) =>
-    apiRequest<Submission>(`/api/v1/submissions/${id}`, { signal }),
+    apiRequest<SubmissionDetail>(`/api/v1/submissions/${id}`, { signal }),
 
   issueStreamTicket: (id: number, signal?: AbortSignal) =>
     apiRequest<SubmissionStreamTicketResponse>(`/api/v1/submissions/${id}/events/ticket`, {
@@ -468,6 +499,6 @@ export const submissionApi = {
     apiRequest<MyProfileStats>(`/api/v1/users/${encodeURIComponent(username)}/profile-stats`, { signal }),
 
   /** Custom-test execution through the submission-service synchronous run API. */
-  run: (body: RunCodeRequest) =>
-    apiRequest<RunResponse>(RUN_ENDPOINT, { method: 'POST', body }),
+  run: (body: RunCodeRequest, signal?: AbortSignal) =>
+    apiRequest<RunResponse>(RUN_ENDPOINT, { method: 'POST', body, signal }),
 };

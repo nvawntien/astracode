@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
@@ -13,11 +14,11 @@ import (
 )
 
 type getSubmissionUseCase struct {
-	submissionRepo outbound.SubmissionRepository
+	detailRepo outbound.CurrentSubmissionDetailRepository
 }
 
-func NewGetSubmissionUseCase(submissionRepo outbound.SubmissionRepository) inbound.GetSubmissionUseCase {
-	return &getSubmissionUseCase{submissionRepo: submissionRepo}
+func NewGetSubmissionUseCase(detailRepo outbound.CurrentSubmissionDetailRepository) inbound.GetSubmissionUseCase {
+	return &getSubmissionUseCase{detailRepo: detailRepo}
 }
 
 func (uc *getSubmissionUseCase) Execute(ctx context.Context, claims auth.Claims, req dto.GetSubmissionRequest) (dto.GetSubmissionResponse, error) {
@@ -28,13 +29,16 @@ func (uc *getSubmissionUseCase) Execute(ctx context.Context, claims auth.Claims,
 		return dto.GetSubmissionResponse{}, domain.ErrSubmissionUnauthenticated
 	}
 
+	var ownerID *string
 	switch claims.Role {
-	case rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin:
+	case rbac.RoleUser, rbac.RoleContributor:
+		ownerID = &claims.UserID
+	case rbac.RoleModerator, rbac.RoleAdmin:
 	default:
 		return dto.GetSubmissionResponse{}, domain.ErrSubmissionForbidden
 	}
 
-	submission, err := uc.submissionRepo.GetByID(ctx, req.SubmissionID)
+	submission, summary, err := uc.detailRepo.GetCurrentDetail(ctx, req.SubmissionID, ownerID)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrSubmissionNotFound):
@@ -49,24 +53,15 @@ func (uc *getSubmissionUseCase) Execute(ctx context.Context, claims auth.Claims,
 		return dto.GetSubmissionResponse{}, domain.ErrInternalServer
 	}
 
-	if submission.UserID != claims.UserID &&
-		claims.Role != rbac.RoleModerator &&
-		claims.Role != rbac.RoleAdmin {
-		return dto.GetSubmissionResponse{}, domain.ErrSubmissionNotFound
+	var attemptID *string
+	if strings.TrimSpace(submission.CurrentAttemptID) != "" {
+		attemptID = &submission.CurrentAttemptID
 	}
-
-	summaries, err := uc.submissionRepo.ResultSummaries(ctx, []int64{submission.ID})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return dto.GetSubmissionResponse{}, err
-		}
-		return dto.GetSubmissionResponse{}, domain.ErrInternalServer.Wrap(err)
-	}
-	summary, found := summaries[submission.ID]
-	passed, total := testcaseSummaryForStatus(submission.Status, summary, found)
+	passed, total := testcaseSummaryForStatus(submission.Status, summary, summary.Total > 0)
 
 	return dto.GetSubmissionResponse{
 		ID:              submission.ID,
+		AttemptID:       attemptID,
 		ProblemID:       submission.ProblemID,
 		ProblemTitle:    submission.ProblemName,
 		UserID:          submission.UserID,

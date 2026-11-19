@@ -133,7 +133,7 @@ function ProblemsScreen() {
   const [nonce, setNonce] = useState(0);
 
   const debouncedSearch = useDebounced(search, 350);
-  const { progress } = useProgress(Boolean(user));
+  const { progress } = useProgress(user?.id ?? null);
 
   // Keep the URL shareable without re-triggering the fetch effect.
   useEffect(() => {

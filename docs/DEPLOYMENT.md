@@ -348,9 +348,14 @@ Judge state is recorded independently:
 /opt/astracode/.deploy/judge/previous-image-tag
 ```
 
-Restarting a Worker can cause a Kafka consumer-group rebalance. The scripts use
-normal Compose recreation and no `kill -9`, global prune, volume deletion, or
-invented queue-draining mechanism.
+The protected rollout requires the running and planned Worker to use
+`WORKER_POOL_SIZE=1`. Higher parallelism can complete a later offset while an
+earlier job from the same partition is still running. The rollout sends
+SIGTERM and disables container restart until Compose recreates the Worker.
+SIGTERM cancels the Kafka session. Completed and marked jobs can commit,
+while interrupted valid jobs without committed offsets are eligible for
+redelivery. Result application still checks the attempt ID and terminal state
+if a verdict was published before its offset committed.
 
 ## GitHub Environment secrets
 
@@ -380,13 +385,98 @@ to both logical key secrets; the workflow does not assume that arrangement.
 
 ## Deployment sequence
 
+Set these non-secret variables in the GitHub `production` Environment for a
+stable, operator-authorized testcase fixture:
+
+```text
+PROD_JUDGE_PROBE_PROBLEM_ID
+PROD_JUDGE_PROBE_TIME_LIMIT_MS
+PROD_JUDGE_PROBE_MEMORY_LIMIT_KIB
+```
+
+A fixture configured for one second and 512 MiB uses `1000` and `524288`.
+Keep the fixture's limits and dataset stable through rollout and rollback.
+The private `GetTestCase` probe prints no signed URLs or testcase content.
+The deploy user needs writable `/opt/astracode/.deploy` on both nodes and
+`flock` on the Judge Node. Use the documented single-container topology and
+literal private IPv4 Problem and Kafka addresses. The gates reject extra local
+Problem replicas, extra managed Workers, or a Kafka group that remains active.
+Avoid separate deployments, configuration edits, and new consumer instances
+during the maintenance window.
+
+The running Worker must provide its startup record at
+`/tmp/astracode-judge-worker-runtime.json`. The Worker writes it from its loaded
+configuration and initialized consumer, using a writable `/tmp` in the
+container. Preflight validates the record against
+PID 1 and compares the captured Problem endpoint, Kafka broker, group, topic,
+and pool size to the planned Compose settings. Startup evidence is required
+even when the mounted file currently matches the plan. The Judge Node checks
+the same container and its startup settings again before suspension. The App
+Node verifies the consumer group reported by that Worker.
+
+### First protected rollout from a legacy pair
+
+Use a maintenance window. Keep the production lock, node-owned configuration,
+and private network topology stable and prevent other Worker launches. In the
+manual **Deploy production** workflow, select the protected target
+`image_tag`, enter the installed App/Judge tag as `legacy_from`, and enter the
+Judge Node's Kafka-visible private IPv4 address as `legacy_judge_peer`. Obtain
+the peer from the private network inventory before dispatch. The address must
+identify that Judge Node exclusively. Shared NAT or proxies cannot establish
+this identity. Leave both inputs blank after the first successful protected
+release.
+
+This path supports an official legacy Worker with the direct image entrypoint,
+`WORKER_POOL_SIZE=1`, and a retained current-startup log containing its
+effective broker and group. The broker must report one stable dynamic
+round-robin member at the approved peer, subscribed and assigned exclusively
+to the planned job topic. The App tag and live fixture must match the legacy
+pair, with both limit fields absent. Missing logs, ambiguous membership, a
+changed member, or different settings block the transition. Recover the
+evidence before retrying. A host config edit alone cannot establish identity.
+
+After rechecking the same container and Kafka member from Judge, the workflow
+disables restart and uses SIGKILL for the legacy Worker. This avoids running
+the legacy cancellation path, which can acknowledge a failed DLT publication.
+An uncommitted job can be redelivered, including a result published just before
+the stop. The existing attempt guards handle duplicate results. Kafka may
+retain the member until its session expires. App activation waits for
+`Empty` and zero members on the verified group. The procedure changes neither
+offsets nor topics and cannot recover a job the legacy Worker already
+acknowledged before suspension.
+
+App activates first. Both private probes must verify the new fixture limits
+before the Worker can start. The new Worker must report its startup record
+for the same broker, group, and topic. Submit one approved synthetic job and
+verify its completion and Kafka lag before closing the maintenance window.
+Interactive Run Code is unavailable while the Worker is stopped.
+
+If bootstrap fails after suspension, the workflow keeps judging suspended.
+When the previous App bundle can be restored and verified, it restores that
+legacy App without restarting the legacy Worker. Inspect the recorded tag,
+container ID, broker, group, and topic from the preflight output. Resolve any
+ambiguous SSH or App state on both hosts, verify the actual group is empty,
+then restore or activate a compatible limits-aware App bundle. Check the
+positive fixture contract from both nodes before activating its matching
+protected Worker with the recorded settings. Use the protected recovery
+commands below. Retain the staged bundles and probe for this recovery.
+Reverting to legacy judging requires a separate emergency decision because
+the old Worker can still use fallback limits and acknowledge failed DLT writes.
+
+### Normal protected rollout
+
 The manual **Deploy production** workflow:
 
 1. validates and checks out the requested semantic release tag;
 2. checks that all six GHCR release image manifests exist;
-3. uploads non-secret bundles before mutating either node;
-4. deploys and verifies the Judge Node first;
-5. deploys and verifies the App Node second.
+3. builds the private gRPC probe and stages non-secret artifacts privately;
+4. checks the previous tags and compares the running and planned Worker
+   settings with the App Node's published private ports;
+5. suspends the Worker and waits for its Kafka group to report `Empty` with zero members;
+6. activates the App bundle and checks the active Problem image, exact fixture
+   limits, and consumer group again;
+7. starts and verifies the sandbox, probes the Problem contract from the
+   Judge Node, then starts the matching Worker and verifies its health.
 
 The App workflow streams the candidate `scripts/deploy-app-bundle.py` into host
 Python before extracting the upload. That controller locks App deployment,
@@ -396,46 +486,75 @@ initializer provisions a read-only UID-101 key copy without changing canonical
 0600 permissions. Configuration validation and forced recreation are shared in
 `scripts/envoy-runtime.sh`.
 
-Judge-first ordering ensures the new App release is not made live before its
-compatible Worker/Sandbox release is ready.
+Official submissions wait in the durable queue during the maintenance window.
+Interactive Run Code is unavailable while the Worker is stopped. Monitor
+Kafka lag, retention, and DLT activity, and use an approved synthetic job
+to verify the completion flow after judging resumes.
+
+The Worker processes each input partition in offset order. If both judging
+and the synchronous DLT write fail, the affected partition stops advancing for
+that consumer session. Other partitions can continue. The error log includes
+the source topic, partition, offset, and cause. Restore DLT publication and
+restart the Worker to redeliver the unresolved message. A Kafka rebalance may
+also redeliver it. Check the retained DLT record and committed offsets after
+recovery. DLT records for malformed messages use
+`original_value_encoding: "base64"` to keep their exact bytes. Valid JSON keeps
+the existing DLT representation. A shutdown between DLT acknowledgement and
+offset commit can produce duplicate DLT records with the same origin offset.
 
 ## Rollback
 
-Each node can be rolled back independently:
-
-```bash
-# Run on the relevant node.
-python3 /opt/astracode/scripts/deploy-app-bundle.py --rollback
-/opt/astracode/scripts/deploy-judge-node.sh --rollback
-```
-
-App rollback restores the previous non-secret configuration bundle AND semantic
-image tag, reruns activation/health checks and explicitly recreates Envoy. The
-controller can restore a partially updated image fleet. State and archives live
-under `/opt/astracode/.deploy/app` by default; retain them and the previous images
-for the rollback window. If the old bundle predates this controller, use the
-controller from the reviewed release. `deploy-app-node.sh --rollback` remains a
-legacy image-only operation and is unsuitable for configuration rollback.
+The workflow suspends Judge and verifies the group is empty before restoring
+App. An App activation failure uses the bundle transaction's own restoration.
+Later failures restore the recorded previous App image/config bundle first.
+The workflow verifies the previous App tag and live contract before starting
+the matching previous Judge release. The requested deployment remains failed
+even when recovery succeeds. Retain the App state and archives under
+`/opt/astracode/.deploy/app` and the previous release images.
 
 External stack/override/JWK and referenced environment files are fingerprinted,
 never bundled or restored. Rollback refuses a changed fingerprint before
 mutating configuration: an operator must explicitly restore compatible protected
 node inputs (including Auth's matching signing secret), or deploy a compatible
 recovery bundle. Automatic rollback must not resurrect a revoked signing key.
-Do not change external inputs during deployment. An activation failure restores
-the previous bundle/tag when those external inputs still match; recovery errors
-or an interrupted process require operator recovery. This is not crash-atomic.
-Judge rollback retains its existing image-tag behavior.
+An ambiguous SSH outage, unknown App state, failed restoration, or unverifiable
+contract requires operator recovery. A legacy App can be restored, but
+missing limits prevent automatic Judge resumption. Rolling back only Problem
+breaks the new Worker. Rolling back only Worker can reintroduce fallback
+verdicts and requires an explicit emergency decision.
 
-If Judge deployment fails, the workflow stops before touching App. If Judge
-succeeds but App deployment fails, the App bundle controller attempts paired rollback and
-the workflow explicitly requests Judge rollback. A failed Judge rollback is a
-visible workflow failure requiring operator intervention.
+When recovering manually, confirm the Judge container is stopped with restart
+disabled and verify the group is empty on the App broker. Compare runtime
+images and node state files. Restore a compatible App bundle, then check the
+private RPC using the staged probe from both hosts before resuming the matching
+Judge release. Retry through the protected workflow once the recorded pair is
+consistent. Keep judging suspended while a host or contract is unverified.
+Preserve pending attempts and broker offsets. Application rollback does not
+roll back the database or make older schemas compatible.
 
-This is orchestration, not a distributed transaction. Review schema and
-protocol compatibility before release; application rollback is not database
-rollback, and GORM `AutoMigrate` can make older application images
-incompatible with newer schema.
+For an interrupted workflow, the previous tag is printed before suspension.
+On the Judge Node, the same suspension helper is safe to retry:
+
+```bash
+ASTRACODE_PROTECTED_ROLLOUT=1 /opt/astracode/scripts/deploy-judge-node.sh --suspend "$PREVIOUS_TAG"
+```
+
+On the App Node, confirm group state with the Worker group from its node-owned
+configuration. If the failed release is the active App tag and the previous
+bundle is known, the staged coordinator can restore that exact reference:
+
+```bash
+docker exec judge_kafka kafka-consumer-groups.sh --bootstrap-server 127.0.0.1:9092 \
+  --describe --group "$WORKER_GROUP" --state
+# Proceed only with Empty and zero members.
+set -o pipefail
+tar -xOf "$APP_BUNDLE" scripts/deploy-app-bundle.py | \
+  ASTRACODE_PROTECTED_ROLLOUT=1 python3 - --rollback "$CURRENT_APP_TAG" "$PREVIOUS_TAG"
+```
+
+If those references disagree, leave the Worker stopped and inspect both
+nodes' state before another activation. Keep the staged bundle and probe for
+recovery until the deployment or rollback has been verified.
 
 ## One-time server preparation
 
@@ -460,4 +579,4 @@ Worker gRPC, or Sandbox HTTP to the public Internet.
 
 `scripts/deploy-production.sh` intentionally exits without deploying. It is a
 deprecated combined-node entrypoint retained only to prevent accidental use;
-use the node-specific scripts or the GitHub workflow instead.
+use the protected GitHub workflow instead.

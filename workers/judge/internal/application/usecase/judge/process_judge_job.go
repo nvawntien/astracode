@@ -44,6 +44,9 @@ func (u *ProcessJudgeJobUseCase) Execute(ctx context.Context, jobMsg *judge.JobM
 	if err != nil {
 		return u.handleProcessingError(ctx, jobMsg, "fetch testcase metadata", err)
 	}
+	if err := workerdomain.ValidateOfficialExecutionLimits(metadata.TimeLimitMS, metadata.MemoryLimitKB); err != nil {
+		return u.handleProcessingError(ctx, jobMsg, "validate official execution limits", err)
+	}
 
 	bundle, err := u.testCaseLoader.Load(ctx, metadata)
 	if err != nil {
@@ -55,6 +58,10 @@ func (u *ProcessJudgeJobUseCase) Execute(ctx context.Context, jobMsg *judge.JobM
 		SourceCode:         jobMsg.SourceCode,
 		TestCases:          bundle.TestCases,
 		StopOnFirstFailure: true,
+		Limits: outbound.ExecutionLimits{
+			TimeLimitMS:   metadata.TimeLimitMS,
+			MemoryLimitKB: metadata.MemoryLimitKB,
+		},
 		TestcaseDataset: &outbound.TestcaseDatasetIdentity{
 			ProblemID:       metadata.ProblemID,
 			Version:         bundle.Version,

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"go-judge-system/pkg/config"
@@ -29,7 +29,6 @@ type JudgeJobConsumer struct {
 	useCase      inbound.ProcessJudgeJobUseCase
 	dltPublisher *DLTPublisher
 	maxRetries   int
-	poolSize     int
 	jobSlots     chan struct{}
 	logger       *zap.Logger
 }
@@ -59,10 +58,13 @@ func NewJudgeJobConsumer(
 		useCase:      useCase,
 		dltPublisher: dltPublisher,
 		maxRetries:   defaultMaxRetries,
-		poolSize:     poolSize,
 		jobSlots:     make(chan struct{}, poolSize),
 		logger:       logger,
 	}
+}
+
+func (c *JudgeJobConsumer) JobSettings() (topic string, poolSize int) {
+	return c.topic, cap(c.jobSlots)
 }
 
 func (c *JudgeJobConsumer) Run(ctx context.Context) error {
@@ -70,7 +72,6 @@ func (c *JudgeJobConsumer) Run(ctx context.Context) error {
 		useCase:      c.useCase,
 		dltPublisher: c.dltPublisher,
 		maxRetries:   c.maxRetries,
-		poolSize:     c.poolSize,
 		jobSlots:     c.jobSlots,
 		logger:       c.logger,
 	}
@@ -104,7 +105,6 @@ type judgeJobHandler struct {
 	useCase      inbound.ProcessJudgeJobUseCase
 	dltPublisher *DLTPublisher
 	maxRetries   int
-	poolSize     int
 	jobSlots     chan struct{}
 	logger       *zap.Logger
 }
@@ -113,50 +113,44 @@ func (h *judgeJobHandler) Setup(_ sarama.ConsumerGroupSession) error   { return 
 func (h *judgeJobHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 
 func (h *judgeJobHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	poolSize := h.poolSize
-	if poolSize <= 0 {
-		poolSize = 4
-	}
-
-	// Start N workers
-	var wg sync.WaitGroup
-	msgCh := make(chan *sarama.ConsumerMessage)
-
-	for i := 0; i < poolSize; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for msg := range msgCh {
-				h.logger.Debug("worker processing message", zap.Int("worker_id", workerID), zap.Int64("offset", msg.Offset))
-				h.handleMessage(session, msg)
-			}
-		}(i)
-	}
-
-	for msg := range claim.Messages() {
-		// Stop dispatching if context is done
+	ctx := session.Context()
+	for {
 		select {
-		case <-session.Context().Done():
-			close(msgCh)
-			wg.Wait()
+		case <-ctx.Done():
 			return nil
-		case msgCh <- msg:
+		case msg, ok := <-claim.Messages():
+			if !ok || ctx.Err() != nil {
+				return nil
+			}
+			// Kafka commits a position per partition. Sarama runs claims
+			// concurrently, but each claim must acknowledge offsets in order.
+			if err := h.handleMessage(session, msg); err != nil {
+				if ctx.Err() == nil {
+					h.logger.Error("judge partition blocked by failed DLT write; restore DLT and restart Worker",
+						zap.String("topic", msg.Topic), zap.Int32("partition", msg.Partition),
+						zap.Int64("offset", msg.Offset), zap.Error(err))
+				}
+				// Returning early would end the session and start a new
+				// delivery loop. Keep the claim idle until shutdown or rebalance.
+				<-ctx.Done()
+				return nil
+			}
 		}
 	}
-
-	close(msgCh)
-	wg.Wait()
-	return nil
 }
 
-func (h *judgeJobHandler) handleMessage(session sarama.ConsumerGroupSession, msg *sarama.ConsumerMessage) {
-	if !h.acquireJobSlot(session.Context()) {
+func (h *judgeJobHandler) handleMessage(session sarama.ConsumerGroupSession, msg *sarama.ConsumerMessage) error {
+	ctx := session.Context()
+	if !h.acquireJobSlot(ctx) {
 		h.logger.Debug("judge job skipped because consumer session was cancelled before execution",
 			zap.Int64("offset", msg.Offset),
 		)
-		return
+		return nil
 	}
 	defer h.releaseJobSlot()
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	// 1. Decode payload
 	var payload judge.JobMessage
@@ -165,27 +159,25 @@ func (h *judgeJobHandler) handleMessage(session sarama.ConsumerGroupSession, msg
 			zap.Int64("offset", msg.Offset),
 			zap.Error(err),
 		)
-		h.sendToDLT(session.Context(), msg, err.Error(), 0)
-		session.MarkMessage(msg, "invalid_payload_dlt")
-		return
+		return h.forwardToDLT(session, msg, err, 0, "invalid_payload_dlt")
 	}
 
 	// 2. Retry with exponential backoff
 	var lastErr error
 	for attempt := 1; attempt <= h.maxRetries; attempt++ {
-		lastErr = h.useCase.Execute(session.Context(), &payload)
-		if lastErr == nil {
-			session.MarkMessage(msg, "processed")
-			return
-		}
+		lastErr = h.useCase.Execute(ctx, &payload)
 
 		// If context is cancelled (shutdown), stop retrying immediately
-		if session.Context().Err() != nil {
+		if ctx.Err() != nil {
 			h.logger.Warn("context cancelled during retry, not committing offset",
 				zap.Int64("submission_id", payload.SubmissionID),
 				zap.Int("attempt", attempt),
 			)
-			return
+			return nil
+		}
+		if lastErr == nil {
+			session.MarkMessage(msg, "processed")
+			return nil
 		}
 
 		h.logger.Warn("judge job processing failed, retrying",
@@ -200,8 +192,8 @@ func (h *judgeJobHandler) handleMessage(session sarama.ConsumerGroupSession, msg
 			backoff := defaultRetryBaseWait * time.Duration(1<<(attempt-1)) // 500ms, 1s, 2s
 			select {
 			case <-time.After(backoff):
-			case <-session.Context().Done():
-				return
+			case <-ctx.Done():
+				return nil
 			}
 		}
 	}
@@ -213,8 +205,7 @@ func (h *judgeJobHandler) handleMessage(session sarama.ConsumerGroupSession, msg
 		zap.Int("max_retries", h.maxRetries),
 		zap.Error(lastErr),
 	)
-	h.sendToDLT(session.Context(), msg, lastErr.Error(), h.maxRetries)
-	session.MarkMessage(msg, "dlt_forwarded")
+	return h.forwardToDLT(session, msg, lastErr, h.maxRetries, "dlt_forwarded")
 }
 
 func (h *judgeJobHandler) acquireJobSlot(ctx context.Context) bool {
@@ -236,18 +227,15 @@ func (h *judgeJobHandler) releaseJobSlot() {
 	}
 }
 
-func (h *judgeJobHandler) sendToDLT(ctx context.Context, msg *sarama.ConsumerMessage, errMsg string, retryCount int) {
+func (h *judgeJobHandler) forwardToDLT(session sarama.ConsumerGroupSession, msg *sarama.ConsumerMessage, cause error, retries int, metadata string) error {
 	if h.dltPublisher == nil {
-		h.logger.Error("DLT publisher not configured, message will be lost",
-			zap.Int64("offset", msg.Offset),
-		)
-		return
+		return fmt.Errorf("DLT publisher not configured: %w", cause)
 	}
-
-	if err := h.dltPublisher.Publish(ctx, msg, errMsg, retryCount); err != nil {
-		h.logger.Error("failed to publish to DLT — message may be re-processed",
-			zap.Int64("offset", msg.Offset),
-			zap.Error(err),
-		)
+	if err := h.dltPublisher.Publish(session.Context(), msg, cause.Error(), retries); err != nil {
+		return fmt.Errorf("forward judge job to DLT: %w", errors.Join(cause, err))
 	}
+	if session.Context().Err() == nil {
+		session.MarkMessage(msg, metadata)
+	}
+	return nil
 }

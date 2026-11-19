@@ -12,13 +12,14 @@ api-tests/
 # Local benchmark artifacts and pre-issued session cookies.
 /bench-results/
 /tools/benchmark/judge/users.local.json
-/tools/benchmark/judge/users-1k.local.json
-/tools/benchmark/judge/users-10k.local.json
-/tools/benchmark/judge/users-100k.local.json
+/tools/benchmark/judge/users-*.local.json
 /tools/benchmark/system-config.json
 /tools/benchmark/system-config.local.json
 /tools/benchmark/api/bench-results/
 tools/benchmark/judge/bench-results/
+
+# Local output of `go build ./cmd/server` in the Judge Worker module.
+/workers/judge/server
 
 # Locally generated HS256 JWK; production uses an externally mounted secret.
 /envoy/symmetric.json
