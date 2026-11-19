@@ -47,7 +47,8 @@ class Deployment(unittest.TestCase):
             stack.write_text(f'ASTRACODE_IMAGE_ROOT={image_root}\nASTRACODE_IMAGE_TAG=v1.0.0\nGATEWAY_JWK_FILE={key}\n')
             override.write_text('services: {}\n')
             env = dict(os.environ, ASTRACODE_APP_DIR=str(app), ASTRACODE_APP_STATE_DIR=str(state),
-                ASTRACODE_STACK_ENV=str(stack), ASTRACODE_APP_OVERRIDE=str(override), ASTRACODE_APP_COMPOSE_PROJECT=project)
+                ASTRACODE_STACK_ENV=str(stack), ASTRACODE_APP_OVERRIDE=str(override), ASTRACODE_APP_COMPOSE_PROJECT=project,
+                ASTRACODE_PROTECTED_ROLLOUT='1')
             env['ASTRACODE_RELEASE_CONTAINER_NAMES'] = ' '.join(project + '-' + name for name in ('website', 'auth-service', 'problem-service', 'submission-service'))
             def compose(*args):
                 return run(['docker','compose','--project-name',project,'--env-file',str(stack),'-f',str(app/'docker-compose.yml'),'-f',str(app/'docker-compose.prod.yml'),'-f',str(override),*args],env=env)
@@ -126,7 +127,7 @@ printf '%s\\n' "$1" > "$ASTRACODE_APP_STATE_DIR/current-image-tag"
                 b2,_=bundle('v1.0.1','two')
                 checked(activate('v1.0.1',b2));ready('two')
                 self.assertEqual(json.loads((state/'current-bundle.json').read_text())['tag'],'v1.0.1')
-                checked(activate('--rollback'));ready('one')
+                checked(activate('--rollback', 'v1.0.1', 'v1.0.0'));ready('one')
                 for name in ('website','auth-service','problem-service','submission-service'):
                     self.assertTrue(checked(run(['docker','inspect','--format','{{.Config.Image}}',project+'-'+name])).endswith(':v1.0.0'))
                 checked(activate('--rollback'));ready('two')

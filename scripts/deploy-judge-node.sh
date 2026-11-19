@@ -14,7 +14,7 @@ readonly SANDBOX_GRPC_READY_ATTEMPTS="${ASTRACODE_SANDBOX_GRPC_READY_ATTEMPTS:-3
 readonly SANDBOX_GRPC_READY_INTERVAL_SECONDS="${ASTRACODE_SANDBOX_GRPC_READY_INTERVAL_SECONDS:-1}"
 
 usage() {
-  echo "usage: $0 <vX.Y.Z> | --rollback" >&2
+  echo "Use the protected production workflow for Judge activation and paired rollback." >&2
 }
 
 valid_tag() {
@@ -89,14 +89,27 @@ require_readable_file() {
   fi
 }
 
-require_readable_file "$JUDGE_COMPOSE" "Judge Compose file"
-require_readable_file "$JUDGE_CONFIG" "Judge configuration"
-
-requested="${1:-}"
-if [[ "$requested" == "--rollback" ]]; then
-  require_readable_file "$PREVIOUS_TAG_FILE" "previous Judge release state"
-  requested="$(<"$PREVIOUS_TAG_FILE")"
-elif [[ $# -ne 1 ]]; then
+operation="${1:-}"
+if [[ "$operation" == --preflight || "$operation" == --suspend || "$operation" == --activate ]]; then
+  if [[ ${ASTRACODE_PROTECTED_ROLLOUT:-0} != 1 ]]; then
+    usage
+    exit 2
+  fi
+fi
+case "$operation" in
+  --preflight) [[ $# -eq 3 ]] || exit 2 ;;
+  --suspend) [[ $# -eq 2 ]] || exit 2 ;;
+  --activate) [[ $# -eq 8 ]] || exit 2 ;;
+  *)
+    if [[ ${ASTRACODE_JUDGE_DEPLOY_DRY_RUN:-0} != 1 &&
+          ! (${ASTRACODE_JUDGE_DEPLOY_TEST_LIB:-0} == 1 && "${BASH_SOURCE[0]}" != "$0") ]]; then
+      usage
+      exit 2
+    fi
+    ;;
+esac
+requested="${2:-$operation}"
+if [[ -z "$requested" ]]; then
   usage
   exit 2
 fi
@@ -104,6 +117,10 @@ fi
 if ! valid_tag "$requested"; then
   echo "Refusing non-release or mutable image tag: $requested" >&2
   exit 2
+fi
+if [[ "$operation" != --suspend ]]; then
+  require_readable_file "$JUDGE_COMPOSE" "Judge Compose file"
+  require_readable_file "$JUDGE_CONFIG" "Judge configuration"
 fi
 
 mkdir -p "$STATE_DIR"
@@ -134,19 +151,19 @@ compose() {
 container_is_running() {
   local service="$1"
   local container_id running health
-  container_id="$(compose ps -q "$service")"
+  container_id="$(compose ps -q "$service")" || return 1
   if [[ -z "$container_id" ]]; then
     echo "Required Judge service has no container: $service" >&2
     return 1
   fi
 
-  running="$(docker inspect --format '{{.State.Running}}' "$container_id")"
+  running="$(docker inspect --format '{{.State.Running}}' "$container_id")" || return 1
   if [[ "$running" != "true" ]]; then
     echo "Required Judge service is not running: $service" >&2
     return 1
   fi
 
-  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id")"
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id")" || return 1
   if [[ -n "$health" && "$health" != "healthy" ]]; then
     echo "Required Judge service is not healthy: $service ($health)" >&2
     return 1
@@ -200,7 +217,7 @@ fi
 
 verify_sandbox_http() {
   local sandbox_id
-  sandbox_id="$(compose ps -q go-judge)"
+  sandbox_id="$(compose ps -q go-judge)" || return 1
   # Executorserver has no repository-defined health path. Accepting either a
   # success or an HTTP error response still proves its local HTTP listener is
   # reachable without publishing port 5050. wget uses status 8 for HTTP 4xx/5xx.
@@ -210,7 +227,7 @@ verify_sandbox_http() {
 
 verify_sandbox_grpc() {
   local sandbox_id
-  sandbox_id="$(compose ps -q go-judge)"
+  sandbox_id="$(compose ps -q go-judge)" || return 1
   # executorserver v1.7.1 does not expose grpc_health_v1. A listening private
   # TCP socket is the strongest dependency-free readiness primitive available.
   wait_for_listening_tcp_port "$sandbox_id" 5051
@@ -218,31 +235,97 @@ verify_sandbox_grpc() {
 
 verify_services() {
   local worker_id grpc_port
-  container_is_running go-judge
-  container_is_running judge-worker
-  verify_sandbox_http
-  verify_sandbox_grpc
+  container_is_running go-judge || return 1
+  container_is_running judge-worker || return 1
+  verify_sandbox_http || return 1
+  verify_sandbox_grpc || return 1
 
-  worker_id="$(compose ps -q judge-worker)"
-  grpc_port="$(read_grpc_port)"
-  verify_listening_tcp_port "$worker_id" "$grpc_port"
+  worker_id="$(compose ps -q judge-worker)" || return 1
+  grpc_port="$(read_grpc_port)" || return 1
+  wait_for_listening_tcp_port "$worker_id" "$grpc_port"
+}
+
+worker_id() {
+  local ids named
+  ids="$(docker ps --all --no-trunc -q --filter label=com.docker.compose.service=judge-worker)" || return 1
+  if [[ -z "$ids" ]]; then
+    return 0
+  fi
+  named="$(docker inspect --format '{{.Id}}' judge_worker)" || return 1
+  if [[ "$ids" != "$named" ]]; then
+    echo "Expected exactly one managed Judge Worker container." >&2
+    return 1
+  fi
+  printf '%s\n' "$named"
+}
+
+worker_stopped() {
+  local id state
+  id="$(worker_id)" || return 1
+  [[ -n "$id" ]] || return 0
+  state="$(docker inspect --format '{{.State.Status}} {{.HostConfig.RestartPolicy.Name}}' "$id")" || return 1
+  [[ "$state" == "exited no" || "$state" == "created no" ]]
+}
+
+suspend_worker() {
+  local id
+  id="$(worker_id)" || return 1
+  if [[ -n "$id" ]] && ! worker_stopped; then
+    # Keep the old container stopped even across a Docker daemon restart.
+    # Compose recreation restores the node-owned policy when judging resumes.
+    docker update --restart=no "$id" >/dev/null || return 1
+    docker stop --signal SIGTERM --timeout "${COMPOSE_STOP_TIMEOUT:-30}" "$id" >/dev/null || return 1
+  fi
+  if ! worker_stopped; then
+    echo "Worker suspension could not be verified." >&2
+    return 1
+  fi
+}
+
+planned_settings() {
+  compose config --format json | "$1" worker-settings "$JUDGE_CONFIG" planned
 }
 
 activate() {
-  compose config --quiet
-  compose pull "${JUDGE_SERVICES[@]}"
-  # Limit Compose to the two Judge services. Docker Compose recreates them with
-  # its normal stop signal/timeout; no force-kill or global cleanup is used.
-  compose up -d --force-recreate --timeout "${COMPOSE_STOP_TIMEOUT:-30}" "${JUDGE_SERVICES[@]}"
-  compose ps "${JUDGE_SERVICES[@]}"
-  verify_services
+  local probe="$1" settings="$2" problem running_settings
+  shift 2
+  if ! worker_stopped; then
+    echo "Judge activation requires confirmed Worker suspension." >&2
+    return 1
+  fi
+  running_settings="$(planned_settings "$probe")" || return 1
+  if [[ "$running_settings" != "$settings" ]]; then
+    echo "Judge configuration changed after rollout preflight." >&2
+    return 1
+  fi
+  compose config --quiet || return 1
+  compose pull "${JUDGE_SERVICES[@]}" || return 1
+  compose up -d --wait --wait-timeout 120 --no-deps --force-recreate --timeout "${COMPOSE_STOP_TIMEOUT:-30}" go-judge || return 1
+  verify_sandbox_http || return 1
+  verify_sandbox_grpc || return 1
+
+  # Recheck through the Judge Node's configured private endpoint immediately
+  # before starting the process that joins the Kafka group.
+  problem="${settings%% *}"
+  "$probe" metadata "$problem" "$@" || return 1
+  compose up -d --wait --wait-timeout 120 --no-deps --force-recreate --timeout "${COMPOSE_STOP_TIMEOUT:-30}" judge-worker || return 1
+  compose ps "${JUDGE_SERVICES[@]}" || return 1
+  verify_services || return 1
 }
 
 write_state() {
   local path="$1"
   local value="$2"
-  printf '%s\n' "$value" >"$path.tmp"
+  printf '%s\n' "$value" >"$path.tmp" || return 1
   mv "$path.tmp" "$path"
+}
+
+persist_release() {
+  local previous="$1"
+  if [[ "$previous" != "$requested" ]]; then
+    write_state "$PREVIOUS_TAG_FILE" "$previous" || return 1
+  fi
+  write_state "$CURRENT_TAG_FILE" "$requested"
 }
 
 write_image_override
@@ -252,30 +335,37 @@ if [[ "${ASTRACODE_JUDGE_DEPLOY_DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
-if ! previous="$(detect_current_release)"; then
-  echo "Refusing to mutate Judge containers without a consistent current release tag." >&2
+exec 9>"$STATE_DIR/rollout.lock"
+if ! flock -n 9; then
+  echo "A Judge operation is already running or its lock is unavailable." >&2
   exit 1
 fi
 
-echo "Deploying Judge Node image tag $requested"
-if ! activate; then
-  echo "Judge deployment verification failed for $requested." >&2
-  compose ps "${JUDGE_SERVICES[@]}" || true
-
-  if [[ -n "$previous" && "$previous" != "$requested" ]] && valid_tag "$previous"; then
-    echo "Attempting Judge Node rollback to $previous" >&2
-    requested="$previous"
-    write_image_override
-    activate || echo "Judge rollback activation also failed; operator action is required." >&2
-  else
-    echo "No distinct previous Judge release is available for automatic rollback." >&2
-  fi
-  exit 1
-fi
-
-if [[ -n "$previous" && "$previous" != "$requested" ]]; then
-  write_state "$PREVIOUS_TAG_FILE" "$previous"
-fi
-write_state "$CURRENT_TAG_FILE" "$requested"
-
-echo "Judge Node $requested is healthy."
+case "$operation" in
+  --preflight)
+    previous="$(detect_current_release)"
+    id="$(worker_id)"
+    [[ -n "$id" ]]
+    actual="$(docker inspect --format '{{json .}}' "$id" | "$3" worker-settings "$JUDGE_CONFIG" running)"
+    planned="$(planned_settings "$3")"
+    if [[ "$actual" != "$planned" ]]; then
+      echo "Running and planned Worker endpoints, group or topic disagree." >&2
+      exit 1
+    fi
+    printf '%s\n%s\n' "$previous" "$planned"
+    ;;
+  --suspend)
+    suspend_worker
+    ;;
+  --activate)
+    previous="$3"
+    valid_tag "$previous"
+    echo "Deploying verified Judge release $requested"
+    if ! activate "${@:4}" || ! persist_release "$previous"; then
+      echo "Judge activation failed for $requested." >&2
+      suspend_worker || echo "Could not verify Worker suspension. Operator intervention is required." >&2
+      exit 1
+    fi
+    echo "Judge Node $requested is healthy."
+    ;;
+esac

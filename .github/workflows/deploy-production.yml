@@ -63,6 +63,17 @@ jobs:
             docker buildx imagetools inspect "ghcr.io/${GITHUB_REPOSITORY}/${image}:${IMAGE_TAG}" >/dev/null
           done
 
+      - name: Set up Go for the private contract probe
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.8'
+          cache: false
+
+      - name: Build the deployment probe
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -trimpath -o /tmp/astracode-judge-rollout-probe ./pkg/cmd/judge-rollout-probe
+
       - name: Assemble non-secret node bundles
         run: |
           tar -czf /tmp/astracode-app-deployment.tgz \
@@ -137,77 +148,24 @@ jobs:
           chmod 0600 "$HOME/.ssh/config"
 
       - name: Upload non-secret bundles before activation
+        id: upload
         run: |
-          scp /tmp/astracode-app-deployment.tgz \
-            "astracode-app:/tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz"
-          scp /tmp/astracode-judge-deployment.tgz \
-            "astracode-judge:/tmp/astracode-judge-deployment-${GITHUB_RUN_ID}.tgz"
+          app_dir="$(ssh astracode-app 'mktemp -d /opt/astracode/.deploy/rollout.XXXXXXXX')"
+          judge_dir="$(ssh astracode-judge 'mktemp -d /opt/astracode/.deploy/rollout.XXXXXXXX')"
+          stage_pattern='^/opt/astracode/\.deploy/rollout\.[a-zA-Z0-9]{8}$'
+          [[ "$app_dir" =~ $stage_pattern && "$judge_dir" =~ $stage_pattern ]]
+          scp /tmp/astracode-app-deployment.tgz /tmp/astracode-judge-rollout-probe "astracode-app:$app_dir/"
+          scp /tmp/astracode-judge-deployment.tgz /tmp/astracode-judge-rollout-probe "astracode-judge:$judge_dir/"
+          printf 'app_dir=%s\njudge_dir=%s\n' "$app_dir" "$judge_dir" >> "$GITHUB_OUTPUT"
 
-      - name: Capture currently active Judge release
-        id: judge_before
-        run: |
-          judge_tag="$(
-            ssh astracode-judge 'bash -s' <<'REMOTE'
-          set -Eeuo pipefail
-
-          valid_tag() {
-            [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
-          }
-
-          state_tag=""
-          if [[ -r /opt/astracode/.deploy/judge/current-image-tag ]]; then
-            state_tag="$(tr -d '\r\n' </opt/astracode/.deploy/judge/current-image-tag)"
-          fi
-
-          if valid_tag "$state_tag"; then
-            printf '%s\n' "$state_tag"
-            exit 0
-          fi
-
-          image="$(docker inspect --format '{{.Config.Image}}' judge_worker 2>/dev/null || true)"
-          if [[ "$image" == *:* ]]; then
-            image_tag="${image##*:}"
-          else
-            image_tag=""
-          fi
-
-          if ! valid_tag "$image_tag"; then
-            echo "Unable to determine a valid semantic release tag for the running Judge Worker." >&2
-            exit 1
-          fi
-
-          printf '%s\n' "$image_tag"
-          REMOTE
-          )"
-          printf 'tag=%s\n' "$judge_tag" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy and verify Judge Node first
+      - name: Suspend judging and deploy the verified App and Judge pair
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          APP_UPLOAD_DIR: ${{ steps.upload.outputs.app_dir }}
+          JUDGE_UPLOAD_DIR: ${{ steps.upload.outputs.judge_dir }}
+          PROBE_PROBLEM_ID: ${{ vars.PROD_JUDGE_PROBE_PROBLEM_ID }}
+          PROBE_TIME_LIMIT_MS: ${{ vars.PROD_JUDGE_PROBE_TIME_LIMIT_MS }}
+          PROBE_MEMORY_LIMIT_KIB: ${{ vars.PROD_JUDGE_PROBE_MEMORY_LIMIT_KIB }}
         run: |
-          ssh astracode-judge \
-            "mkdir -p /opt/astracode && tar -xzf /tmp/astracode-judge-deployment-${GITHUB_RUN_ID}.tgz -C /opt/astracode && rm -f /tmp/astracode-judge-deployment-${GITHUB_RUN_ID}.tgz && /opt/astracode/scripts/deploy-judge-node.sh '$IMAGE_TAG'"
-
-      - name: Deploy App Node or roll back Judge Node
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
-          PREVIOUS_JUDGE_TAG: ${{ steps.judge_before.outputs.tag }}
-        run: |
-          if ssh astracode-app \
-            "tar -xOf /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz scripts/deploy-app-bundle.py | python3 - '$IMAGE_TAG' /tmp/astracode-app-deployment-${GITHUB_RUN_ID}.tgz"; then
-            exit 0
-          else
-            app_status=$?
-          fi
-
-          if [[ "$PREVIOUS_JUDGE_TAG" == "$IMAGE_TAG" ]]; then
-            echo "App deployment failed; Judge was already running $IMAGE_TAG, so no Judge restoration is needed." >&2
-            exit "$app_status"
-          fi
-
-          echo "App deployment failed; restoring Judge to pre-workflow release $PREVIOUS_JUDGE_TAG." >&2
-          if ! ssh astracode-judge "/opt/astracode/scripts/deploy-judge-node.sh '$PREVIOUS_JUDGE_TAG'"; then
-            echo "Judge restoration also failed; operator intervention is required." >&2
-            exit 1
-          fi
-          exit "$app_status"
+          python3 scripts/deploy-release-transition.py "$IMAGE_TAG" "$APP_UPLOAD_DIR" "$JUDGE_UPLOAD_DIR" \
+            "$PROBE_PROBLEM_ID" "$PROBE_TIME_LIMIT_MS" "$PROBE_MEMORY_LIMIT_KIB"

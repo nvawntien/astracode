@@ -185,8 +185,11 @@ jobs:
           bash -n scripts/envoy-runtime.sh
           python3 -c 'import ast; from pathlib import Path; ast.parse(Path("scripts/deploy-app-bundle.py").read_text())'
           bash -n scripts/deploy-judge-node.sh
+          bash -n scripts/verify-judge-rollout-app.sh
           bash -n scripts/deploy-production.sh
           bash -n infra/kafka/kafka-init.sh
+          python3 scripts/deploy-release-transition_test.py
+          bash scripts/deploy-judge-node_test.sh
 
           grep -Fqx 'readonly KAFKA_READY_MAX_ATTEMPTS=30' infra/kafka/kafka-init.sh
           grep -Fqx 'readonly KAFKA_READY_RETRY_SECONDS=2' infra/kafka/kafka-init.sh

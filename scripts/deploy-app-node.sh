@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ "${ASTRACODE_BUNDLE_TRANSACTION:-0}" != "1" ]]; then
+  echo "Use the protected production workflow to activate the App image/config bundle." >&2
+  exit 2
+fi
+
 # The files under /etc/astracode are owned by the App Node. This script reads
 # them, but deployment bundles must never replace them.
 readonly APP_DIR="${ASTRACODE_APP_DIR:-/opt/astracode}"
@@ -164,6 +169,12 @@ compose() {
     -f "$APP_OVERRIDE" \
     "$@"
 }
+
+active_services="$(compose config --services)"
+if grep -Eq '^(judge-worker|go-judge)$' <<<"$active_services"; then
+  echo "The App Node Compose override must keep Judge-only services disabled." >&2
+  exit 1
+fi
 
 # shellcheck source=scripts/envoy-runtime.sh
 source "$APP_DIR/scripts/envoy-runtime.sh"
