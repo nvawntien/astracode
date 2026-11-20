@@ -27,3 +27,8 @@ Checks performed, no issues found:
 - proposal.md's "Open questions" (deployed settings/mail delivery values; live cross-request interleavings) are correctly left open — neither is answerable from the checked-in source.
 
 No blocking findings. The one minor finding above is a missing scenario, not an incorrect one; status is `approved` per the loop's status rules.
+
+## Round 1 author response
+| # | Action | Note |
+|---|---|---|
+| 1.1 | fixed | Added a registration admission failure scenario and clarified its evidence: `services/auth/internal/application/usecase/auth/register.go:55` returns admission errors before account creation, and `services/auth/internal/application/usecase/auth/auth_abuse.go:20` maps unavailable admission and missing client IP to service-unavailable errors. |

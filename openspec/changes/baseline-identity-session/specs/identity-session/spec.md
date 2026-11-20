@@ -96,6 +96,10 @@ The system SHALL apply configured registration quotas by client IP and by client
 - **WHEN** admission for verification resend or password recovery cannot be established because trusted client IP information or the admission store is unavailable
 - **THEN** the action returns generic success without sending mail
 
+#### Scenario: Registration admission cannot be checked
+- **WHEN** registration admission cannot be established because trusted client IP information or the admission store is unavailable
+- **THEN** registration fails with a service-unavailable error without creating an account
+
 ### Requirement: Sign-in credentials and account eligibility
 
 The system SHALL use a trimmed and lowercased username or email identifier to find an account for sign-in. It SHALL require an active, unsuspended account and a matching password before issuing session credentials.
