@@ -29,8 +29,12 @@ The system SHALL let Guests and signed-in viewers request public aggregate stati
 - **THEN** the response is not found and statistics are not read for the account
 
 #### Scenario: Visibility cannot be verified
-- **WHEN** the identity lookup fails because it is unavailable or reaches its own timeout while the request is still active
+- **WHEN** the identity lookup fails because it is unavailable or reaches its own timeout while the request is still active, other than a cancellation response
 - **THEN** the request reports temporary unavailability without reading or returning aggregates
+
+#### Scenario: Identity lookup returns cancellation
+- **WHEN** the identity lookup returns a cancellation response while the request is still active
+- **THEN** the request reports an internal error without reading or returning aggregates
 
 ### Requirement: Statistics response contains aggregates
 

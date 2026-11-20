@@ -25,6 +25,7 @@ This is a documentation baseline. The change adds OpenSpec deltas and review art
 
 ## Findings
 
+- A cancellation response from the identity lookup while the public statistics request remains active is reported as an internal error instead of temporary unavailability. See `grpcPublicUserResolver.ResolvePublicUser` and `response.HandleError`.
 - Public statistics resolve visibility before reading aggregates. A suspension between those two operations can leave an already admitted request reading that account's statistics. The next request resolves visibility again. See `getPublicProfileStatsUseCase.Execute` and `resolvePublicUserUseCase.Execute`.
 - The totals, verdict, language, and activity reads are separate queries on the profile request path. Concurrent submissions or verdict changes can make the sections reflect different moments. See `submissionRepository.GetUserProfileStats`.
 - Avatar replacement attempts cleanup but ignores deletion errors, both when discarding a new upload after a failed profile write and when removing the old avatar after success. This can leave an unreferenced object. The upload checks the detected media type from the first 512 bytes rather than decoding the complete image. See `uploadAvatarUseCase.Execute`.

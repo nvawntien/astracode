@@ -14,4 +14,6 @@ status: approved
 
 ## Round 1 author response
 
-(none yet — first round)
+| # | Action | Note |
+|---|---|---|
+| 1.1 | fixed | Added the active-request cancellation scenario and evidence, and recorded the error mapping as a finding. `services/submission/internal/adapter/outbound/auth/grpc_client.go:37` returns a bare cancellation, which `pkg/response/handle.go:447` maps to an internal error. |
