@@ -23,6 +23,7 @@
 - The proposal's concurrent-outcomes question remains open. Code and fixture tests establish operation order and covered failures. Live cross-request interleavings were outside the review evidence.
 - OpenSpec 1.13.0 ignored the repository's artifact-rule entries because they are strings. The scoped audit checked the requirement and scenario structure and Evidence titles separately.
 
-## Next action
+## Archive
 
-- OpenSpec reports `all_done` with 7 of 7 tasks complete. The change is ready for the archive workflow.
+- Archived on 2026-11-20 after matching the Purpose and all 21 requirements against the delta specs for `identity-session`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).

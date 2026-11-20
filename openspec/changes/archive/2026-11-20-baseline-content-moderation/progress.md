@@ -20,6 +20,7 @@
 - Proposal OQ-2 remains open for concurrent package replacement and partial-failure recovery. Payload integrity and deleted-slug reuse were reviewed from source. The PostgreSQL probe covered the tag create/read path with fixture claims.
 - Existing website lint warnings and the confirmed inactive-tag defect do not block this documentation baseline.
 
-## Next action
+## Archive
 
-- The reviewed baseline is ready for merge review.
+- Archived on 2026-11-20 after matching the Purpose and all 21 requirements against the delta specs for `content-moderation`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).

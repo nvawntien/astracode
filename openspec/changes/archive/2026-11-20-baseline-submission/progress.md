@@ -27,6 +27,7 @@
 - The website build reported existing lint warnings. OpenSpec apply ignores the existing artifact rules because their values are strings.
 - Rejudge concurrency and rollback tests use fixtures. Real PostgreSQL snapshots, Redis cooldown integration, deployed behavior and external historical-Attempt consumers remain outside this review's runtime evidence.
 
-## Next action
+## Archive
 
-- The verified baseline is ready for archive through OpenSpec.
+- Archived on 2026-11-20 after matching the Purpose and all 22 requirements against the delta specs for `submission`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).

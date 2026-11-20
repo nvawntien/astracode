@@ -23,9 +23,10 @@
 - No failing local checks. Verification used Go `1.27.0-X:nodwarf5`; the script warned that the expected version is `1.25.8`. Existing website lint warnings remain.
 - No live Sandbox/deployment execution was verified; effective environment overrides, installed toolchains, and intended future configuration enforcement remain open questions.
 
-## Next action
-- Next task: reviewer review of this baseline and its Findings/Open questions; no implementation task remains in this change.
-- Do not touch: code, `docs/`, main specs, other changes, production configuration; do not merge or archive.
+## Archive
+
+- Archived on 2026-11-20 after matching the Purpose and all 19 requirements against the delta specs for `code-run`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).
 
 ## Notes for the reviewer
 - Evidence distinguishes source review from existing test coverage; passing unit/race tests do not establish live execution or resource enforcement.

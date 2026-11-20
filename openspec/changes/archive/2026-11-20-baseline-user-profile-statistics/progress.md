@@ -22,6 +22,7 @@
 - Live PostgreSQL aggregate isolation and the effects of a visibility or verdict change during a request remain unverified. Fixture and mock tests cover the request flow, query shape, and result mapping.
 - Deployed avatar URL reachability and caching after replacement or suspension, plus object cleanup under live storage failures, remain unverified. The tests cover scoped writes and the storage outcomes were reviewed in source.
 
-## Next action
+## Archive
 
-- All seven review tasks are complete. The change is ready for archive.
+- Archived on 2026-11-20 after matching the Purpose and all 15 requirements against the delta specs for `statistics`, `user-profile`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).

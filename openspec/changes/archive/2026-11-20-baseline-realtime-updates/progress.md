@@ -22,6 +22,7 @@
 
 - The proposal Findings and deployment question remain in place. Transaction doubles do not establish real PostgreSQL commit-fault behavior. Cross-instance delivery, deployed gateway timing and configuration, and browser acceptance remain unverified. The website build reported existing lint warnings.
 
-## Next action
+## Archive
 
-- The documentation baseline is ready for a separate archive step.
+- Archived on 2026-11-20 after matching the Purpose and all 17 requirements against the delta specs for `realtime-updates`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).

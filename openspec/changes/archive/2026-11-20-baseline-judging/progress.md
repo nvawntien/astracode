@@ -22,6 +22,7 @@
 
 - The tests use fixtures and doubles. Live Sandbox syscall and network enforcement, live Kafka delivery and external DLT recovery, and deployed C++ and Python versions remain unverified. The website build reported existing lint warnings.
 
-## Next action
+## Archive
 
-- The documentation baseline is ready for a separate archive step.
+- Archived on 2026-11-20 after matching the Purpose and all 24 requirements against the delta specs for `judging`.
+- `openspec validate --all --strict --no-interactive` passed (9 items, zero failures).
