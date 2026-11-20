@@ -7,18 +7,18 @@ Describe the current behavior of coding-problem authoring, Contributor ownership
 ## ADDED Requirements
 
 ### Requirement: CM-01 Authoring and moderation roles
-The system SHALL permit authenticated Contributors, Moderators, and Admins to create coding problems and access authoring operations subject to ownership checks. It SHALL reserve arbitrary problem listing, publish/hide, and tag administration for Moderators and Admins.
+The system SHALL permit authenticated Contributors, Moderators, and Admins to create coding problems and submit authoring mutations subject to ownership and visibility checks. It SHALL reserve publication and hiding for Moderators and Admins.
 
 #### Scenario: Base-role user attempts authoring
 - **WHEN** a User without Contributor, Moderator, or Admin role attempts to create a coding problem
 - **THEN** the system denies the operation
 
 #### Scenario: Contributor attempts a moderation action
-- **WHEN** a Contributor attempts arbitrary administrative problem listing, publication, hiding, or tag administration
+- **WHEN** a Contributor attempts to publish or hide a coding problem
 - **THEN** the system denies the operation
 
 #### Scenario: Missing authenticated identity
-- **WHEN** an authoring or moderation operation has no authenticated identity
+- **WHEN** an authoring mutation, publication, or hiding is requested without an authenticated identity
 - **THEN** the system rejects it before performing the operation
 
 ### Requirement: CM-02 Contributor Workspace access and states
@@ -52,24 +52,19 @@ The system SHALL create each new coding problem as a hidden Draft owned by the a
 - **WHEN** a Moderator or Admin successfully creates a coding problem
 - **THEN** the new problem is also hidden and owned by the authenticated creator
 
-### Requirement: CM-04 Own contributions discovery
-The system SHALL list only the authenticated author's undeleted coding problems, including hidden and Published items, newest first. It SHALL support title/slug search, difficulty and tag filters, pagination, and a matching total; omitted pagination SHALL use page one and twenty items, with supplied page sizes limited to one through one hundred.
+### Requirement: CM-04 Contributor Workspace navigation
+The Contributor Workspace SHALL label returned hidden contributions as Draft and link to the draft editor. It SHALL label returned Published contributions as Published and link to their contribution detail and public problem.
 
-#### Scenario: Author has hidden and Published contributions
-- **WHEN** an authorized author lists their contributions
-- **THEN** the result includes both states for that author and excludes other authors' and deleted problems
-- **AND** includes the total and pagination information
+#### Scenario: Workspace displays both contribution states
+- **WHEN** the workspace receives a hidden and a Published contribution
+- **THEN** the hidden item has an Edit draft action and the Published item has Open and View problem actions
 
-#### Scenario: Filtered own contributions
-- **WHEN** the author supplies a search term, difficulty, or tag filter
-- **THEN** the result and total apply those filters within that author's contributions
+### Requirement: CM-05 Ownership and draft mutation
+The system SHALL permit a Contributor to edit or delete only their own hidden problem. Moderators and Admins SHALL be allowed to edit or delete any undeleted problem regardless of author and visibility.
 
-### Requirement: CM-05 Author detail access and draft mutation
-The system SHALL allow a Contributor to read authoring detail for their own hidden or Published problem, but SHALL permit them to edit or delete only their own hidden problem. Moderators and Admins SHALL be allowed these operations regardless of author and visibility.
-
-#### Scenario: Contributor reads another author's problem
-- **WHEN** a Contributor requests another author's authoring detail
-- **THEN** the system denies access
+#### Scenario: Contributor mutates another author's draft
+- **WHEN** a Contributor attempts to edit or delete another author's hidden problem
+- **THEN** the system denies the operation
 
 #### Scenario: Contributor edits a Published problem
 - **WHEN** a Contributor attempts to edit or delete their own Published problem
@@ -80,11 +75,15 @@ The system SHALL allow a Contributor to read authoring detail for their own hidd
 - **THEN** the system accepts the edit without requiring the problem to be hidden first
 
 ### Requirement: CM-06 Structured problem authoring
-The system SHALL keep description, input format, output format, examples, constraints, and hints as separate authoring content. Creation SHALL require a title and description of at least three characters before trimming, nonblank trimmed prose fields, a valid difficulty, and at least one example containing input and expected output.
+The system SHALL keep description, input format, output format, examples, constraints, and hints as separate authoring content. Creation SHALL require a title and description of at least three characters before trimming, nonblank trimmed prose fields, a valid difficulty, and at least one example containing input and expected output. A legacy example output SHALL supply the expected output when the current value is empty.
 
 #### Scenario: Incomplete creation content
-- **WHEN** creation omits an input format, output format, or example, or provides an example with empty input or expected output
+- **WHEN** creation omits an input format, output format, or example, or provides an example with empty input or with neither current nor legacy expected output
 - **THEN** the system rejects creation
+
+#### Scenario: Legacy example output supplies the expected output
+- **WHEN** an otherwise valid creation request supplies an example with empty current expected output and a nonempty legacy output
+- **THEN** the system accepts and stores the legacy value as the expected output
 
 #### Scenario: Creation normalizes prose and difficulty
 - **WHEN** otherwise valid creation supplies surrounding whitespace in prose or a differently cased difficulty
@@ -98,7 +97,7 @@ The system SHALL keep description, input format, output format, examples, constr
 - **AND** submitted prose and constraint/hint entries are trimmed while example input/output text is preserved
 
 ### Requirement: CM-07 Creation and edit execution limits
-The system SHALL default missing or nonpositive creation limits to a numeric time limit of 1000 and memory limit of 256, without imposing the edit bounds on positive creation values. Supplied edit limits SHALL require time greater than zero and at most 30, and memory from 16 through 1024. The website SHALL initially use time 1 and memory 256, with time controls bounded from 1 through 30 and memory from 16 through 1024 for creation and editing.
+The system SHALL default missing or nonpositive creation limits to a numeric time limit of 1000 and memory limit of 256, without imposing the edit bounds on positive creation values. Supplied edit limits SHALL require time greater than zero and at most 30, and memory from 16 through 1024. The website SHALL initialize new forms with time 1 and memory 256 and edit forms with stored limits. Both forms SHALL use controls bounded from 1 through 30 for time and 16 through 1024 for memory.
 
 #### Scenario: Creation uses defaults
 - **WHEN** valid creation omits limits or supplies nonpositive values
@@ -124,7 +123,7 @@ The system SHALL derive a new problem's slug by lowercasing its title, replacing
 - **THEN** the system reports a conflict instead of choosing a suffix
 
 ### Requirement: CM-09 Partial updates preserve omitted content
-The system SHALL replace only supplied authoring fields during an update and preserve omitted fields. Updating a title alone SHALL preserve the existing slug. Content edits SHALL preserve the author and visibility; publication and hiding SHALL remain separate actions.
+For a sequential edit, the system SHALL apply only supplied authoring changes and preserve omitted values, including the existing slug when only the title changes. Content edits SHALL preserve the author and existing visibility.
 
 #### Scenario: Title-only edit
 - **WHEN** an authorized author supplies only a valid replacement title
@@ -135,7 +134,7 @@ The system SHALL replace only supplied authoring fields during an update and pre
 - **THEN** the supplied list is cleared rather than treated as omitted
 
 #### Scenario: Invalid replacement content
-- **WHEN** an edit supplies an empty examples list, an example with empty input/output, blank required prose, or an invalid difficulty
+- **WHEN** an edit supplies an empty examples list, an example with empty input or with neither current nor legacy expected output, blank required prose, or an invalid difficulty
 - **THEN** the system rejects the edit
 
 ### Requirement: CM-10 Active tag assignment
@@ -151,23 +150,26 @@ The system SHALL accept at most twenty supplied positive tag identifiers for a c
 - **AND** a subsequent explicit empty selection removes all attached tags
 
 ### Requirement: CM-11 Problem deletion
-The system SHALL remove an authorized deleted problem from subsequent authoring detail and management lists while retaining its deletion state. Contributor deletion SHALL require an owned hidden problem; Moderator/Admin deletion SHALL also allow Published problems.
+An authorized problem deletion SHALL mark the problem deleted. The operation SHALL leave its testcase package storage and metadata untouched.
 
 #### Scenario: Delete an owned Draft
 - **WHEN** a Contributor successfully deletes their hidden problem
-- **THEN** subsequent authoring detail reports it missing and their contribution list excludes it
+- **THEN** a subsequent edit of that problem reports it missing
 
-#### Scenario: Staff deletes a Published problem
-- **WHEN** a Moderator or Admin successfully deletes another author's Published problem
-- **THEN** authoring detail and administrative problem listing no longer return it
+#### Scenario: Staff deletes a Published problem with a package
+- **WHEN** a Moderator or Admin successfully deletes another author's Published problem with a testcase package
+- **THEN** the problem is marked deleted without removing the stored package or its metadata
 
-### Requirement: CM-12 Administrative problem catalog
-The system SHALL let Moderators and Admins list undeleted problems from all authors, including hidden and Published problems, newest first, with author and visibility information. Administrative listing SHALL support title/slug search, difficulty and tag filters, matching totals, and pagination defaulting to page one and twenty items with supplied sizes from one through one hundred.
+### Requirement: CM-12 Admin Console row actions
+The Admin Console SHALL restrict access to problem management to Moderators and Admins. It SHALL give staff access to editing and deletion from each returned problem row, offer publication for a hidden problem, and offer hiding for a Published problem.
 
-#### Scenario: Mixed-author administrative listing
-- **WHEN** a Moderator or Admin lists problems without an author restriction
-- **THEN** hidden and Published problems from different authors are eligible for inclusion
-- **AND** the returned list and total apply the requested filters and pagination
+#### Scenario: Lower role opens administrative problem management
+- **WHEN** a signed-in User or Contributor opens administrative problem management
+- **THEN** the console denies access to the management page
+
+#### Scenario: Console displays both visibility states
+- **WHEN** the console receives a hidden and a Published problem
+- **THEN** both rows provide Open and Delete actions, the hidden row provides Publish, and the Published row provides Hide
 
 ### Requirement: CM-13 Publication
 The system SHALL let a Moderator or Admin publish an undeleted problem if none of its attached tags is inactive. Publication SHALL NOT require a testcase package, Reference solution, Automatic pre-check, or prior review decision.
@@ -211,25 +213,25 @@ The system SHALL allow a Contributor to read testcase metadata for their own hid
 - **THEN** the system permits the replacement
 
 ### Requirement: CM-16 Testcase archive structure
-The system SHALL require a readable, nonempty ZIP with root-level numbered input and output entries using lowercase input/output suffixes. Testcase numbers SHALL be positive and consecutive from one, with exactly one input and one expected output per number. Directories, nested paths, unrelated entries, duplicate numeric inputs/outputs, and unmatched pairs SHALL be rejected.
+The system SHALL require a nonempty ZIP with readable archive structure and root-level numbered input and output entries using lowercase input/output suffixes. Testcase numbers SHALL be positive and consecutive from one, with exactly one input and one expected output per number. Directories, nested paths, unrelated entries, duplicate numeric inputs/outputs, and unmatched pairs SHALL be rejected.
 
 #### Scenario: Consecutive complete pairs
 - **WHEN** an authorized upload contains complete root-level input/output pairs numbered consecutively from one
 - **THEN** the archive passes structural validation and the test count equals the number of pairs
 
 #### Scenario: Invalid structure
-- **WHEN** the ZIP is empty or unreadable, contains a directory or nested path, uses an invalid entry name or nonpositive number, duplicates a numeric input/output, has an unmatched pair, or skips a number
+- **WHEN** the ZIP is empty, its archive structure cannot be read, it contains a directory or nested path, it uses an invalid entry name or nonpositive number, it duplicates a numeric input/output, it has an unmatched pair, or it skips a number
 - **THEN** the system rejects the upload as an invalid testcase package
 
 ### Requirement: CM-17 Testcase archive bounds
-The system SHALL reject an uploaded testcase ZIP larger than 50 MiB, an archive containing more than 2000 entries, or entries whose declared total uncompressed size exceeds 100 MiB.
+The system SHALL reject an uploaded testcase ZIP larger than 50 MiB or containing more than 2000 entries. It SHALL check a running sum of the declared uncompressed sizes against a 100 MiB limit and reject the archive if the running sum exceeds that limit.
 
 #### Scenario: Oversized uploaded archive
 - **WHEN** the uploaded ZIP is larger than 50 MiB
 - **THEN** the system rejects it before accepting a replacement package
 
 #### Scenario: Excessive entry count or declared size
-- **WHEN** an archive contains more than 2000 entries or declares over 100 MiB of total uncompressed data
+- **WHEN** an archive contains more than 2000 entries or contains otherwise valid entries whose declared sizes add up to 101 MiB
 - **THEN** the system rejects the upload
 
 ### Requirement: CM-18 Sequential testcase replacement and versions
@@ -244,7 +246,7 @@ The system SHALL maintain one current testcase package per problem. A first succ
 - **THEN** the new package starts again at version one
 
 ### Requirement: CM-19 Testcase metadata confidentiality and absence
-The system SHALL return only package identifiers, test count, version, and timestamps in authoring testcase metadata, without private inputs, expected outputs, storage locations, or download access. Authoring problem detail SHALL indicate when a package is absent; a separate metadata lookup for an absent package SHALL report it missing.
+Authoring testcase metadata SHALL contain package identifiers, test count, version, and timestamps, without private inputs, expected outputs, storage locations, or download access. Authoring problem detail SHALL indicate whether a package exists, and a separate metadata lookup for an absent package SHALL report it missing.
 
 #### Scenario: Metadata for an existing package
 - **WHEN** an authorized actor requests testcase metadata or authoring problem detail
@@ -256,7 +258,7 @@ The system SHALL return only package identifiers, test count, version, and times
 - **AND** a separate package-metadata lookup reports the package missing
 
 ### Requirement: CM-20 Testcase package deletion
-The system SHALL report successful package deletion only after removing the stored package and its metadata. It SHALL report a missing package when none exists and report an error if package removal or metadata deletion fails.
+The system SHALL request removal of the stored package before deleting its metadata. It SHALL report a missing package when its metadata is absent and report an error if storage removal or metadata deletion fails.
 
 #### Scenario: Successful package deletion
 - **WHEN** an authorized actor successfully deletes an existing testcase package
@@ -266,53 +268,20 @@ The system SHALL report successful package deletion only after removing the stor
 - **WHEN** removal of the stored package fails
 - **THEN** the operation reports an error and does not proceed to delete its metadata
 
-### Requirement: CM-21 Administrative tag inventory
-The system SHALL let Moderators and Admins list both active and inactive undeleted tags, ordered by name, with their names, slugs, descriptions, active states, and creation/update times.
-
-#### Scenario: Mixed active-state inventory
-- **WHEN** a Moderator or Admin lists administrative tags
-- **THEN** the result includes active and inactive tags and their management metadata
-
-### Requirement: CM-22 Tag creation and editing
-The system SHALL let Moderators and Admins create and edit tags, trimming names and descriptions, rejecting blank names, and reporting duplicate slugs as conflicts. Slugs SHALL be normalized to lowercase ASCII letters/digits and hyphens with a generic fallback; omitted creation slugs SHALL derive from the name. Tags SHALL default to active when creation omits an active-state choice. When creation explicitly requests an inactive tag, the create response SHALL report it inactive while the persisted tag is active.
-
-#### Scenario: Default tag creation
-- **WHEN** a Moderator creates a valid tag without specifying a slug or active state
-- **THEN** the system derives a normalized slug from its trimmed name and creates an active tag
-
-#### Scenario: Explicitly inactive tag creation
-- **WHEN** a Moderator successfully creates a tag with the active state explicitly set to false
-- **THEN** the create response reports it inactive, but a subsequent read reports it active
-
-#### Scenario: Duplicate slug or blank name
-- **WHEN** tag creation or editing supplies a slug already in use or a whitespace-only name
-- **THEN** the system reports a conflict or invalid-name error respectively
-
-#### Scenario: Partial tag edit
-- **WHEN** an Admin edits only a tag's description or explicitly reactivates an inactive tag
-- **THEN** the supplied change is saved and omitted tag fields remain unchanged
-
-### Requirement: CM-23 Tag deactivation and Published usage
-The system SHALL treat tag deletion as deactivation while retaining the tag and its problem associations. It SHALL reject deactivation of an active tag attached to an undeleted Published problem, whether requested as deletion or as an active-state edit.
-
-#### Scenario: Tag is used only by hidden problems
-- **WHEN** a Moderator deactivates an active tag attached only to hidden problems
-- **THEN** the tag becomes inactive, remains in administrative inventory, and stays attached to those problems
-
-#### Scenario: Tag is used by a Published problem
-- **WHEN** an Admin attempts to delete or disable an active tag attached to an undeleted Published problem
-- **THEN** the system rejects deactivation and keeps the tag active
-
 ### Requirement: CM-24 Management controls and mutation feedback
-The website SHALL expose administrative create/edit, publish/hide, and confirmed problem-deletion actions, plus testcase upload/replacement and confirmed deletion where a package manager is shown. It SHALL show mutation failures, prevent duplicate in-flight mutations within each control, and reload the affected listing or detail after successful management mutations.
+The website SHALL ask for confirmation before staff deletes a problem or an authorized user deletes a testcase package through the package manager. It SHALL show mutation failures and prevent duplicate in-flight requests within each problem form, administrative list, and package manager. On success, it SHALL report the mutation and refresh the affected listing or detail, or open the new problem's detail after creation.
 
 #### Scenario: Delete confirmation
-- **WHEN** a staff user chooses problem deletion or an authorized author chooses package deletion
+- **WHEN** a staff user chooses problem deletion or an authorized user chooses package deletion
 - **THEN** the website asks for confirmation before performing that deletion
 
 #### Scenario: Package or visibility mutation succeeds
-- **WHEN** a package upload/replacement/deletion or administrative publish/hide action succeeds
+- **WHEN** a package or administrative visibility action and its required follow-up reads succeed
 - **THEN** the website reports success and reloads the affected problem detail or administrative list
+
+#### Scenario: A problem is created
+- **WHEN** the Contributor Workspace or Admin Console successfully creates a problem
+- **THEN** the website reports success and opens the new problem's detail in the same workspace or console
 
 #### Scenario: Management mutation fails
 - **WHEN** a management request fails

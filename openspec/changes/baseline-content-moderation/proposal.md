@@ -6,10 +6,10 @@ Record the current content-moderation behavior at source revision `728aef2` so l
 
 ## What Changes
 
-- Add `content-moderation` requirements for Contributor drafts and ownership, structured coding-problem authoring, draft testcase packages, publish/hide, and administrative problem/tag management.
+- Add `content-moderation` requirements for Contributor drafts and ownership, structured coding-problem authoring, testcase packages, publish/hide, and administrative problem management.
 - Record both server-side decisions and the Contributor Workspace/Admin Console behavior, including current validation differences.
 - Add one implementation-evidence row per requirement and review-only tasks.
-- Keep catalog read behavior owned by `problem-catalog`; reference that capability without specifying its behavior.
+- Depend on `problem-catalog` for own and staff listing, privileged problem reads, and tag taxonomy. This baseline covers how those results are used in the management UI, tag assignment during authoring, and the inactive-tag publication check.
 
 ## Capabilities
 
@@ -32,14 +32,15 @@ None.
 ## Findings
 
 1. **Terminology drift:** the glossary marks Contributor deprecated, but both the service and website still implement that role. The baseline uses Contributor in that existing-code sense. The current lifecycle is hidden/published, not Pending, Claim, In review, Changes requested, or Rejected. A previously Published problem that is Hidden becomes editable by its Contributor author again.
-2. **Execution-limit mismatch:** creation defaults a missing/nonpositive time limit to `1000` and memory to `256`, with no upper-bound validation on positive creation values. Editing accepts time greater than zero and at most `30`, and memory from `16` to `1024`; the website defaults time to `1` and applies the edit bounds to creation too. These values are recorded as observed, not corrected.
+2. **Execution-limit mismatch:** creation defaults a missing or nonpositive time limit to `1000` and memory to `256`, with no upper-bound validation on positive creation values. Editing accepts time greater than zero and at most `30`, and memory from `16` to `1024`. New website forms use time `1` and memory `256`. The browser applies time `1`–`30` in increments of `0.5` and memory `16`–`1024` in both modes.
 3. **Publication has no package/pre-check gate:** publish checks attached tags for inactivity but does not load a testcase package, require a Reference solution, run an Automatic pre-check, or require a review decision. Moderators/Admins may edit Published problems and change their packages directly.
-4. **Package validation is structural:** upload inspects archive entries and declared uncompressed sizes; it does not read/decompress entry payloads to verify their contents or checksums. No payload-integrity guarantee is specified.
+4. **Package validation is structural:** upload checks a running sum of declared uncompressed sizes in a fixed-width counter. The counter has no overflow check. The upload validator does not decompress entry payloads or verify their contents or checksums.
 5. **Package operations are not atomic across storage and metadata:** replacement cleanup is best effort, versions are computed from a read without a concurrency guard, and deletion removes the stored package before deleting its metadata. Deleting a problem only soft-deletes that problem; its use case performs no testcase-package cleanup. No atomicity, concurrent-upload safety, or cleanup-completion guarantee is specified.
 6. **Possible slug reuse conflict:** slug availability reads exclude soft-deleted problems while the slug uniqueness declaration is unconditional. Reusing a deleted problem's slug may therefore fail at persistence instead of receiving an automatically suffixed slug. Runtime reproduction is not claimed.
-7. **Inactive tag creation mismatch:** the configured GORM create path substitutes the boolean default `true` for an explicitly requested `false`, while the response maps the original entity and reports `false`. A later database read therefore returns an active tag. This conclusion follows from source inspection of GORM v1.31.1 and has not been checked against a running database.
+7. **Inactive tag creation mismatch (confirmed on isolated PostgreSQL 15.6):** a valid Moderator request with `is_active=false` returned HTTP 201 and an inactive response. The DAO entered GORM as `false`, but the v1.31.1 create callback bound `true` for the insert. Both a direct query and the tag repository reread returned `true`. Omitted activation returned and persisted `true` in the control case. This is an observed taxonomy defect. Its evidence is recorded in `review.md`; taxonomy requirements belong to `problem-catalog`.
 
 ## Open questions
 
 - **OQ-2 — Concurrent package replacement and failure recovery:** which package survives simultaneous uploads or an object/metadata partial failure in a running deployment? No concurrency/fault-injection evidence was found; requirements cover the sequential successful path and explicit error handling only.
-- **OQ-3 — Future moderation workflow:** when, if ever, will Eligible user submission, Pending/Claim/review decisions, Reference solutions, and Automatic pre-check replace the implemented Contributor/hidden-state workflow? No current implementation was found for those behaviors in the inspected authoring paths, so they are not requirements of this baseline.
+
+The planned review workflow remains outside this baseline. The current authoring paths use Contributor ownership and hidden/Published state.
