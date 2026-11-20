@@ -290,6 +290,8 @@ After a successful compilation supplies an executable artifact, the worker SHALL
 
 For completed execution, the worker SHALL publish the final Verdict correlated with the original Submission and Attempt, together with available aggregate metrics, compilation output or error information, testcase package version, declared total count, and package checksum. Published per-testcase data SHALL contain only the result index, Verdict, and available CPU time and memory usage. Official inputs, expected outputs, actual outputs, standard error, and per-testcase diagnostics SHALL not be included as per-testcase data. Zero CPU-time or memory measurements SHALL be omitted from published metrics.
 
+For a first failing testcase with a RUNTIME_ERROR, the result-level public error message SHALL be derived from its standard error when a nonempty message is available after sanitization, with known internal path prefixes, invalid UTF-8, and control characters other than newline, carriage return, and tab removed, and the message length bounded. This message is separate from the published per-testcase data.
+
 #### Scenario: Failed official testcase
 
 - **WHEN** execution produces WRONG_ANSWER and includes actual and expected output internally
@@ -299,6 +301,11 @@ For completed execution, the worker SHALL publish the final Verdict correlated w
 
 - **WHEN** execution stops before all testcases are retained
 - **THEN** the published package count still describes the declared total, with the package version and checksum and the original Attempt correlation
+
+#### Scenario: Runtime error message
+
+- **WHEN** the first failing testcase has a RUNTIME_ERROR and its standard error yields a nonempty message after sanitization
+- **THEN** the worker publishes a sanitized, length-bounded result-level message derived from that standard error, separate from the testcase summary
 
 ### Requirement: J20 Non-retryable processing failures
 

@@ -34,7 +34,7 @@ No response required: the review is `approved` and no finding is blocking. Findi
 
 | # | Action | Note |
 |---|---|---|
-| 1.1 | | |
-| 1.2 | | |
-| 1.3 | | |
-| 1.4 | | |
+| 1.1 | fixed | Recorded the unused concurrency setting and Compose overrides in proposal Finding 6; `workers/judge/internal/adapter/inbound/kafka/judge_job_consumer.go:48`, `docker-compose.prod.yml:102`. |
+| 1.2 | fixed | Added the runtime-error result-level message and scenario to J19 and updated its evidence; `workers/judge/internal/adapter/outbound/execute/go_judge_client.go:520`, `workers/judge/internal/adapter/outbound/execute/diagnostics.go:149`. |
+| 1.3 | fixed | Recorded the checked-in sandbox configuration and narrowed the deferred question to executor-internal syscall and network enforcement; `docker-compose.yml:195`, `workers/judge/internal/adapter/outbound/execute/go_judge_client.go:368`. |
+| 1.4 | fixed | Recorded the absence of a production DLT replay implementation as proposal Finding 7; `infra/kafka/kafka-init.sh:33`, `workers/judge/internal/adapter/inbound/kafka/dlt_publisher.go:56`. |
