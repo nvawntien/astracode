@@ -290,7 +290,7 @@ After a successful compilation supplies an executable artifact, the worker SHALL
 
 For completed execution, the worker SHALL publish the final Verdict correlated with the original Submission and Attempt, together with available aggregate metrics, compilation output or error information, testcase package version, declared total count, and package checksum. Published per-testcase data SHALL contain only the result index, Verdict, and available CPU time and memory usage. Official inputs, expected outputs, actual outputs, standard error, and per-testcase diagnostics SHALL not be included as per-testcase data. Zero CPU-time or memory measurements SHALL be omitted from published metrics.
 
-For a first failing testcase with a RUNTIME_ERROR, the result-level public error message SHALL be derived from its standard error when a nonempty message is available after sanitization, with known internal path prefixes, invalid UTF-8, and control characters other than newline, carriage return, and tab removed, and the message length bounded. This message is separate from the published per-testcase data.
+For a first failing testcase with a RUNTIME_ERROR, the result-level public error message SHALL be derived from its standard error when a nonempty message is available after sanitization, with known internal path prefixes, invalid UTF-8, and ASCII control characters other than newline, carriage return, and tab removed, and the message length bounded. This message is separate from the published per-testcase data.
 
 #### Scenario: Failed official testcase
 

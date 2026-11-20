@@ -1,28 +1,27 @@
 # progress.md — baseline-judging
 
 ## Verified state
-- Branch / worktree: `feature/baseline-judging`; clean, empty index at session start; changes confined to this directory.
-- Last verify run: `OPENSPEC_TELEMETRY=0 npx --yes --package @fission-ai/openspec@1.13.0 openspec validate baseline-judging --strict` → exit 0, `Change 'baseline-judging' is valid`.
-- Tasks 1.1–1.5: manual code review using `cat` / `sed -n` on the implementing functions in the Evidence table; all five requirement groups reviewed against actual branches and adjacent test assertions.
-- Tasks 1.1–1.5 / 2.2: stdin Node audit → `PASS: 24 ADDED requirements; 55 WHEN/THEN scenarios; 24 matching evidence rows; 17 existing source paths; 63 implementing functions verified.` This checks structure and reference existence, not runtime behaviour.
-- Task 2.1: five findings checked against implementation; all three open questions explicitly deferred with evidence limitations; no unsupported guarantee added.
-- Task 2.2: `git diff --check` → exit 0; requirement and Evidence headings match one-to-one; no source paths or implementation names in the delta.
-- Task 2.3: strict validation output recorded above; all eight tasks are review tasks and have been completed.
 
-## Last session
-- Goal: record current `judging` behaviour with no code change.
-- Changed: `.openspec.yaml`, `proposal.md`, `specs/judging/spec.md`, `design.md`, `tasks.md`, `progress.md` only.
-- Source revision: `728aef24cc0d6f624f79fd612265e904406d3d44`.
+- Verification base is `docs/apply-m0-baselines` at `f89f8ec41ca2668955d835b2a3992b645c913c1c`. The final deltas incorporate review response `9cc7b69` and the J19 clarification below. The cited runtime source matches baseline revision `728aef2`.
+- `GOTOOLCHAIN=go1.25.8 QUICK=1 scripts/verify.sh` passed on the verification base. `GOTOOLCHAIN=go1.25.8 scripts/verify.sh` passed with both final deltas in the same disposable checkout. The full run completed Go tests, vet and race tests, the website typecheck and build, Compose validation, and all eight OpenSpec changes. It ended with `All checks passed`.
+- `openspec validate baseline-judging --strict` exited 0 with `Change 'baseline-judging' is valid`. `openspec validate --all --strict` exited 0 with 8 passed and 0 failed. `git diff --check` and `git diff --name-only` confirmed a whitespace-clean diff confined to the two authorized baselines.
+
+## Task evidence
+
+- Tasks 1.1–1.4 and 2.1 retain their reviewed evidence. The worker, Sandbox build and shared code match the inspected baseline. The proposal retains its seven Findings and two open questions.
+- Task 1.5, J19 source trace. In `workers/judge/internal/adapter/outbound/execute/go_judge_client.go:148`, `Execute` retains the first failure and derives the result-level message via `mapTestCaseResult` and `errorMessageForTestCase`. In `diagnostics.go:149`, `runtimeErrorMessage` prefers a nonempty sanitized runtime diagnostic derived from stderr, then uses a stderr headline. `publicErrorMessage` removes recognized path prefixes, invalid UTF-8 and ASCII controls except newline, carriage return and tab. It bounds the text to a UTF-8-safe prefix of up to 4,096 bytes plus an ellipsis when truncated. J19 now says ASCII controls to match this code.
+- `ProcessJudgeJobUseCase.Execute` forwards the result with the original Submission and Attempt. In `workers/judge/internal/adapter/outbound/judge/kafka_result_publisher.go:36`, `PublishResult` copies the top-level message and maps testcase items to index, Verdict and available metrics.
+- The focused tests `TestRuntimeErrorMessagePrefersDiagnosticAndSanitizes`, `TestRuntimeErrorMessageFallsBackToHeadlineAndTruncates`, `TestKafkaResultPublisherIncludesSanitizedErrorMessageAndAttemptID`, `TestPublishResultDoesNotIncludeHiddenTestcaseData`, and `TestProcessJudgeJobUsesOfficialLoaderSharedExecutorAndSanitizesResult` passed. The helper tests cover diagnostic preference, NUL removal, fallback and truncation. The publisher test supplies the message explicitly and verifies the serialized result. Source review connects these checks to the official first-failure path and establishes the invalid UTF-8 and ASCII ranges.
+- Tasks 2.2–2.3 passed. The independent audit counted 24 ADDED requirements, 56 WHEN/THEN scenarios and 24 matching Evidence rows. All eight review tasks retain their completed status.
+
+## Historical verification
+
+- The 55-scenario count and original strict validation came from `f336dc0`, before `9cc7b69` added the J19 scenario. The original round did source review and skipped the broad repository gate. The results above cover the current delta.
 
 ## Broken or unverified
-- Broad `QUICK=1 scripts/verify.sh` / `scripts/verify.sh` not run: missing local env/dependency prerequisites would cause writes outside the authorized directory. No code tests, live broker, real Sandbox, or deployment validation claimed.
-- Existing OpenSpec config uses string-valued artifact rules; CLI warns and ignores those fields when loading instructions. Config unchanged; applicable readable rules followed.
-- First Node audit invocation hit the default shell's temporary-file quota before running; rerunning through Bash succeeded without changing repository scope.
+
+- The tests use fixtures and doubles. Live Sandbox syscall and network enforcement, live Kafka delivery and external DLT recovery, and deployed C++ and Python versions remain unverified. The website build reported existing lint warnings.
 
 ## Next action
-- Next task: reviewer assessment of this baseline and the recorded findings/questions; commit/push after validation and exclusive staging checks as requested.
-- Do not touch: code, docs, main specs, other changes, production configuration; do not merge or archive.
 
-## Notes for the reviewer
-- Baseline only: 24 ADDED requirements, 55 scenarios; NON-BREAKING, no runtime or interface change.
-- Evidence is source-confirmed behaviour; operational isolation, external DLT recovery, and unpinned compiler/interpreter versions remain open.
+- The documentation baseline is ready for a separate archive step.
