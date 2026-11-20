@@ -22,14 +22,29 @@ python3 envoy/generate.py --check
 `GATEWAY_JWK_FILE` remains the Compose interpolation variable. Production keeps
 its existing `/etc/astracode/symmetric.json`; it is mounted read-only at
 `/source/symmetric.json` in a short-lived, networkless `envoy-jwk` initializer.
-Keep the SAME access secret as Auth and retain canonical file
-mode 0600. Local development defaults to ignored `envoy/symmetric.json`:
+Keep the same access secret as Auth and retain canonical file mode 0600. The
+[local quick start](../README.md#start-the-local-judge-stack) uses
+`go run envoy/gen_jwk.go` with the Compose defaults
+`environment/service.env` and `envoy/symmetric.json`. It creates a missing key
+with mode 0600 or verifies that the existing path is a regular file with
+mode 0600 containing the expected single-key HS256 JWKS. If you override
+`SERVICE_ENV_FILE` or `GATEWAY_JWK_FILE`, use the same paths when checking the
+key.
+
+If validation fails, check the file type, permissions, and local Auth access
+secret. The generator rejects symlinks in both modes. To deliberately replace
+a regular local JWK file, coordinate the secret change with Auth, then run
+from the repository root:
 
 ```bash
-set -a
-source environment/service.env
-set +a
-JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+(
+  set -e
+  set +x
+  unset JWT_ACCESS_SECRET
+  set -a
+  source environment/service.env
+  JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go -replace
+)
 ```
 
 Never publish this symmetric JWK or put it into a deployment bundle. The initializer
@@ -125,6 +140,7 @@ review; the current contract uses the immediate peer.
 ## Verification
 
 ```bash
+go test envoy/gen_jwk.go envoy/gen_jwk_test.go
 python3 envoy/generate.py --check
 python3 envoy/tests/route_parity.py
 python3 envoy/tests/integration.py

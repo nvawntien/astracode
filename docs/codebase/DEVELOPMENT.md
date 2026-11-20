@@ -2,17 +2,22 @@
 
 ## Prerequisites and configuration
 
-Use Go 1.25.8 (the workspace and Docker builders declare it), Docker Engine/Compose, and Node/npm for `website/`. Runtime configs live in `services/*/config/config.yaml` and `workers/judge/config/config.yaml`; Compose reads `environment/postgres.env`, `environment/redis.env`, and `environment/service.env`. Do not commit real secrets. Viper maps dotted config paths to uppercase underscore environment names, such as `DATABASE_PASSWORD` and `JWT_ACCESS_SECRET`.
+Use Go 1.25.8 for Go checks and local JWK generation, Docker Engine/Compose, and Node.js 22.12+ in the Node 22 series with npm for `website/`. Runtime configs live in `services/*/config/config.yaml` and `workers/judge/config/config.yaml`; Compose reads `environment/postgres.env`, `environment/redis.env`, and `environment/service.env`. Do not commit real secrets. Viper maps dotted config paths to uppercase underscore environment names, such as `DATABASE_PASSWORD` and `JWT_ACCESS_SECRET`.
 
 ## Run the full stack
 
-From repository root, provision the ignored `envoy/symmetric.json` using `envoy/gen_jwk.go` and the same `JWT_ACCESS_SECRET` as Auth (see [gateway setup](../../envoy/README.md)). Then:
+The quick start copies missing local env files from their templates and uses
+`JWT_ACCESS_SECRET` from `environment/service.env` to create or verify the
+ignored `envoy/symmetric.json`. A mismatch stops startup and leaves the key
+file intact. [Local stack quick start](../../README.md#start-the-local-judge-stack)
 
-```bash
-docker compose --profile dev --profile worker up -d --build
-docker compose ps
-docker compose down
-```
+On startup, the `envoy-jwk` service copies that host file into a named volume
+for Envoy and must finish successfully before Envoy starts. If you change the
+local Auth access secret, regenerate the key and activate it explicitly.
+[Envoy key setup and activation](../../envoy/README.md#configuration-and-secrets)
+
+Check containers with `docker compose ps` and stop the stack with
+`docker compose down`.
 
 The worker is profile-gated; omit `--profile worker` to start the API/infrastructure without it. Envoy exposes the gateway at `http://localhost:8080`; MailHog and Kafka UI are dev-profile services. Compose creates databases and Kafka topics automatically through the mounted bootstrap assets.
 
@@ -32,11 +37,25 @@ The worker accepts `-config` (default `/app/config`), so local usage needs a con
 
 ## Build, test and quality checks
 
-There is no root Makefile; `scripts/verify.sh` runs the standard checks (`QUICK=1` skips race tests and the website build). Otherwise use module-scoped commands. GitHub Actions workflows in `.github/workflows/`:
+Run `QUICK=1 scripts/verify.sh` at session start and `scripts/verify.sh` before
+finishing a change. Both modes run Go tests and vet for shared packages and
+services, website typechecking, local Compose configuration validation, and
+strict OpenSpec validation when specs or active changes exist. Both modes reuse
+healthy website dependencies and run `npm ci` from the lockfile when the
+installed dependencies are missing or inconsistent.
+
+Full verification adds Go race tests, the judge benchmark module's tests, vet
+and race tests, syntax checks for both benchmark collectors, and the website
+unit tests and production build. The full script does not run CI's separate
+website lint warning-budget and tooling-format checks, gateway client contract
+test, Envoy suite, production Compose assertions, deployment-script checks, or
+container image builds.
+
+GitHub Actions workflows in `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race per module, website typecheck and build, Compose validation, deployment-script checks, judge benchmark harness checks |
+| `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race, judge benchmark and collector checks, website typecheck/lint/tooling format/unit tests/gateway client contract/build, Envoy checks, development and production Compose validation, deployment-script checks, image builds |
 | `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
 | `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
@@ -54,7 +73,7 @@ docker compose config --quiet
 
 Format modified Go files with `gofmt -w <files>`. Wire injectors are in each `cmd/server/wire.go` and generated output is checked in as `wire_gen.go`; no Wire generation command or `buf`/`protoc` configuration was found, so do not guess a generation command. Proto sources are `proto/problem/v1/problem.proto` and `proto/judge/v1/run.proto`; generated Go is checked in under `pkg/pb/`.
 
-For website development, the scripts in `website/package.json` are `npm run dev` (`next dev -p 3000`), `npm run build` (`next build`), `npm run start` (`next start -p 3000`), and `npm run typecheck` (`tsc --noEmit`). `node_modules` and `.next` are generated local artifacts and should not be used as architecture evidence.
+For website development, use `npm run dev` (`next dev -p 3000`), `npm run build` (`next build`), `npm run start` (`next start -p 3000`), `npm run typecheck` (`tsc --noEmit`), and `npm test` (`vitest run`) from `website/`. `node_modules` and `.next` are generated local artifacts and should not be used as architecture evidence.
 
 ## Migrations and operational checks
 

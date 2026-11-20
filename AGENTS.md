@@ -27,17 +27,33 @@ Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w 
 ## Commands
 
 ```bash
-# Local stack: copy env templates once (files are git-ignored), then start
-for f in postgres redis service; do
-  [ -f environment/$f.env ] || cp environment/$f.env.example environment/$f.env
-done
-docker compose --profile dev --profile worker up -d --build
+# Run from the repository root with Go 1.25.8 and Docker Compose.
+(
+  set -e
+  for f in postgres redis service; do
+    [ -f "environment/$f.env" ] || cp "environment/$f.env.example" "environment/$f.env"
+  done
+
+  # Create or verify the JWK using the default local Compose paths.
+  (
+    set +x
+    unset JWT_ACCESS_SECRET
+    set -a
+    source environment/service.env
+    JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+  )
+
+  docker compose --profile dev --profile worker up -d --build
+)
 (cd website && { [ -f .env.local ] || cp .env.example .env.local; } && npm ci && npm run dev)
 
-# Verify — Go modules, website, Compose config, OpenSpec (skipped while nothing exists)
-QUICK=1 scripts/verify.sh   # session start: no race tests, no website build
+# Verify Go modules, website, Compose config and OpenSpec
+QUICK=1 scripts/verify.sh   # session start: skip race, benchmark, website tests and build
 scripts/verify.sh           # before claiming done
 ```
+
+If JWK validation fails, check the local Auth access secret and follow the
+[Envoy key replacement and activation steps](envoy/README.md#configuration-and-secrets).
 
 ## Session protocol
 
