@@ -1,34 +1,23 @@
 # progress.md — baseline-problem-catalog
 
 ## Verified state
-- Branch / worktree: `feature/baseline-problem-catalog`; initially clean, no staged paths.
-- Source revision: `728aef24cc0d6f624f79fd612265e904406d3d44`.
-- Last module verify: from `services/problem`, `TMPDIR=/dev/shm/problem-catalog-go-tmp GOTMPDIR=/dev/shm/problem-catalog-go-tmp go test ./...` and the same environment with `go vet ./...` → PASS (exit 0).
-- Last strict validation: `openspec validate baseline-problem-catalog --strict` → `Change 'baseline-problem-catalog' is valid` (exit 0), using the Node invocation below.
-- Task 1.1: reviewed PC-01–04 binding/routing/read/count source; module test and vet commands above PASS; evidence audit below PASS.
-- Task 1.2: reviewed PC-05–08 binding, filter conjunction, literal search, and active-tag predicates in the cited functions; evidence audit PASS; SQL execution not claimed.
-- Task 1.3: reviewed PC-09–13 mapping/decoding/tag loading; module run includes passing `TestTestCaseMetadataDoesNotSerializeStorageKey` (adjacent coverage only); evidence audit PASS.
-- Task 1.4: module run PASS includes `TestListTagsReturnsOnlyThePublicAuthoringCatalog`, `TestListMyProblemsRoleAndOwnershipMatrix`, `TestAdminListRequiresModerator`, `TestGetProblemRoleAndOwnershipMatrix`, and `TestCachedGetProblemPreservesHiddenAccessMatrix`; reviewed PC-14–18 source.
-- Task 1.5: module run PASS includes `TestAdminTagListRequiresModerator`, `TestTagMutationRoleMatrix`, `TestSeedIsIdempotent`, `TestSeedPreservesExistingConflictingTag`, `TestSeedCountsCreationFailures`; reviewed PC-19–24 source and SQL coverage limits.
-- Task 2.2: inline Node evidence audit → `PASS evidence audit: 24 ADDED requirements, 50 WHEN/THEN scenarios, 24 matching evidence rows, 25 existing source paths, 9 review tasks.` Manual review maps each scenario to the implementing functions and retains Findings/Q1–Q3 exclusions.
-- Task 2.3: `git diff --cached --name-only` and inline Node scope guard → `PASS staged scope: exactly 6 files, exclusively openspec/changes/baseline-problem-catalog/`; no code, docs, main specs, or other baselines staged.
-- Task 3.1: strict validation above PASS; `git diff --check` and `git diff --cached --check` → no output, exit 0.
+
+- Branch `docs/apply-m0-baselines` at verification input `fe345d297248fcb1b24949ca3afcae3580df3f50`. The relevant implementation matches the inspected source revision `728aef2`.
+- `GOTOOLCHAIN=go1.25.8 QUICK=1 scripts/verify.sh` and `GOTOOLCHAIN=go1.25.8 scripts/verify.sh` passed in a disposable checkout. The full gate ran the Problem module tests, vet and race tests, website typecheck/build, Compose config and strict validation of all eight changes.
+- `openspec validate baseline-problem-catalog --strict` exited 0 with `Change 'baseline-problem-catalog' is valid`. The audit found 24 ADDED requirements, 50 WHEN/THEN scenarios, 24 matching Evidence rows and 25 existing evidence paths. `git diff --check` passed. The scoped diff contains this progress record, `proposal.md` and `design.md`.
 
 ## Last session
-- Goal: record existing `problem-catalog` behaviour with ADDED requirements and review-only tasks.
-- Changed: change metadata, proposal, spec, design/evidence, review tasks, and this progress record only.
-- Read root instructions, glossary, all four requested codebase documents, and implementation/tests; no nested module instructions exist.
+
+- Task 2.1, Q1 resolved. `git diff --exit-code 3faa936 HEAD -- services/problem pkg` confirmed the audited tag-create source is unchanged. The M0-05 PostgreSQL 15.6 probe returned HTTP 201 with `is_active=false` for explicit false, while both the database and repository reread returned true. Omitted activation returned and stored true. The probe used fixture Moderator claims and GORM v1.31.1. Explicit-inactive creation remains a finding outside PC-20.
+- Task 2.1, Q3 resolved. Catalog mapping copies both stored numbers. The shared execution helpers treat valid time values below 50 as seconds and values at or above 50 as legacy milliseconds. Configured memory is converted from MiB to KiB. The website uses the same time threshold and displays the raw memory number as MB. `TestGetTestCaseNormalizesCanonicalExecutionLimits`, `TestGetTestCaseRejectsUnusableExecutionLimitsBeforePresigning`, `TestRunCodeUseCaseForwardsNormalizedProblemLimits` and `npm test -- tests/format.test.ts` passed.
+- Task 2.1, Q2 remains open. The source audit counted 209 unique curated slugs and the four focused seed tests passed. Local Docker inventory found no running Compose Problem or PostgreSQL service. A listener check found no service on the documented local gateway, Problem or PostgreSQL ports. These checks did not establish an installed taxonomy.
+- Tasks 1.1–1.5 retain the reviewed catalog, access and taxonomy evidence in `review.md` and the Evidence table. Tasks 2.2, 2.3 and 3.1 retain their completed status after current structure, scope and validation checks.
 
 ## Broken or unverified
-- `/tmp` quota prevented initial npm bootstrap and Go build setup; reused an existing OpenSpec installation and reran Go successfully with both temporary-directory variables above.
-- Whole-repository `scripts/verify.sh` was not run because it writes environment/dependency/build files outside the permitted change boundary.
-- No PostgreSQL-backed catalog execution or deployed-stack verification was performed; see evidence-table coverage limits.
-- Proposal Q1–Q3 remain unanswered; task 2.1 stays open.
+
+- The seed tests use an in-memory repository. The PostgreSQL probe covers tag creation, while catalog filter SQL and the deployed tag inventory remain outside its evidence.
+- The full build reported existing lint warnings. The original module-only checks and staging audit apply to the initial baseline commit `9f3fb58`. The commands above cover the current review evidence.
 
 ## Next action
-- Next task: reviewer answers Q1–Q3 (task 2.1); all planning artifacts exist and the remaining questions do not authorize implementation.
-- Do not touch: code, docs, main specs, other baselines, production configuration; do not merge or archive.
 
-## Notes for the reviewer
-- OpenSpec is invoked with `node /dev/shm/content-moderation-tools/node_modules/@fission-ai/openspec/bin/openspec.js` (no executable on PATH).
-- CLI warns that existing config rules are strings rather than arrays; follow the read constraints manually and do not edit config.
+- OpenSpec reports 8 of 9 tasks complete. Task 2.1 requires a read-only inventory from an identified running environment to resolve Q2.
