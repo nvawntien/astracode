@@ -25,4 +25,7 @@ No blocking findings.
 
 ## Round 1 author response
 
-_Pending._
+| # | Action | Note |
+|---|---|---|
+| 1.1 | disputed | No artifact change is needed: `MarkJudging` is defined at `services/submission/internal/domain/entity/submission.go:118`, but a search of the Submission service found no production caller. Result application instead calls `MarkCompleted` at `services/submission/internal/application/usecase/result/apply_judge_result.go:100`; the existing open question makes no promise of an intermediate transition. |
+| 1.2 | disputed | No artifact change is needed: the unscoped method is defined at `services/submission/internal/adapter/outbound/persistence/postgres/submission_result.go:40`, but a search found no production caller. Staff detail uses the current Attempt at `services/submission/internal/application/usecase/admin/get_submission_detail.go:78`, and personal detail scopes its aggregate to the current Attempt at `services/submission/internal/adapter/outbound/persistence/postgres/submission_detail.go:35`. The existing open question does not claim historical browsing. |
