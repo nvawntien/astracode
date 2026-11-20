@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/verify.sh — standard local checkout checks.
 # Usage:  scripts/verify.sh          full verification
-#         QUICK=1 scripts/verify.sh  skip race, benchmark, website tests and build
+#         QUICK=1 scripts/verify.sh  quick session-start checks
 # Requires network access on first run (Go modules, npm packages).
 
 set -euo pipefail
@@ -67,6 +67,9 @@ for module in "${GO_MODULES[@]}"; do
 done
 
 if [ "${QUICK:-0}" != "1" ]; then
+  step "Local JWK generator tests"
+  go test envoy/gen_jwk.go envoy/gen_jwk_test.go
+
   step "Judge benchmark collector syntax"
   bash -n tools/benchmark/judge/scripts/collect-container-stats.sh
   bash -n tools/benchmark/judge/scripts/collect-kafka-lag.sh
