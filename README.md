@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/nvawntien/go-judge-system/releases/latest"><img src="https://img.shields.io/github/v/release/nvawntien/go-judge-system?display_name=tag&amp;sort=semver" alt="Latest release" /></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25.8-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25.8" /></a>
-  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5.21-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 15.5.21" /></a>
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5.29-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 15.5.29" /></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&amp;logoColor=white" alt="Docker Compose" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2ea44f" alt="MIT License" /></a>
 </p>
@@ -146,7 +146,7 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 | Area | Technology |
 | --- | --- |
 | Services | Go **1.25.8**, Gin, gRPC, GORM, Google Wire, Zap |
-| Frontend | Next.js **15.5.21**, React **19.1.1**, TypeScript |
+| Frontend | Next.js **15.5.29**, React **19.1.1**, TypeScript |
 | Messaging | Apache Kafka **4.0.0** in KRaft mode, Sarama |
 | Data | PostgreSQL **15.6**, Redis **7.2**, MinIO |
 | Execution | `criyle/executorserver`-based go-judge image with C/C++, Python, and Go tooling |
@@ -172,8 +172,8 @@ the Contributor navigation workflow.
 
 - Git
 - Docker Engine with Docker Compose
-- Node.js and npm for the Next.js frontend
-- Go 1.25.8 only when running Go modules outside Docker
+- Node.js 22.12+ in the Node 22 series and npm for the Next.js frontend
+- Go 1.25.8 for local JWK generation and Go checks
 
 ### Start the local judge stack
 
@@ -181,26 +181,32 @@ the Contributor navigation workflow.
 git clone https://github.com/nvawntien/go-judge-system.git
 cd go-judge-system
 
-test -f environment/postgres.env || \
-  cp environment/postgres.env.example environment/postgres.env
-test -f environment/redis.env || \
-  cp environment/redis.env.example environment/redis.env
-test -f environment/service.env || \
-  cp environment/service.env.example environment/service.env
+(
+  set -e
+  for f in postgres redis service; do
+    [ -f "environment/$f.env" ] || cp "environment/$f.env.example" "environment/$f.env"
+  done
 
-# Generate the ignored JWK from the SAME access secret used by Auth.
-set -a
-source environment/service.env
-set +a
-JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+  # Generate the ignored JWK from Auth's local access secret if needed.
+  if [ ! -f envoy/symmetric.json ] || [ ! -s envoy/symmetric.json ]; then
+    (
+      set -a
+      source environment/service.env
+      JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+    )
+  fi
 
-docker compose --profile dev --profile worker up -d --build
+  docker compose --profile dev --profile worker up -d --build
+)
 docker compose ps
 ```
 
 The `worker` profile is required for official asynchronous judging; `dev` enables
 MailHog and Kafka UI. Compose starts the edge, services, Kafka,
 storage, and executor. Start the Next.js app separately.
+
+If the local Auth access secret changes, follow the
+[Envoy key activation steps](envoy/README.md#configuration-and-secrets).
 
 ### Start the frontend
 
@@ -231,17 +237,17 @@ docker compose down
 
 ## Development and validation
 
-This is a Go workspace with separate modules. Run Go checks per module rather
-than assuming a root-level test target:
+Run the local verifier from the repository root. It runs Go checks per module,
+checks website dependencies against the lockfile, and validates local Compose
+and OpenSpec.
 
 ```bash
-for module in pkg services/auth services/problem services/submission workers/judge; do
-  (cd "$module" && go test ./... && go vet ./... && go test -race ./...)
-done
-
-(cd website && npm run typecheck && npm run build)
-docker compose config --quiet
+QUICK=1 scripts/verify.sh   # session-start checks
+scripts/verify.sh           # includes race, benchmark, website tests and build
 ```
+
+See the [development guide](docs/codebase/DEVELOPMENT.md#build-test-and-quality-checks)
+for local and CI coverage.
 
 Service configuration is under `services/*/config/` and `workers/judge/config/`.
 Compose reads local runtime values from ignored files under `environment/`; safe
@@ -366,7 +372,9 @@ before a multi-replica or public deployment.
 - Accounts, profiles, and the Admin Console.
 - Dual-node production deployment and an immutable release pipeline.
 
-Planned work is tracked in a single place: [docs/product/delivery-plan.md](docs/product/delivery-plan.md).
+The [delivery plan](docs/product/delivery-plan.md) records planned changes,
+dependencies, and ownership. It identifies OpenSpec and the GitHub Project
+board as the sources for live progress.
 
 ## Contributing and security
 
