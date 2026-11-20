@@ -34,14 +34,14 @@ Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w 
     [ -f "environment/$f.env" ] || cp "environment/$f.env.example" "environment/$f.env"
   done
 
-  # Generate the ignored JWK from Auth's local access secret if needed.
-  if [ ! -f envoy/symmetric.json ] || [ ! -s envoy/symmetric.json ]; then
-    (
-      set -a
-      source environment/service.env
-      JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
-    )
-  fi
+  # Create or verify the JWK using the default local Compose paths.
+  (
+    set +x
+    unset JWT_ACCESS_SECRET
+    set -a
+    source environment/service.env
+    JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+  )
 
   docker compose --profile dev --profile worker up -d --build
 )
@@ -52,8 +52,8 @@ QUICK=1 scripts/verify.sh   # session start: skip race, benchmark, website tests
 scripts/verify.sh           # before claiming done
 ```
 
-If the local Auth access secret changes, follow the
-[Envoy key activation steps](envoy/README.md#configuration-and-secrets).
+If JWK validation fails, check the local Auth access secret and follow the
+[Envoy key replacement and activation steps](envoy/README.md#configuration-and-secrets).
 
 ## Session protocol
 

@@ -5,7 +5,7 @@
 <h1 align="center">AstraCode</h1>
 
 <p align="center">
-  <a href="https://github.com/nvawntien/go-judge-system/releases/latest"><img src="https://img.shields.io/github/v/release/nvawntien/go-judge-system?display_name=tag&amp;sort=semver" alt="Latest release" /></a>
+  <a href="https://github.com/nvawntien/astracode/releases/latest"><img src="https://img.shields.io/github/v/release/nvawntien/astracode?display_name=tag&amp;sort=semver" alt="Latest release" /></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25.8-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25.8" /></a>
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5.29-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 15.5.29" /></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&amp;logoColor=white" alt="Docker Compose" /></a>
@@ -17,7 +17,7 @@ a modern Next.js workspace, and isolated program execution. It covers the core
 competitive-programming lifecycle: author a problem, moderate it, solve it,
 run code, submit against official testcases, and review results and statistics.
 
-See [GitHub Releases](https://github.com/nvawntien/go-judge-system/releases)
+See [GitHub Releases](https://github.com/nvawntien/astracode/releases)
 for version history and release notes.
 
 ## Highlights
@@ -178,8 +178,8 @@ the Contributor navigation workflow.
 ### Start the local judge stack
 
 ```bash
-git clone https://github.com/nvawntien/go-judge-system.git
-cd go-judge-system
+git clone https://github.com/nvawntien/astracode.git
+cd astracode
 
 (
   set -e
@@ -187,14 +187,14 @@ cd go-judge-system
     [ -f "environment/$f.env" ] || cp "environment/$f.env.example" "environment/$f.env"
   done
 
-  # Generate the ignored JWK from Auth's local access secret if needed.
-  if [ ! -f envoy/symmetric.json ] || [ ! -s envoy/symmetric.json ]; then
-    (
-      set -a
-      source environment/service.env
-      JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
-    )
-  fi
+  # Create or verify the JWK using the default local Compose paths.
+  (
+    set +x
+    unset JWT_ACCESS_SECRET
+    set -a
+    source environment/service.env
+    JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
+  )
 
   docker compose --profile dev --profile worker up -d --build
 )
@@ -205,8 +205,8 @@ The `worker` profile is required for official asynchronous judging; `dev` enable
 MailHog and Kafka UI. Compose starts the edge, services, Kafka,
 storage, and executor. Start the Next.js app separately.
 
-If the local Auth access secret changes, follow the
-[Envoy key activation steps](envoy/README.md#configuration-and-secrets).
+If JWK validation fails, check the local Auth access secret and follow the
+[Envoy key replacement and activation steps](envoy/README.md#configuration-and-secrets).
 
 ### Start the frontend
 

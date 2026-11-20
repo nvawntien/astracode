@@ -6,10 +6,10 @@ Use Go 1.25.8 for Go checks and local JWK generation, Docker Engine/Compose, and
 
 ## Run the full stack
 
-From the repository root, copy the missing local env files from their templates
-and generate the ignored `envoy/symmetric.json` if needed. The generator uses
-`JWT_ACCESS_SECRET` from the same `environment/service.env` that Compose passes
-to Auth. [Local stack quick start](../../README.md#start-the-local-judge-stack)
+The quick start copies missing local env files from their templates and uses
+`JWT_ACCESS_SECRET` from `environment/service.env` to create or verify the
+ignored `envoy/symmetric.json`. A mismatch stops startup and leaves the key
+file intact. [Local stack quick start](../../README.md#start-the-local-judge-stack)
 
 On startup, the `envoy-jwk` service copies that host file into a named volume
 for Envoy and must finish successfully before Envoy starts. If you change the
