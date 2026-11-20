@@ -15,4 +15,7 @@ status: approved
 
 ## Round 1 author response
 
-(none — round 1)
+| # | Action | Note |
+|---|---|---|
+| 1.1 | fixed | Recorded the inactive-create response/persistence mismatch in CM-22, its evidence and proposal findings, qualified as source inference without a database check. |
+| 1.2 | fixed | Added the wired best-effort cache invalidation side effect to design risks, covering update, delete, publish and hide. |

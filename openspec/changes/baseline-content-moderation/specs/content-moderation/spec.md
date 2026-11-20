@@ -274,11 +274,15 @@ The system SHALL let Moderators and Admins list both active and inactive undelet
 - **THEN** the result includes active and inactive tags and their management metadata
 
 ### Requirement: CM-22 Tag creation and editing
-The system SHALL let Moderators and Admins create and edit tags, trimming names and descriptions, rejecting blank names, and reporting duplicate slugs as conflicts. Slugs SHALL be normalized to lowercase ASCII letters/digits and hyphens with a generic fallback; omitted creation slugs SHALL derive from the name. Tags SHALL default to active when creation omits an active-state choice.
+The system SHALL let Moderators and Admins create and edit tags, trimming names and descriptions, rejecting blank names, and reporting duplicate slugs as conflicts. Slugs SHALL be normalized to lowercase ASCII letters/digits and hyphens with a generic fallback; omitted creation slugs SHALL derive from the name. Tags SHALL default to active when creation omits an active-state choice. When creation explicitly requests an inactive tag, the create response SHALL report it inactive while the persisted tag is active.
 
 #### Scenario: Default tag creation
 - **WHEN** a Moderator creates a valid tag without specifying a slug or active state
 - **THEN** the system derives a normalized slug from its trimmed name and creates an active tag
+
+#### Scenario: Explicitly inactive tag creation
+- **WHEN** a Moderator successfully creates a tag with the active state explicitly set to false
+- **THEN** the create response reports it inactive, but a subsequent read reports it active
 
 #### Scenario: Duplicate slug or blank name
 - **WHEN** tag creation or editing supplies a slug already in use or a whitespace-only name

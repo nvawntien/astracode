@@ -16,7 +16,7 @@
 
 ## Broken or unverified
 - `scripts/verify.sh` not run: missing local env files and website dependencies would make it write outside the user-authorized directory. No application-test, website-build, or runtime acceptance pass is claimed.
-- OQ-1 through OQ-3 remain explicitly unresolved/excluded in the proposal; reviewer acceptance tasks remain unchecked.
+- OQ-1 was resolved by source inspection in round 1; OQ-2 and OQ-3 remain unresolved in the proposal. Reviewer acceptance tasks remain unchecked.
 - CLI warns that existing artifact rules in `openspec/config.yaml` are strings rather than arrays; relevant constraints were followed manually without changing that file.
 - `/tmp` quota errors blocked the normal CLI installation and an initial heredoc assertion attempt; isolated tooling and a successful `node -e` assertion run were used instead.
 
