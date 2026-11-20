@@ -310,15 +310,15 @@ For a validated matching result on a nonterminal Submission, the system SHALL at
 
 ### Requirement: Verdict-specific diagnostic retention
 
-Compilation Error SHALL retain only nonblank compiler output, preserving its content. Runtime Error SHALL retain only a nonblank public error message. Time, Memory, and Output Limit Exceeded SHALL retain a public error message or use a limit-specific default. System Error SHALL use the fixed message "The judge could not complete this submission." Accepted and Wrong Answer SHALL clear both diagnostic fields. Public runtime/limit messages SHALL normalize recognized internal workspace prefixes, discard invalid UTF-8 and control characters other than newline/carriage return/tab, trim surrounding whitespace, and truncate content longer than 4096 bytes at a valid UTF-8 boundary with an appended ellipsis.
+Compilation Error SHALL retain only nonblank compiler output, preserving its content. Runtime Error SHALL retain only a nonblank public error message. Time, Memory, and Output Limit Exceeded SHALL retain a public error message or use a limit-specific default. System Error SHALL use the fixed message "The judge could not complete this submission." Accepted and Wrong Answer SHALL clear both diagnostic fields. Public runtime and limit messages SHALL normalize recognized internal workspace prefixes, discard invalid UTF-8, remove ASCII control characters (`U+0000` through `U+001F` and `U+007F`) except newline, carriage return, and tab, and trim surrounding whitespace. If the resulting message exceeds 4096 bytes, the system SHALL keep a valid UTF-8 prefix within the first 4096 bytes, trim surrounding whitespace again, and append an ellipsis.
 
 #### Scenario: Compiler output is retained
 - **WHEN** a Compilation Error result supplies nonblank compiler output and an error message
 - **THEN** only the original compiler output is retained
 
 #### Scenario: Runtime or limit diagnostics
-- **WHEN** Runtime Error or a resource-limit Verdict supplies a long message containing recognized internal workspace prefixes and control characters
-- **THEN** its public error message is normalized and truncated as specified, without retaining compiler output
+- **WHEN** Runtime Error or a resource-limit Verdict supplies a long message containing recognized internal workspace prefixes and ASCII control characters
+- **THEN** its public error message is normalized, filtered, and truncated as specified, without retaining compiler output
 
 #### Scenario: Default messages and cleared diagnostics
 - **WHEN** a limit Verdict has no nonblank public error message, System Error has an arbitrary message, or the Verdict is Accepted or Wrong Answer
