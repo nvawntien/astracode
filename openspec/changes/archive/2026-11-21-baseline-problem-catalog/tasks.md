@@ -12,7 +12,7 @@ This baseline has review tasks only. PC references identify the requirement rows
 
 ## 2. Review limitations and boundaries
 
-- [ ] 2.1 Answer proposal questions Q1–Q3 with code or permitted local verification evidence; if an answer remains unavailable, leave this task open and keep that behaviour outside normative claims.
+- [x] 2.1 Answer proposal questions Q1–Q3 with code or permitted local verification evidence; if an answer remains unavailable, leave this task open and keep that behaviour outside normative claims.
 - [x] 2.2 Review every scenario against its evidence row and the proposal Findings; verify 24 ADDED requirements, WHEN/THEN scenarios, no implementation identifiers in the spec, and no unsupported guarantee. Record the evidence-audit command output in `progress.md`.
 - [x] 2.3 Review documentation and contract impact: verify the NON-BREAKING documentation-only classification, reference-only boundary with `content-moderation`, and that `git diff --cached --name-only` contains exclusively this change directory. Record that no code, main spec, other baseline, or architecture document is staged.
 

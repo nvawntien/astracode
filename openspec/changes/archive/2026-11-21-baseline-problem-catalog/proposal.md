@@ -45,8 +45,5 @@ None. `openspec list --specs` reports no existing specs.
 ## Resolved review questions
 
 - **Q1 — Initially-inactive creation.** The isolated PostgreSQL 15.6 probe recorded in the M0-05 review at `3faa936` exercised the same handler, use case, repository and GORM v1.31.1. A request with `is_active=false` returned HTTP 201 and `false`. GORM inserted `true`, which a direct database query and the repository reread both returned. Omitting activation produced `true` in the response and the database. PC-20 covers default-active creation.
+- **Q2 — Installed taxonomy.** A read-only PostgreSQL inventory on 2026-11-21 found all 209 curated slugs in the local AstraCode `problem_db` snapshot. All curated tags were active and nondeleted, with names and descriptions matching `Desired()`. Eight additional slugs were inactive, including two soft-deleted rows. There were no missing or duplicate slugs. `progress.md` records the snapshot source, query, and results. PC-24 covers the seeding operation and preservation rules. This inventory applies to the local database snapshot.
 - **Q3 — Limit units.** The catalog returns both stored numbers unchanged. `pkg/judge/limits.go` interprets valid time values below 50 as seconds and values of 50 or greater as legacy milliseconds, and converts configured memory from MiB to KiB. Custom Run and official testcase metadata use these helpers. The website uses the same time threshold for display and labels the stored memory number `MB`. PC-11 covers the catalog's numeric pass-through.
-
-## Open questions
-
-- **Q2 — Installed taxonomy.** Which curated seed definitions are installed in a running environment? `seed-tags` is an explicit command with 209 checked-in definitions. No running local catalog was available to compare against them. PC-24 covers the seeding operation and preservation rules. Task 2.1 stays open pending an inventory from an identified running environment.

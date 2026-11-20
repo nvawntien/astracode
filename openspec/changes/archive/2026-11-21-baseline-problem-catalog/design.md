@@ -18,7 +18,7 @@ The read-only architecture references are `docs/codebase/ARCHITECTURE.md` (servi
 2. **Describe the callable boundary.** Public query validation precedes use-case normalization. Pagination rejects invalid supplied values even though direct application calls contain defensive defaults/clamping. Difficulty is case-sensitive at request binding despite later normalization. Requirements describe those observable calls rather than exposing application helpers as a separate product interface.
 3. **Map existing state narrowly.** Published reads correspond to `IsHidden == false`; Hidden reads correspond to `IsHidden == true`. Deleted records are excluded by persistence default scopes. Do not infer the fuller moderation lifecycle from that boolean. Contributor remains the glossary's deprecated term because it is still enforced in code.
 4. **Preserve read-surface differences.** Public statements and lists use `MapProblemToResponse(..., false)`. Own/staff lists use the private mapping; privileged detail additionally supplies update metadata. Internal metadata reads return only identity/title/slug/limits and authorize against the state they read, including potentially cached state. Replacing all of these with one desired access model would be inaccurate.
-5. **Keep the catalog contract scoped to its own reads and writes.** PC-20 covers default-active creation. The explicit-inactive mismatch is recorded as a finding. PC-11 records the numeric values returned by the catalog. The proposal records how execution consumers interpret those values. Curated seeding is an explicit operation. Q2 tracks which definitions are installed in a running environment.
+5. **Keep the catalog contract scoped to its own reads and writes.** PC-20 covers default-active creation. The explicit-inactive mismatch is recorded as a finding. PC-11 records the numeric values returned by the catalog. The proposal records how execution consumers interpret those values. Curated seeding is an explicit operation. Q2 records the taxonomy found in the local PostgreSQL snapshot.
 
 ### Interface and documentation impact
 
@@ -69,12 +69,8 @@ Proposal findings 1–4 follow from PC-01, PC-05, PC-09–PC-17 and `pkg/rbac/ro
 
 ## Verification approach
 
-`progress.md` records the current repository and focused checks alongside the initial Problem module evidence. Repository verification uses a disposable checkout for generated environment and build files. The isolated PostgreSQL probe covers the tag-create round trip in Q1. The focused conversion checks cover Q3 with fixtures. Inventory of a running catalog remains Q2.
+`progress.md` records the current repository and focused checks alongside the initial Problem module evidence. Repository verification uses a disposable checkout for generated environment and build files. The isolated PostgreSQL probe covers the tag-create round trip in Q1. The focused conversion checks cover Q3 with fixtures. For Q2, the read-only inventory from a copy of the local PostgreSQL volume confirmed all 209 curated tags were present and active.
 
 ## Migration Plan
 
 No runtime migration, deployment, or rollback is needed. Submit only the reviewed change artifacts. Do not merge or archive this change in this workflow.
-
-## Open Questions
-
-Q2 remains open in `proposal.md`. The seed source and tests establish the explicit operation and preservation rules. The list of installed definitions requires a running catalog inventory.
