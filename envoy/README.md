@@ -26,13 +26,15 @@ Keep the same access secret as Auth and retain canonical file mode 0600. The
 [local quick start](../README.md#start-the-local-judge-stack) uses
 `go run envoy/gen_jwk.go` with the Compose defaults
 `environment/service.env` and `envoy/symmetric.json`. It creates a missing key
-or verifies the existing single-key HS256 JWKS produced by the generator. If
-you override `SERVICE_ENV_FILE` or `GATEWAY_JWK_FILE`, use the same paths when
-checking the key.
+with mode 0600 or verifies that the existing path is a regular file with
+mode 0600 containing the expected single-key HS256 JWKS. If you override
+`SERVICE_ENV_FILE` or `GATEWAY_JWK_FILE`, use the same paths when checking the
+key.
 
-If validation fails, check that you are using the intended local Auth access
-secret. To deliberately replace the local JWK, coordinate the secret change
-with Auth, then run from the repository root:
+If validation fails, check the file type, permissions, and local Auth access
+secret. The generator rejects symlinks in both modes. To deliberately replace
+a regular local JWK file, coordinate the secret change with Auth, then run
+from the repository root:
 
 ```bash
 (
@@ -138,6 +140,7 @@ review; the current contract uses the immediate peer.
 ## Verification
 
 ```bash
+go test envoy/gen_jwk.go envoy/gen_jwk_test.go
 python3 envoy/generate.py --check
 python3 envoy/tests/route_parity.py
 python3 envoy/tests/integration.py
