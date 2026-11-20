@@ -18,6 +18,8 @@
 - The seed tests use an in-memory repository. The PostgreSQL probe covers tag creation, while catalog filter SQL and the deployed tag inventory remain outside its evidence.
 - The website build passed with existing lint warnings. The original staging audit applies to the initial baseline commit `9f3fb58`.
 
-## Next action
+## Archive
 
-- OpenSpec reports 8 of 9 tasks complete. To resolve Q2, compare the 209 curated slugs against a read-only inventory of active and inactive tags from an identified existing Problem catalog.
+- Archived on 2026-11-21 with approval to proceed while task 2.1 remained open. The main `problem-catalog` spec matches the delta's purpose, 24 requirements, and 50 scenarios.
+- With Go 1.25.8, `QUICK=1 scripts/verify.sh` passed before the sync and `scripts/verify.sh` passed after archiving. Strict OpenSpec validation passed for all nine main specs.
+- To resolve Q2, compare the 209 curated slugs against a read-only inventory of active and inactive tags from an identified running Problem catalog.
