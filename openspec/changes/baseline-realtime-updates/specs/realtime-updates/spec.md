@@ -242,12 +242,17 @@ The system SHALL establish accepted streams as SSE with response directives agai
 
 ### Requirement: RT-16 Failure handling and subscription cleanup
 
-The system SHALL send no status data when the initial status read fails. Once registered for live delivery, a stream SHALL release its subscription on every exit. It SHALL end delivery when the client disconnects, its request is cancelled, live delivery closes, or a stream write fails.
+The system SHALL send no status data when the initial status read fails or the response does not support flushing. Once registered for live delivery, a stream SHALL release its subscription on every exit. It SHALL end delivery when the client disconnects, its request is cancelled, live delivery closes, or a stream write fails.
 
 #### Scenario: Initial read fails
 
 - **WHEN** the initial status cannot be read
 - **THEN** the system returns an error without starting status delivery and releases any registered subscription
+
+#### Scenario: Response does not support flushing
+
+- **WHEN** the response does not support flushing after the initial status and ownership checks
+- **THEN** the system returns an error without starting status delivery and releases the subscription
 
 #### Scenario: Active stream exits
 

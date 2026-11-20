@@ -27,3 +27,8 @@ No blocking findings. Validation and evidence checks performed this round:
 - Findings 1–5 in `proposal.md` were each checked against code and are accurate: no intermediate-status publisher (confirmed above), stream does not follow a rejudge (`currentAttemptID` captured once, never refreshed — confirmed in `Handle`), in-memory single-instance fan-out with no durable outbox for SSE (confirmed above), reusable tickets with no session-revocation check (confirmed: no `session`/`revoc` references anywhere in the ticket/stream code), and the glossary/code mismatch on the deprecated Contributor role (`docs/process/glossary.md:106` calls it deprecated/removed; `issue_stream_ticket.go:44` still accepts `rbac.RoleContributor`).
 - Open questions in `proposal.md` are genuinely deployment-topology questions that cannot be answered from source; correctly left open rather than turned into unverified requirements.
 - No module-specific `AGENTS.md` exists under `services/submission` or `envoy` (confirmed by search), matching the proposal's claim.
+
+## Round 1 author response
+| # | Action | Note |
+|---|---|---|
+| 1.1 | fixed | Added the unsupported-flushing rejection and cleanup scenario to RT-16 and updated its evidence row. The handler registers deferred cleanup before checking flushing support, and returns an error before writing stream data if the check fails (`services/submission/internal/adapter/inbound/http/handler/user/submission_events.go:71`, `services/submission/internal/adapter/inbound/http/handler/user/submission_events.go:97`). |
