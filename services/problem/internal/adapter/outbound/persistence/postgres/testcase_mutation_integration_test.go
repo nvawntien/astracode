@@ -304,6 +304,74 @@ func TestTestcaseMutationPostgresConcurrency(t *testing.T) {
 			t.Fatalf("cleanup removed an unreviewed or referenced object: %v", storage.keys())
 		}
 	})
+	t.Run("hiding a published problem restores author package management", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		p := newReconciliationProblem("hide-restores-package-management")
+		requireMutation(t, repo.Create(ctx, p))
+		params := dto.ProblemIDRequest{ID: p.ID}
+		original := entity.NewTestCase(p.ID, "hide-restores-original.zip", 1, 1)
+		requireMutation(t, packages.Upsert(ctx, original))
+		storage := &mutationStorage{objects: map[string][]byte{original.ZipObjectKey: []byte("original")}}
+		upload := func() (dto.TestCaseMetadataResponse, error) {
+			return testcase.NewUploadTestCaseUseCase(repo, packages, storage).Execute(ctx, owner, params, uploadRequest)
+		}
+		deletePackage := func() error {
+			return testcase.NewDeleteTestCaseUseCase(repo, packages).Execute(ctx, owner, params)
+		}
+
+		_, err := problem.NewPublishProblemUseCase(repo).Execute(ctx, staff, params)
+		requireMutation(t, err)
+		if _, err := upload(); !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("author upload to Published problem = %v", err)
+		}
+		if err := deletePackage(); !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("author package delete on Published problem = %v", err)
+		}
+		metadata, err := testcase.NewGetTestCaseUseCase(repo, packages).Execute(ctx, owner, params)
+		requireMutation(t, err)
+		if metadata.Version != 1 {
+			t.Fatalf("author metadata version on Published problem = %d", metadata.Version)
+		}
+
+		_, err = problem.NewHiddenProblemUseCase(repo).Execute(ctx, staff, params)
+		requireMutation(t, err)
+		replaced, err := upload()
+		requireMutation(t, err)
+		if replaced.Version != 2 {
+			t.Fatalf("author replacement version after hide = %d", replaced.Version)
+		}
+		requireMutation(t, deletePackage())
+		if _, err := packages.GetByProblemID(ctx, p.ID); !errors.Is(err, domain.ErrTestCaseNotFound) {
+			t.Fatalf("package metadata after author delete = %v", err)
+		}
+	})
+	t.Run("staff deletes a published problem and its package is kept", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		p := newReconciliationProblem("staff-delete-published")
+		requireMutation(t, repo.Create(ctx, p))
+		params := dto.ProblemIDRequest{ID: p.ID}
+		kept := entity.NewTestCase(p.ID, "staff-delete-kept.zip", 1, 1)
+		requireMutation(t, packages.Upsert(ctx, kept))
+
+		_, err := problem.NewPublishProblemUseCase(repo).Execute(ctx, staff, params)
+		requireMutation(t, err)
+		requireMutation(t, problem.NewDeleteProblemUseCase(repo).Execute(ctx, staff, params))
+
+		if _, err := repo.GetByID(ctx, p.ID); !errors.Is(err, domain.ErrProblemNotFound) {
+			t.Fatalf("read after staff deletion = %v", err)
+		}
+		retained, err := packages.GetByProblemID(ctx, p.ID)
+		requireMutation(t, err)
+		if retained.ZipObjectKey != kept.ZipObjectKey || retained.Version != 1 {
+			t.Fatalf("retained package = %+v", retained)
+		}
+		title := "Late edit"
+		if _, err := problem.NewUpdateProblemUseCase(repo, nil).Execute(ctx, owner, params, dto.UpdateProblemRequest{Title: &title}); !errors.Is(err, domain.ErrProblemNotFound) {
+			t.Fatalf("author edit after deletion = %v, want not found", err)
+		}
+	})
 }
 
 func newReconciliationProblem(slug string) *entity.Problem {
