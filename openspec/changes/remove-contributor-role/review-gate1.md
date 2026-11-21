@@ -1,12 +1,24 @@
 ---
 change: remove-contributor-role
 gate: 1
+round: 2
+max_rounds: 3
+reviewed_commit: 1e5b0d70e4a278a4b26019444fda38e9a8e44ae4
+risk: high
+status: approved
+---
+
+## Round 1 review history
+
+```yaml
+change: remove-contributor-role
+gate: 1
 round: 1
 max_rounds: 3
 reviewed_commit: 8dbcd7a7b300b2a82514ec734b89200503f6a118
 risk: high
 status: changes-requested
----
+```
 
 ## Evidence of checks run
 
@@ -34,3 +46,38 @@ status: changes-requested
 
 ## Summary for the human reviewer
 This change removes the Contributor role. It converts existing Contributor accounts to User and revokes their old sessions, rejects `contributor` at Envoy, Auth refresh, the services and internal GetProblem, and opens draft authoring and the Contributions workspace to every signed-in User. Publish and hide stay staff-only. Risk is high because it touches authentication, authorization, a Redis-and-PostgreSQL data conversion, BREAKING contracts and the content-moderation hotspot. The blocking issue is size (5 capabilities; see 1.1). Look first at design.md's Migration Plan and the cutoff-before-commit ordering, the missing ADR (1.2), and the new conversion command against the AGENTS.md "no migration runner" rule (1.3). Separately, decide whether letting any verified User upload Testcase packages before the M1-07 eligibility limits exist is acceptable for the pilot.
+
+## Round 2 review
+
+Reviewed on 2026-11-21 against `1e5b0d7` and the decisions recorded in this review.
+
+### Project owner decisions
+
+1. Approved an exception to the three-capability maximum. Keep all five capability deltas in `remove-contributor-role`.
+2. Accepted PRD D-01 and the existing design as sufficient documentation. Approved an exception to the workflow's separate ADR requirement for M1-01.
+3. Approved retaining existing scenario headings where OpenSpec requires them by name. Record the stale headings and the `content-moderation` Purpose disposition during archive. Use a subsequent documentation-only OpenSpec change for wording that the archive tooling cannot safely update. Main-spec updates go through archive.
+
+### Round 1 finding dispositions
+
+| Finding | Disposition | Round 2 evidence |
+| --- | --- | --- |
+| 1.1 | Resolved by approved exception | The proposal records the owner's waiver. All five capabilities remain coordinated in the change. |
+| 1.2 | Resolved by approved exception | The proposal cites D-01 and records the owner's acceptance of the design and the M1-01 exception to workflow §10. |
+| 1.3 | Resolved | The Auth conversion command, migration-specific cutoff, production cutover, and rehearsal were removed. The design permits manual local database resets and preserves existing logout-all behavior. |
+| 1.4 | Resolved | Identity-session no longer claims ownership or data continuity for converted accounts. Author access belongs to content-moderation and problem-catalog, and personal Submission access belongs to submission. |
+| 1.5 | Resolved | The conversion requirement and its four scenarios were removed. Identity-session specifies ongoing credential eligibility and role rejection. |
+| 1.6 | Resolved | Internal Problem metadata explicitly allows User, Moderator, and Admin and includes a forbidden outcome for Contributor, including for an owner. |
+| 1.7 | Behavior resolved. Wording follow-up accepted. | The affected scenarios now exercise general User behavior. The prior headings are required by OpenSpec 1.13.0. The design records their archive disposition and the documentation-only follow-up if they remain. The migrated-owner history scenario was removed. |
+| 1.8 | Resolved | CM-02 and CM-04 use `RENAMED` and complete `MODIFIED` blocks under their new names. Read-only merge reconstruction found each requirement exactly once and preserved the capability's requirement count. |
+| 1.9 | Resolved | The workspace scenario requires an authenticated User. Draft creation has no M1-07 review eligibility gate. |
+| 1.10 | Resolved in the implementation plan | Tasks 2.1 and 2.3 verify restored edit and package permissions after hiding and task 2.1 covers owned-draft deletion. Task 4.1 covers Admin Console denial and successful creation opening the draft detail. Task 1.2 specifies the Auth suite command. Task 4.2 requires recording verification evidence. The cutover rehearsal was deleted. |
+| 1.11 | Archive follow-up accepted | OpenSpec 1.13.0 retains the existing `content-moderation` Purpose in the read-only merge preview. The design specifies “author ownership” and records the need for a subsequent documentation-only OpenSpec change if the wording remains at archive. |
+
+### Evidence and verdict
+
+- OpenSpec 1.13.0 strict validation passed with `openspec validate remove-contributor-role --strict --no-interactive`. `openspec list --json` showed one active change and 0 of 11 implementation tasks complete.
+- Read-only reconstruction of all five specs confirmed the delta targets, requirement renames, and scenario preservation. The preview retained the stale scenario headings and existing Purpose. See the archive disposition. [Design](design.md#archive-disposition)
+- The proposal and design keep M1-02, M1-03, M1-04, and M1-07 outside this change. The contract draft labels role compatibility changes and preserves existing routes and payload shapes. Backend ownership checks, secure credential admission, staff authorization, and testcase upload and confidentiality rules are specified.
+- The owner-approved pilot permits authenticated Users to manage testcase packages for their own hidden drafts within the existing limits and protections. Review eligibility belongs to M1-07.
+
+**Gate 1 approved.** Blocking and major findings are resolved, with no new findings. The recorded archive wording follow-up is accepted. This is specification approval. The implementation checklist remains at 0 of 11.
