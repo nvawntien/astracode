@@ -132,6 +132,26 @@ The system SHALL allow a User to read testcase metadata for their own undeleted 
 - **WHEN** a Moderator or Admin supplies a valid replacement package for another author's Published problem
 - **THEN** the system permits the replacement
 
+### Requirement: CM-20 Testcase package deletion
+The system SHALL commit removal of the current testcase package metadata before making the stored package eligible for cleanup. It SHALL report a missing package when its metadata is absent and report an error when metadata removal cannot be confirmed. A confirmed metadata deletion SHALL succeed independently of physical object cleanup. Cleanup SHALL preserve referenced packages, packages whose commit outcome is unresolved, and packages still usable through previously issued download access.
+
+#### Scenario: Successful package deletion
+- **WHEN** an authorized actor deletes an existing testcase package and metadata removal commits
+- **THEN** deletion succeeds, subsequent authoring detail indicates no package, and package-metadata lookup reports it missing
+
+#### Scenario: Storage removal fails
+- **WHEN** physical cleanup fails after metadata removal commits
+- **THEN** deletion remains successful and the metadata remains absent
+- **AND** the stored object remains eligible for a later cleanup attempt
+
+#### Scenario: Metadata deletion rolls back
+- **WHEN** metadata removal fails and rolls back
+- **THEN** deletion reports an error and the current metadata and its stored package remain available
+
+#### Scenario: Metadata commit cannot be confirmed
+- **WHEN** the system cannot determine the outcome of the metadata deletion commit
+- **THEN** deletion reports an error and preserves the stored package until its reference status is reconciled
+
 ### Requirement: CM-24 Management controls and mutation feedback
 The website SHALL ask for confirmation before staff deletes a problem or an authorized user deletes a testcase package through the package manager. It SHALL show mutation failures and prevent duplicate in-flight requests within each problem form, administrative list, and package manager. On success, it SHALL report the mutation and refresh the affected listing or detail, or open the new problem's detail after creation.
 
