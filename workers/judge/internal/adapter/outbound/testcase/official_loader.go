@@ -3,20 +3,20 @@ package testcase
 import (
 	"archive/zip"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
+	"go-judge-system/pkg/judge"
 	"go-judge-system/workers/judge/internal/application/port/outbound"
 	workerdomain "go-judge-system/workers/judge/internal/domain"
 
@@ -25,9 +25,9 @@ import (
 
 const (
 	defaultCacheBaseDir      = "/cache/testcases"
-	defaultHTTPTimeout       = 30 * time.Second
 	defaultMaxZipBytes       = 64 * 1024 * 1024
 	defaultMaxExtractedBytes = 128 * 1024 * 1024
+	cacheGenerationFile      = ".current"
 	cacheVersionFile         = ".version"
 	cacheSHA256File          = ".sha256"
 	cacheZipFile             = "bundle.zip"
@@ -49,7 +49,7 @@ type OfficialLoader struct {
 func NewOfficialLoader(logger *zap.Logger) *OfficialLoader {
 	return &OfficialLoader{
 		httpClient: &http.Client{
-			Timeout: defaultHTTPTimeout,
+			Timeout: judge.TestcaseDownloadTimeout,
 		},
 		cacheBaseDir:      defaultCacheBaseDir,
 		maxZipBytes:       defaultMaxZipBytes,
@@ -66,89 +66,76 @@ func (l *OfficialLoader) Load(
 		return outbound.OfficialTestCaseBundle{}, err
 	}
 
-	cacheDir := filepath.Join(l.cacheBaseDir, fmt.Sprintf("problem_%d", metadata.ProblemID))
+	objectURL, err := url.Parse(metadata.ZipDownloadURL)
+	if err != nil || objectURL.Host == "" || (objectURL.Scheme != "http" && objectURL.Scheme != "https") {
+		return outbound.OfficialTestCaseBundle{}, workerdomain.MarkNonRetryable(fmt.Errorf("invalid testcase download URL"))
+	}
+	identity := sha256.Sum256([]byte(objectURL.Scheme + "://" + objectURL.Host + objectURL.EscapedPath()))
+	cacheDir := filepath.Join(l.cacheBaseDir, fmt.Sprintf("problem_%d", metadata.ProblemID), hex.EncodeToString(identity[:]))
 	version := strconv.Itoa(metadata.Version)
-	versionFile := filepath.Join(cacheDir, cacheVersionFile)
-	if cachedVersion, err := os.ReadFile(versionFile); err == nil && strings.TrimSpace(string(cachedVersion)) == version {
-		if checksum, ok := l.verifiedCachedChecksum(cacheDir); ok {
-			l.logger.Debug(
-				"official testcase cache hit",
-				zap.Int64("problem_id", metadata.ProblemID),
-				zap.Int("version", metadata.Version),
-			)
-			return l.bundleFromDir(cacheDir, metadata, checksum)
+	referenceFile := filepath.Join(cacheDir, cacheGenerationFile)
+	if reference, err := os.ReadFile(referenceFile); err == nil {
+		name := string(reference)
+		if filepath.Base(name) == name && strings.HasPrefix(name, "generation-") {
+			generation := filepath.Join(cacheDir, name)
+			cachedVersion, err := os.ReadFile(filepath.Join(generation, cacheVersionFile))
+			if err == nil && string(cachedVersion) == version {
+				if checksum, valid := l.verifiedCachedChecksum(generation); valid {
+					if bundle, err := l.bundleFromDir(generation, metadata, checksum); err == nil {
+						l.logger.Debug("official testcase cache hit", zap.Int64("problem_id", metadata.ProblemID), zap.Int("version", metadata.Version))
+						return bundle, nil
+					}
+				}
+			}
 		}
-		l.logger.Debug(
-			"official testcase cache missing or mismatched checksum, refreshing bundle",
-			zap.Int64("problem_id", metadata.ProblemID),
-			zap.Int("version", metadata.Version),
-		)
 	}
 
-	l.logger.Info(
-		"official testcase cache miss, downloading bundle",
-		zap.Int64("problem_id", metadata.ProblemID),
-		zap.Int("version", metadata.Version),
-	)
-
-	zipPath := filepath.Join(os.TempDir(), fmt.Sprintf("tc_%d_%d_%s.zip", metadata.ProblemID, metadata.Version, randHex(6)))
-	checksum, err := l.downloadToFile(ctx, metadata.ZipDownloadURL, zipPath)
+	l.logger.Info("official testcase cache miss, downloading bundle", zap.Int64("problem_id", metadata.ProblemID), zap.Int("version", metadata.Version))
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("create testcase cache directory: %w", err)
+	}
+	generation, err := os.MkdirTemp(cacheDir, "generation-")
 	if err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("download testcase bundle: %w", err)
+		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("create testcase cache generation: %w", err)
 	}
+	published := false
 	defer func() {
-		if err := os.Remove(zipPath); err != nil && !os.IsNotExist(err) {
-			l.logger.Debug("failed to remove temp testcase zip", zap.String("path", zipPath), zap.Error(err))
-		}
-	}()
-
-	tmpDir := fmt.Sprintf("%s_tmp_%s", cacheDir, randHex(8))
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("create testcase cache temp dir: %w", err)
-	}
-	removeTmp := true
-	defer func() {
-		if removeTmp {
-			if err := os.RemoveAll(tmpDir); err != nil {
-				l.logger.Debug("failed to remove temp testcase dir", zap.String("path", tmpDir), zap.Error(err))
+		if !published {
+			if err := os.RemoveAll(generation); err != nil {
+				l.logger.Debug("failed to remove testcase staging directory", zap.Error(err))
 			}
 		}
 	}()
 
-	if err := l.extractZip(zipPath, tmpDir); err != nil {
+	zipPath := filepath.Join(generation, cacheZipFile)
+	checksum, err := l.downloadToFile(ctx, metadata.ZipDownloadURL, zipPath)
+	if err != nil {
+		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("download testcase bundle: %w", err)
+	}
+	if err := l.extractZip(zipPath, generation); err != nil {
 		return outbound.OfficialTestCaseBundle{}, workerdomain.MarkNonRetryable(fmt.Errorf("extract testcase bundle: %w", err))
 	}
-	if _, err := l.loadFromDir(tmpDir, metadata.TestCount); err != nil {
+	bundle, err := l.bundleFromDir(generation, metadata, checksum)
+	if err != nil {
 		return outbound.OfficialTestCaseBundle{}, err
 	}
-	if err := copyFileAtomic(zipPath, filepath.Join(tmpDir, cacheZipFile)); err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("write testcase cache zip: %w", err)
-	}
-	if err := writeFileAtomic(filepath.Join(tmpDir, cacheVersionFile), []byte(version), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(generation, cacheVersionFile), []byte(version), 0644); err != nil {
 		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("write testcase cache version: %w", err)
 	}
-	if err := writeFileAtomic(filepath.Join(tmpDir, cacheSHA256File), []byte(checksum), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(generation, cacheSHA256File), []byte(checksum), 0644); err != nil {
 		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("write testcase cache checksum: %w", err)
 	}
+	if err := os.Chmod(generation, 0755); err != nil {
+		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("make testcase generation readable to the sandbox: %w", err)
+	}
 
-	if err := os.MkdirAll(l.cacheBaseDir, 0755); err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("create testcase cache base dir: %w", err)
+	// Jobs keep paths to the resolved generation. Replacing only the reference
+	// leaves every previously published generation available to active jobs.
+	if err := publishGeneration(referenceFile, filepath.Base(generation)); err != nil {
+		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("publish testcase generation: %w", err)
 	}
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("remove stale testcase cache: %w", err)
-	}
-	if err := os.Rename(tmpDir, cacheDir); err != nil {
-		return outbound.OfficialTestCaseBundle{}, fmt.Errorf("promote testcase cache: %w", err)
-	}
-	removeTmp = false
-
-	l.logger.Info(
-		"official testcase bundle cached",
-		zap.Int64("problem_id", metadata.ProblemID),
-		zap.Int("version", metadata.Version),
-		zap.Int("test_count", metadata.TestCount),
-	)
-	return l.bundleFromDir(cacheDir, metadata, checksum)
+	published = true
+	return bundle, nil
 }
 
 func (l *OfficialLoader) verifiedCachedChecksum(cacheDir string) (string, bool) {
@@ -235,44 +222,21 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmpPath := fmt.Sprintf("%s.tmp.%s", path, randHex(6))
-	if err := os.WriteFile(tmpPath, data, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
-}
-
-func copyFileAtomic(srcPath, destPath string) error {
-	tmpPath := fmt.Sprintf("%s.tmp.%s", destPath, randHex(6))
-	src, err := os.Open(srcPath)
+func publishGeneration(referencePath, name string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(referencePath), ".current-")
 	if err != nil {
 		return err
 	}
-	defer src.Close()
-
-	dest, err := os.Create(tmpPath)
-	if err != nil {
-		return err
+	defer os.Remove(tmp.Name())
+	_, writeErr := tmp.WriteString(name)
+	closeErr := tmp.Close()
+	if writeErr != nil {
+		return writeErr
 	}
-	if _, err := io.Copy(dest, src); err != nil {
-		_ = dest.Close()
-		_ = os.Remove(tmpPath)
-		return err
+	if closeErr != nil {
+		return closeErr
 	}
-	if err := dest.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return os.Rename(tmp.Name(), referencePath)
 }
 
 func (l *OfficialLoader) bundleFromDir(
@@ -412,12 +376,4 @@ func (l *OfficialLoader) loadFromDir(dir string, testCount int) ([]outbound.Exec
 		})
 	}
 	return testCases, nil
-}
-
-func randHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 16)
-	}
-	return hex.EncodeToString(b)
 }

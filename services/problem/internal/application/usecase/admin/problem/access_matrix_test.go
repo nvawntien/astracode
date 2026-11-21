@@ -35,6 +35,14 @@ func (r *accessMatrixProblemRepository) GetByID(_ context.Context, _ int64) (*en
 	return &copy, nil
 }
 
+func (r *accessMatrixProblemRepository) WithLockedProblem(ctx context.Context, id int64, mutate func(context.Context, *entity.Problem) error) error {
+	problem, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return mutate(ctx, problem)
+}
+
 func (r *accessMatrixProblemRepository) GetBySlug(_ context.Context, _ string) (*entity.Problem, error) {
 	return nil, domain.ErrProblemNotFound
 }
@@ -89,8 +97,8 @@ func TestCreateProblemRoleMatrix(t *testing.T) {
 		role    rbac.Role
 		allowed bool
 	}{
-		{role: rbac.RoleUser},
-		{role: rbac.RoleContributor, allowed: true},
+		{role: "contributor"},
+		{role: rbac.RoleUser, allowed: true},
 		{role: rbac.RoleModerator, allowed: true},
 		{role: rbac.RoleAdmin, allowed: true},
 	}
@@ -128,10 +136,11 @@ func TestGetProblemRoleAndOwnershipMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner draft", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor owner published", role: rbac.RoleContributor, actor: "owner", allowed: true},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
+		{name: "user owns draft", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user owns published", role: rbac.RoleUser, actor: "owner", allowed: true},
+		{name: "other author's draft", role: rbac.RoleUser, actor: "other", hidden: true},
+		{name: "other author's published problem", role: rbac.RoleUser, actor: "other"},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
 		{name: "moderator", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -154,6 +163,17 @@ func TestGetProblemRoleAndOwnershipMatrix(t *testing.T) {
 	}
 }
 
+func TestGetProblemRejectsMissingActorAndReportsMissingProblem(t *testing.T) {
+	useCase := NewGetProblemUseCase(&accessMatrixProblemRepository{}, nil)
+	params := dto.ProblemIDRequest{ID: 42}
+	if _, err := useCase.Execute(context.Background(), matrixClaims(rbac.RoleUser, ""), params); !errors.Is(err, domain.ErrActorUnauthenticated) {
+		t.Fatalf("missing actor error = %v", err)
+	}
+	if _, err := useCase.Execute(context.Background(), matrixClaims(rbac.RoleAdmin, "admin"), params); !errors.Is(err, domain.ErrProblemNotFound) {
+		t.Fatalf("missing problem error = %v", err)
+	}
+}
+
 func TestUpdateProblemRoleOwnershipAndPublicationMatrix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -163,10 +183,10 @@ func TestUpdateProblemRoleOwnershipAndPublicationMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner draft", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
-		{name: "contributor owner published", role: rbac.RoleContributor, actor: "owner"},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
+		{name: "user owner draft", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user non-owner", role: rbac.RoleUser, actor: "other", hidden: true},
+		{name: "user owner published", role: rbac.RoleUser, actor: "owner"},
 		{name: "moderator other published", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin other published", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -205,10 +225,10 @@ func TestDeleteProblemRoleOwnershipAndPublicationMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner draft", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
-		{name: "contributor owner published", role: rbac.RoleContributor, actor: "owner"},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
+		{name: "user owner draft", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user non-owner", role: rbac.RoleUser, actor: "other", hidden: true},
+		{name: "user owner published", role: rbac.RoleUser, actor: "owner"},
 		{name: "moderator other published", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin other published", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -235,7 +255,7 @@ func TestDeleteProblemRoleOwnershipAndPublicationMatrix(t *testing.T) {
 
 func TestAdminListRequiresModerator(t *testing.T) {
 	t.Parallel()
-	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin} {
+	for _, role := range []rbac.Role{rbac.RoleUser, "contributor", rbac.RoleModerator, rbac.RoleAdmin} {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			t.Parallel()
@@ -258,7 +278,7 @@ func TestPublishAndHideRequireModeratorInUseCase(t *testing.T) {
 		allowed bool
 	}{
 		{role: rbac.RoleUser},
-		{role: rbac.RoleContributor},
+		{role: "contributor"},
 		{role: rbac.RoleModerator, allowed: true},
 		{role: rbac.RoleAdmin, allowed: true},
 	}

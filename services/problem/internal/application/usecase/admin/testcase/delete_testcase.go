@@ -3,6 +3,8 @@ package testcase
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
@@ -10,59 +12,47 @@ import (
 	inbound "go-judge-system/services/problem/internal/application/port/inbound/admin"
 	"go-judge-system/services/problem/internal/application/port/outbound"
 	"go-judge-system/services/problem/internal/domain"
+	"go-judge-system/services/problem/internal/domain/entity"
 )
 
 type deleteTestCaseUseCase struct {
-	problemRepo     outbound.ProblemRepository
-	testcaseRepo    outbound.TestCaseRepository
-	testcaseStorage outbound.TestCaseStorage
+	problemRepo  outbound.ProblemRepository
+	testcaseRepo outbound.TestCaseRepository
 }
 
-func NewDeleteTestCaseUseCase(problemRepo outbound.ProblemRepository, testcaseRepo outbound.TestCaseRepository, testcaseStorage outbound.TestCaseStorage) inbound.DeleteTestCaseUseCase {
+func NewDeleteTestCaseUseCase(problemRepo outbound.ProblemRepository, testcaseRepo outbound.TestCaseRepository) inbound.DeleteTestCaseUseCase {
 	return &deleteTestCaseUseCase{
-		problemRepo:     problemRepo,
-		testcaseRepo:    testcaseRepo,
-		testcaseStorage: testcaseStorage,
+		problemRepo:  problemRepo,
+		testcaseRepo: testcaseRepo,
 	}
 }
 
 func (uc *deleteTestCaseUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest) error {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleUser) {
 		return domain.ErrForbidden
 	}
 
-	problem, err := uc.problemRepo.GetByID(ctx, params.ID)
-	if err != nil {
-		if errors.Is(err, domain.ErrProblemNotFound) {
-			return domain.ErrProblemNotFound
-		}
-		return domain.ErrInternalServer.Wrap(err)
-	}
-
-	if claims.Role == rbac.RoleContributor {
-		if problem.AuthorID != claims.UserID {
+	var key string
+	err := uc.problemRepo.WithLockedProblem(ctx, params.ID, func(txCtx context.Context, locked *entity.Problem) error {
+		if !canMutateTestcase(claims, locked) {
 			return domain.ErrForbidden
 		}
-		if !problem.IsHidden {
-			return domain.ErrForbidden
-		}
-	}
 
-	tc, err := uc.testcaseRepo.GetByProblemID(ctx, problem.ID)
-	if err != nil {
+		tc, err := uc.testcaseRepo.GetByProblemID(txCtx, locked.ID)
 		if errors.Is(err, domain.ErrTestCaseNotFound) {
 			return domain.ErrTestCaseNotFound
 		}
-		return domain.ErrInternalServer.Wrap(err)
+		if err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		key = tc.ZipObjectKey
+		if err := uc.testcaseRepo.DeleteByProblemID(txCtx, locked.ID); err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		return nil
+	})
+	if errors.Is(err, outbound.ErrMutationCommitUncertain) {
+		slog.WarnContext(ctx, "testcase deletion commit needs reconciliation", "object_key", key)
 	}
-
-	if err := uc.testcaseStorage.DeleteTestCase(ctx, tc.ZipObjectKey); err != nil {
-		return domain.ErrInternalServer.Wrap(err)
-	}
-
-	if err := uc.testcaseRepo.DeleteByProblemID(ctx, problem.ID); err != nil {
-		return domain.ErrInternalServer.Wrap(err)
-	}
-
-	return nil
+	return err
 }

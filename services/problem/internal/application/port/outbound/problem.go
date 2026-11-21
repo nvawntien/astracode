@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go-judge-system/services/problem/internal/domain/entity"
@@ -34,7 +35,11 @@ type SubmissionProblemCache interface {
 	Delete(ctx context.Context, problemID int64) error
 }
 
+// ErrMutationCommitUncertain means callers must retain any staged objects until reconciliation.
+var ErrMutationCommitUncertain = errors.New("problem mutation commit could not be confirmed")
+
 type ProblemRepository interface {
+	WithLockedProblem(ctx context.Context, id int64, mutate func(context.Context, *entity.Problem) error) error
 	Create(ctx context.Context, problem *entity.Problem) error
 	GetByID(ctx context.Context, id int64) (*entity.Problem, error)
 	GetBySlug(ctx context.Context, slug string) (*entity.Problem, error)

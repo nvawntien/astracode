@@ -51,10 +51,8 @@ func TestGetProblemAccessMatrix(t *testing.T) {
 		wantAllow bool
 	}{
 		{name: "user public", role: rbac.RoleUser, actorID: "user-1", wantAllow: true},
-		{name: "user hidden", role: rbac.RoleUser, actorID: "user-1", hidden: true},
-		{name: "contributor public", role: rbac.RoleContributor, actorID: "contributor-a", wantAllow: true},
-		{name: "contributor own hidden", role: rbac.RoleContributor, actorID: "contributor-a", hidden: true, authorID: "contributor-a", wantAllow: true},
-		{name: "contributor other hidden", role: rbac.RoleContributor, actorID: "contributor-a", hidden: true, authorID: "contributor-b"},
+		{name: "user own hidden", role: rbac.RoleUser, actorID: "user-1", hidden: true, authorID: "user-1", wantAllow: true},
+		{name: "user other hidden", role: rbac.RoleUser, actorID: "user-1", hidden: true, authorID: "user-2"},
 		{name: "moderator public", role: rbac.RoleModerator, actorID: "moderator-1", wantAllow: true},
 		{name: "moderator hidden", role: rbac.RoleModerator, actorID: "moderator-1", hidden: true, wantAllow: true},
 		{name: "admin public", role: rbac.RoleAdmin, actorID: "admin-1", wantAllow: true},
@@ -83,7 +81,7 @@ func TestGetProblemAccessMatrix(t *testing.T) {
 }
 
 func TestGetProblemMissingAndDeletedAreNotFoundForEveryRole(t *testing.T) {
-	roles := []rbac.Role{rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin}
+	roles := []rbac.Role{rbac.RoleUser, rbac.RoleModerator, rbac.RoleAdmin}
 	deletedAt := time.Now()
 
 	for _, role := range roles {
@@ -117,6 +115,7 @@ func TestGetProblemValidatesActorBeforeRepository(t *testing.T) {
 		{name: "missing actor user ID", req: inbound.GetProblemRequest{ProblemID: 42, ActorRole: rbac.RoleUser}, want: domain.ErrActorUnauthenticated},
 		{name: "missing actor role", req: inbound.GetProblemRequest{ProblemID: 42, ActorUserID: "actor"}, want: domain.ErrActorUnauthenticated},
 		{name: "unsupported actor role", req: inbound.GetProblemRequest{ProblemID: 42, ActorUserID: "actor", ActorRole: rbac.Role("owner")}, want: domain.ErrPermissionDenied},
+		{name: "retired actor role", req: inbound.GetProblemRequest{ProblemID: 42, ActorUserID: "actor", ActorRole: "contributor"}, want: domain.ErrPermissionDenied},
 	}
 
 	for _, tt := range tests {

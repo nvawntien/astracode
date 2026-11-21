@@ -67,7 +67,7 @@ func activeTag() *entity.Tag {
 
 func TestAdminTagListRequiresModerator(t *testing.T) {
 	t.Parallel()
-	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin} {
+	for _, role := range []rbac.Role{rbac.RoleUser, "contributor", rbac.RoleModerator, rbac.RoleAdmin} {
 		role := role
 		t.Run(string(role), func(t *testing.T) {
 			t.Parallel()
@@ -124,7 +124,7 @@ func TestTagMutationRoleMatrix(t *testing.T) {
 	for _, operation := range operations {
 		operation := operation
 		t.Run(operation.name, func(t *testing.T) {
-			for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin} {
+			for _, role := range []rbac.Role{rbac.RoleUser, "contributor", rbac.RoleModerator, rbac.RoleAdmin} {
 				role := role
 				t.Run(string(role), func(t *testing.T) {
 					t.Parallel()

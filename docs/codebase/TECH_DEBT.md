@@ -19,7 +19,8 @@
 ## Potential concerns — require verification before remediation
 
 * **At-least-once duplicate behavior:** Job producer, consumer, and PostgreSQL are not a single transaction. Attempt IDs and outbox/result guards exist, but audit live failure/rebalance behavior before asserting exactly-once guarantees.
-* **Testcase cache concurrency:** cache promotion has no cross-process lock. It is likely safe for one Compose worker but needs testing before horizontally scaling shared cache volumes.
+* **Testcase cache growth and sharing:** each fill publishes a new generation by atomically replacing a reference, so there is no cross-process lock, but superseded generations and legacy `problem_<id>` directories are not reclaimed automatically. Reclaim them only after draining every worker and executor that shares the volume. Horizontally scaling shared cache volumes still needs testing.
+* **Orphaned testcase objects:** replacing or deleting a testcase package leaves the previous MinIO object until an operator runs `go run ./cmd/reconcile-testcase-objects` from `services/problem` during a quiesced maintenance window.
 * **Official data at rest:** worker sanitizes result messages, but `submission_results` has input/expected-output fields and interactive calls can populate output. Confirm data-retention/access-control policy before changing schemas or APIs.
 * **Transport security:** internal gRPC clients are configured with explicit insecure credentials in provider wiring for the Compose network. Verify TLS/mTLS requirements outside local Docker before production deployment.
 * **Official-testcase gRPC boundary:** `ProblemService.GetTestCase` returns a presigned official-testcase ZIP URL to an unauthenticated internal gRPC caller. It is not exposed through the public gateway, but therefore relies entirely on network isolation; add authenticated service identity/authorization before allowing untrusted workloads on that network.

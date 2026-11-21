@@ -48,14 +48,43 @@ Full verification adds Go race tests, the judge benchmark module's tests, vet
 and race tests, syntax checks for both benchmark collectors, and the website
 unit tests and production build. The full script does not run CI's separate
 website lint warning-budget and tooling-format checks, gateway client contract
-test, Envoy suite, production Compose assertions, deployment-script checks, or
-container image builds.
+test, Envoy suite, production Compose assertions, deployment-script checks,
+PostgreSQL integration suites, or container image builds.
+
+Three PostgreSQL integration suites skip unless a port variable points at a
+disposable PostgreSQL on `127.0.0.1` with the fixture role and a database that
+has none of the suite's tables: `TestProblemMutationPostgresConcurrency` and
+`TestTestcaseMutationPostgresConcurrency` (`services/problem`,
+`ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT`, role and database `problem_fixture` /
+`problem_mutation_test`) and `TestGetCurrentDetailPostgresSnapshots`
+(`services/submission`, `ASTRACODE_DETAIL_TEST_PGPORT`, `detail_fixture` /
+`submission_detail_test`). `scripts/verify.sh` does not start a database, so
+run them by hand and recreate the database before each suite:
+
+```bash
+docker run -d --name astracode-pg-fixture -p 127.0.0.1:55432:5432 \
+  -e POSTGRES_PASSWORD=fixture-admin postgres:15.6-alpine
+docker exec astracode-pg-fixture psql -U postgres \
+  -c "CREATE ROLE problem_fixture LOGIN PASSWORD 'problem_fixture'" \
+  -c "CREATE ROLE detail_fixture LOGIN PASSWORD 'detail_fixture'"
+# Before each suite (use submission_detail_test / detail_fixture for the third):
+docker exec astracode-pg-fixture psql -U postgres \
+  -c "DROP DATABASE IF EXISTS problem_mutation_test WITH (FORCE)" \
+  -c "CREATE DATABASE problem_mutation_test OWNER problem_fixture"
+(cd services/problem && ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT=55432 \
+  go test ./internal/adapter/outbound/persistence/postgres \
+  -run '^TestProblemMutationPostgresConcurrency$' -count=1 -v)
+docker rm -f astracode-pg-fixture
+```
+
+CI's `postgres-integration` job does the same with a PostgreSQL 15.6 service
+container and fails when a suite is skipped or does not pass.
 
 GitHub Actions workflows in `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race, judge benchmark and collector checks, website typecheck/lint/tooling format/unit tests/gateway client contract/build, Envoy checks, development and production Compose validation, deployment-script checks, image builds |
+| `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race, PostgreSQL integration suites (`postgres-integration` job), judge benchmark and collector checks, website typecheck/lint/tooling format/unit tests/gateway client contract/build, Envoy checks, development and production Compose validation, deployment-script checks, image builds |
 | `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
 | `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |

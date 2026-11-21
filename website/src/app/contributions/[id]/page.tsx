@@ -1,30 +1,34 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeading } from '@/components/AppShell';
 import { AdminProblemForm } from '@/components/admin/AdminProblemForm';
-import { adminCard } from '@/components/admin/AdminStates';
+import { AdminDialog, adminCard } from '@/components/admin/AdminStates';
 import { TestcaseManager } from '@/components/admin/TestcaseManager';
 import { useToast } from '@/components/ToastProvider';
 import { ErrorState, SkeletonBar, buttonStyles } from '@/components/ui';
 import { ApiError, NetworkError, contributionProblemApi } from '@/lib/api';
 import type { AdminProblemDetail, CreateAdminProblemRequest, UpdateAdminProblemRequest } from '@/lib/types';
 
-function errorMessage(error: unknown) {
+function errorMessage(error: unknown, fallback = 'The contribution could not be loaded.') {
   if (error instanceof NetworkError) return 'The Problem Service could not be reached.';
   if (error instanceof ApiError) return error.message || `Request failed with ${error.httpStatus}.`;
-  return 'The contribution could not be loaded.';
+  return fallback;
 }
 
 export default function ContributionDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const problemId = useMemo(() => Number(params.id), [params.id]);
   const { showToast } = useToast();
   const [problem, setProblem] = useState<AdminProblemDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletePending = useRef(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!Number.isSafeInteger(problemId) || problemId < 1) {
@@ -57,6 +61,23 @@ export default function ContributionDetailPage() {
     setProblem(await contributionProblemApi.getOwn(problemId));
   };
 
+  const deleteDraft = async () => {
+    if (deletePending.current) return;
+    deletePending.current = true;
+    setDeleting(true);
+    try {
+      await contributionProblemApi.deleteOwn(problemId);
+      setConfirmDelete(false);
+      showToast('Problem draft deleted', 'success');
+      router.replace('/contributions');
+    } catch (deleteError) {
+      showToast(errorMessage(deleteError, 'The draft could not be deleted.'), 'error');
+    } finally {
+      setDeleting(false);
+      deletePending.current = false;
+    }
+  };
+
   if (loading) {
     return (
       <div aria-label="Loading contribution" style={{ display: 'grid', gap: 12 }}>
@@ -75,7 +96,7 @@ export default function ContributionDetailPage() {
         <section style={{ ...adminCard, padding: 20 }}>
           <h2 style={{ margin: '0 0 8px', fontSize: 16 }}>Published contribution</h2>
           <p style={{ margin: '0 0 16px', color: 'var(--text2)', lineHeight: 1.6 }}>
-            Published problems are read-only for Contributors. A Moderator or Admin can return the problem to draft or apply moderation changes.
+            A Moderator or Admin can return this problem to draft.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <Link href={`/problems/${encodeURIComponent(problem.slug)}`} className="ac-hover-accent" style={buttonStyles.primary(38)}>
@@ -92,7 +113,15 @@ export default function ContributionDetailPage() {
 
   return (
     <>
-      <PageHeading title={problem.title} subtitle={`${problem.slug} · Draft`} />
+      <PageHeading
+        title={problem.title}
+        subtitle={`${problem.slug} · Draft`}
+        actions={
+          <button type="button" onClick={() => setConfirmDelete(true)} style={buttonStyles.secondary(38)}>
+            Delete draft
+          </button>
+        }
+      />
       <AdminProblemForm
         mode="edit"
         problem={problem}
@@ -111,6 +140,24 @@ export default function ContributionDetailPage() {
           setProblem(await contributionProblemApi.getOwn(problemId));
         }}
       />
+      {confirmDelete && (
+        <AdminDialog title="Delete this draft?" onClose={() => !deleting && setConfirmDelete(false)}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" onClick={() => setConfirmDelete(false)} disabled={deleting} style={buttonStyles.secondary(38)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={deleteDraft}
+              disabled={deleting}
+              aria-busy={deleting}
+              style={{ ...buttonStyles.primary(38), background: 'var(--error)' }}
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        </AdminDialog>
+      )}
     </>
   );
 }

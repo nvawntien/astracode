@@ -3,6 +3,7 @@ package testcase
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
@@ -26,7 +27,7 @@ func NewGetTestCaseUseCase(problemRepo outbound.ProblemRepository, testcaseRepo 
 }
 
 func (uc *getTestCaseUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest) (dto.TestCaseMetadataResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.TestCaseMetadataResponse{}, domain.ErrForbidden
 	}
 

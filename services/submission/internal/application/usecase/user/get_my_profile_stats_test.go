@@ -75,7 +75,7 @@ func TestGetMyProfileStatsReturnsAuthoritativeRepositoryAggregates(t *testing.T)
 }
 
 func TestGetMyProfileStatsZeroAndAuthorizationBehavior(t *testing.T) {
-	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin} {
+	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleModerator, rbac.RoleAdmin} {
 		t.Run(string(role), func(t *testing.T) {
 			repo := &fakeProfileStatsRepository{}
 			got, err := NewGetMyProfileStatsUseCase(repo).Execute(context.Background(), auth.Claims{UserID: "actor", Role: role})
@@ -96,6 +96,7 @@ func TestGetMyProfileStatsZeroAndAuthorizationBehavior(t *testing.T) {
 	}{
 		{name: "missing actor", claims: auth.Claims{Role: rbac.RoleUser}, want: domain.ErrSubmissionUnauthenticated},
 		{name: "unknown role", claims: auth.Claims{UserID: "actor", Role: rbac.Role("auditor")}, want: domain.ErrSubmissionForbidden},
+		{name: "retired role", claims: auth.Claims{UserID: "actor", Role: "contributor"}, want: domain.ErrSubmissionForbidden},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeProfileStatsRepository{}

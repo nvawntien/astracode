@@ -3,18 +3,15 @@ package rbac
 type Role string
 
 const (
-	RoleUser        Role = "user"
-	RoleContributor Role = "contributor"
-	RoleModerator   Role = "moderator"
-	RoleAdmin       Role = "admin"
+	RoleUser      Role = "user"
+	RoleModerator Role = "moderator"
+	RoleAdmin     Role = "admin"
 )
 
 func (r Role) Level() int {
 	switch r {
 	case RoleUser:
 		return 1
-	case RoleContributor:
-		return 2
 	case RoleModerator:
 		return 3
 	case RoleAdmin:
@@ -25,7 +22,8 @@ func (r Role) Level() int {
 }
 
 func (r Role) AtLeast(min Role) bool {
-	return r.Level() >= min.Level()
+	minLevel := min.Level()
+	return minLevel > 0 && r.Level() >= minLevel
 }
 
 func ParseRole(value string) (Role, bool) {

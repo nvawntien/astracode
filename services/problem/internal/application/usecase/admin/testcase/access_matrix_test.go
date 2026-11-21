@@ -25,6 +25,14 @@ func (r *accessMatrixProblemRepository) GetByID(context.Context, int64) (*entity
 	return &copy, nil
 }
 
+func (r *accessMatrixProblemRepository) WithLockedProblem(ctx context.Context, id int64, mutate func(context.Context, *entity.Problem) error) error {
+	problem, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return mutate(ctx, problem)
+}
+
 type accessMatrixTestCaseRepository struct {
 	outbound.TestCaseRepository
 	deleted bool
@@ -66,10 +74,10 @@ func TestGetTestCaseRoleAndOwnershipMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner hidden", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor owner published metadata", role: rbac.RoleContributor, actor: "owner", allowed: true},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
+		{name: "user owner hidden", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user owner published metadata", role: rbac.RoleUser, actor: "owner", allowed: true},
+		{name: "user non-owner", role: rbac.RoleUser, actor: "other", hidden: true},
 		{name: "moderator", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -104,10 +112,10 @@ func TestUploadTestCaseRoleOwnershipAndPublicationMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner hidden", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor owner published", role: rbac.RoleContributor, actor: "owner"},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
+		{name: "user owner hidden", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user owner published", role: rbac.RoleUser, actor: "owner"},
+		{name: "user non-owner", role: rbac.RoleUser, actor: "other", hidden: true},
 		{name: "moderator", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -142,10 +150,10 @@ func TestDeleteTestCaseRoleOwnershipAndPublicationMatrix(t *testing.T) {
 		hidden  bool
 		allowed bool
 	}{
-		{name: "user", role: rbac.RoleUser, actor: "owner", hidden: true},
-		{name: "contributor owner hidden", role: rbac.RoleContributor, actor: "owner", hidden: true, allowed: true},
-		{name: "contributor owner published", role: rbac.RoleContributor, actor: "owner"},
-		{name: "contributor non-owner", role: rbac.RoleContributor, actor: "other", hidden: true},
+		{name: "retired role", role: "contributor", actor: "owner", hidden: true},
+		{name: "user owner hidden", role: rbac.RoleUser, actor: "owner", hidden: true, allowed: true},
+		{name: "user owner published", role: rbac.RoleUser, actor: "owner"},
+		{name: "user non-owner", role: rbac.RoleUser, actor: "other", hidden: true},
 		{name: "moderator", role: rbac.RoleModerator, actor: "moderator", allowed: true},
 		{name: "admin", role: rbac.RoleAdmin, actor: "admin", allowed: true},
 	}
@@ -154,18 +162,17 @@ func TestDeleteTestCaseRoleOwnershipAndPublicationMatrix(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			repository := &accessMatrixTestCaseRepository{}
-			storage := &accessMatrixTestCaseStorage{}
 			err := NewDeleteTestCaseUseCase(
-				&accessMatrixProblemRepository{problem: testcaseProblem(test.hidden)}, repository, storage,
+				&accessMatrixProblemRepository{problem: testcaseProblem(test.hidden)}, repository,
 			).Execute(context.Background(), testcaseClaims(test.role, test.actor), dto.ProblemIDRequest{ID: 42})
 			if test.allowed {
-				if err != nil || !repository.deleted || !storage.deleted {
-					t.Fatalf("error/deleted/storage = %v/%t/%t", err, repository.deleted, storage.deleted)
+				if err != nil || !repository.deleted {
+					t.Fatalf("error/deleted = %v/%t", err, repository.deleted)
 				}
 				return
 			}
-			if !errors.Is(err, domain.ErrForbidden) || repository.deleted || storage.deleted {
-				t.Fatalf("error/deleted/storage = %v/%t/%t, want forbidden/no mutation", err, repository.deleted, storage.deleted)
+			if !errors.Is(err, domain.ErrForbidden) || repository.deleted {
+				t.Fatalf("error/deleted = %v/%t, want forbidden/no mutation", err, repository.deleted)
 			}
 		})
 	}

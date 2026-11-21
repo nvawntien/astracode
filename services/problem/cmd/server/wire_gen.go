@@ -104,7 +104,7 @@ func InitializeApp(cfg *config.Config) (*container.App, error) {
 	}
 	uploadTestCaseUseCase := testcase.NewUploadTestCaseUseCase(problemRepository, testCaseRepository, testCaseStorage)
 	uploadTestCaseHandler := testcase2.NewUploadTestCaseHandler(uploadTestCaseUseCase)
-	deleteTestCaseUseCase := testcase.NewDeleteTestCaseUseCase(problemRepository, testCaseRepository, testCaseStorage)
+	deleteTestCaseUseCase := testcase.NewDeleteTestCaseUseCase(problemRepository, testCaseRepository)
 	deleteTestCaseHandler := testcase2.NewDeleteTestCaseHandler(deleteTestCaseUseCase)
 	adminHandler := handler.NewAdminHandler(createProblemHandler, problemListProblemsHandler, updateProblemHandler, problemGetProblemHandler, publishProblemHandler, hiddenProblemHandler, deleteProblemHandler, tagListTagsHandler, createTagHandler, updateTagHandler, deleteTagHandler, getTestCaseHandler, uploadTestCaseHandler, deleteTestCaseHandler)
 	jwtConfig := cfg.JWT

@@ -5,6 +5,7 @@ import (
 	"errors"
 	pkgauth "go-judge-system/pkg/auth"
 	"go-judge-system/pkg/config"
+	"go-judge-system/pkg/rbac"
 	"go-judge-system/pkg/response"
 	"go-judge-system/services/auth/internal/application/dto"
 	"go-judge-system/services/auth/internal/application/port/inbound"
@@ -94,6 +95,10 @@ func (uc *loginUseCase) Execute(ctx context.Context, req dto.LoginRequest) (*dto
 		if user.IsSuspended {
 			return nil, domain.ErrUserSuspended
 		}
+	}
+
+	if !user.Role.AtLeast(rbac.RoleUser) {
+		return nil, domain.ErrInvalidCredentials
 	}
 
 	accessToken, accessExpire, err := uc.jwtProvider.GenerateAccessToken(ctx, user.ID, user.Username, user.Role)

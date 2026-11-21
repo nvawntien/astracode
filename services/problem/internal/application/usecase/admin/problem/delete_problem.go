@@ -2,7 +2,7 @@ package problem
 
 import (
 	"context"
-	"errors"
+	"strings"
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
@@ -10,6 +10,7 @@ import (
 	inbound "go-judge-system/services/problem/internal/application/port/inbound/admin"
 	"go-judge-system/services/problem/internal/application/port/outbound"
 	"go-judge-system/services/problem/internal/domain"
+	"go-judge-system/services/problem/internal/domain/entity"
 )
 
 type deleteProblemUseCase struct {
@@ -30,29 +31,21 @@ func newDeleteProblemUseCase(problemRepo outbound.ProblemRepository, cache outbo
 }
 
 func (uc *deleteProblemUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest) error {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleUser) {
 		return domain.ErrForbidden
 	}
 
-	problem, err := uc.problemRepo.GetByID(ctx, params.ID)
+	err := uc.problemRepo.WithLockedProblem(ctx, params.ID, func(txCtx context.Context, locked *entity.Problem) error {
+		if !claims.Role.AtLeast(rbac.RoleModerator) && (locked.AuthorID != claims.UserID || !locked.IsHidden) {
+			return domain.ErrForbidden
+		}
+		if err := uc.problemRepo.Delete(txCtx, params.ID); err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		return nil
+	})
 	if err != nil {
-		if errors.Is(err, domain.ErrProblemNotFound) {
-			return domain.ErrProblemNotFound
-		}
-		return domain.ErrInternalServer.Wrap(err)
-	}
-
-	if !claims.Role.AtLeast(rbac.RoleModerator) {
-		if problem.AuthorID != claims.UserID {
-			return domain.ErrForbidden
-		}
-		if !problem.IsHidden {
-			return domain.ErrForbidden
-		}
-	}
-
-	if err := uc.problemRepo.Delete(ctx, params.ID); err != nil {
-		return domain.ErrInternalServer.Wrap(err)
+		return err
 	}
 	invalidateSubmissionProblemCache(ctx, uc.cache, params.ID)
 

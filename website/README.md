@@ -57,8 +57,9 @@ npm run build
 
 The existing gateway contract tests remain separate: they cover refresh/retry and
 cookie behavior. Unit tests in `tests/` cover query encoding/URL origins, display
-fallbacks and measurement boundaries, and role inheritance versus dedicated
-contributor-workspace membership. Tests do not grant or verify backend permissions.
+fallbacks and measurement boundaries, role inheritance, and the Contributions
+workspace, which Users open while Moderators and Admins are sent to the Admin
+Console. Tests do not grant or verify backend permissions.
 
 Initial lint baseline: one empty-interface error and six warnings. The equivalent
 type alias fixes the error. The six existing warnings remain visible: two native

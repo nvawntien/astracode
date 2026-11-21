@@ -26,7 +26,7 @@ def authorization(protected=False):
             permissions.append(metadata_permission("envoy.filters.http.jwt_authn", ["verified", claim],
                 {"string_match": {"safe_regex": {"regex": r"[^\x00-\x1f\x7f]+"}}}))
         permissions.append(metadata_permission("envoy.filters.http.jwt_authn", ["verified", "role"],
-            {"string_match": {"safe_regex": {"regex": "user|contributor|moderator|admin"}}}))
+            {"string_match": {"safe_regex": {"regex": "user|moderator|admin"}}}))
         permissions.append(metadata_permission("envoy.filters.http.jwt_authn", ["verified", "iat"],
             {"double_match": {"range": {"start": 0, "end": 9007199254740992}}}))
         # Metadata numbers are doubles. Require the native propagated timestamp

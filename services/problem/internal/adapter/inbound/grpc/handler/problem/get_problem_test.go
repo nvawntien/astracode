@@ -34,8 +34,8 @@ func TestGetProblemHandlerSuccess(t *testing.T) {
 	useCase := &fakeGetProblemUseCase{result: inbound.ProblemMetadata{ID: 42, Title: "Two Sum", Slug: "two-sum"}}
 	got, err := NewGetProblemHandler(useCase).Handle(context.Background(), &problemv1.GetProblemRequest{
 		ProblemId:   42,
-		ActorUserId: "contributor-a",
-		ActorRole:   string(rbac.RoleContributor),
+		ActorUserId: "user-a",
+		ActorRole:   string(rbac.RoleUser),
 	})
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -43,7 +43,7 @@ func TestGetProblemHandlerSuccess(t *testing.T) {
 	if got.GetProblemId() != 42 || got.GetTitle() != "Two Sum" || got.GetSlug() != "two-sum" {
 		t.Fatalf("response = %+v", got)
 	}
-	if useCase.req.ProblemID != 42 || useCase.req.ActorUserID != "contributor-a" || useCase.req.ActorRole != rbac.RoleContributor {
+	if useCase.req.ProblemID != 42 || useCase.req.ActorUserID != "user-a" || useCase.req.ActorRole != rbac.RoleUser {
 		t.Fatalf("application request = %+v", useCase.req)
 	}
 }

@@ -127,7 +127,7 @@ func (r *tagRepository) ListByIDs(ctx context.Context, ids []uint, activeOnly bo
 		return []*entity.Tag{}, nil
 	}
 
-	query := r.db.WithContext(ctx).Where("id IN ?", ids)
+	query := problemDB(ctx, r.db).Where("id IN ?", ids)
 	if activeOnly {
 		query = query.Where("is_active = ?", true)
 	}

@@ -59,8 +59,8 @@ documented below.
 ## Submission detail
 
 `GET /api/v1/submissions/{submission_id}` requires authentication.
-`submission_id` is the unique identifier of the Submission. Users and
-contributors may read their own submissions; moderators and administrators may
+`submission_id` is the unique identifier of the Submission. Users
+may read their own submissions; moderators and administrators may
 read any submission. Requests for another user's inaccessible submission return
 the same `404 Not Found` response as a missing submission.
 
@@ -72,7 +72,7 @@ Problem Service.
 ## My submissions
 
 `GET /api/v1/me/submissions` returns only the authenticated actor's own
-Submission history. Users, contributors, moderators, and administrators share
+Submission history. Users, moderators, and administrators share
 the same owner-only behavior on this endpoint.
 
 Supported query parameters:
@@ -93,7 +93,7 @@ available through `GET /api/v1/submissions/{submission_id}`.
 
 `GET /api/v1/admin/submissions` lists Submissions across the whole system.
 Authentication is required, and only moderators and administrators are allowed.
-Users and contributors receive `403 Forbidden`.
+Users receive `403 Forbidden`.
 
 Supported query parameters:
 

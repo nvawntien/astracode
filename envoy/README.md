@@ -91,7 +91,7 @@ rotation with Auth; there is no automatic dual-key rotation protocol.
 4. Native RBAC requires the sanitizer's completion metadata on every forwarded
    route, and a valid verified identity on protected routes: nonempty strings
    `sub` and `username` without control characters, role in
-   user/contributor/moderator/admin, and numeric iat in [0, 2^53) whose propagated
+   user/moderator/admin (the retired `contributor` role is rejected), and numeric iat in [0, 2^53) whose propagated
    header is an integer. This matches backend integer timestamp parsing.
    Missing/malformed identity is denied before upstream (401 by JWT parsing or
    403 by RBAC). If Lua errors before completion, native RBAC fails closed (403),

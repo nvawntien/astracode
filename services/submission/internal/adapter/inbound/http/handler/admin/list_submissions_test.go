@@ -163,7 +163,7 @@ func TestListAdminSubmissionsHandlerUsesSharedErrorMapping(t *testing.T) {
 			err: domain.ErrSubmissionForbidden, wantStatus: http.StatusForbidden, wantCode: response.CodeForbidden, wantCalls: 1,
 		},
 		{
-			name: "contributor forbidden", claims: &auth.Claims{UserID: "actor", Role: rbac.RoleContributor},
+			name: "contributor forbidden", claims: &auth.Claims{UserID: "actor", Role: "contributor"},
 			err: domain.ErrSubmissionForbidden, wantStatus: http.StatusForbidden, wantCode: response.CodeForbidden, wantCalls: 1,
 		},
 		{

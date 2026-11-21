@@ -59,16 +59,8 @@ func (uc *getProblemUseCase) Execute(
 	ctx context.Context,
 	req inbound.GetProblemRequest,
 ) (inbound.ProblemMetadata, error) {
-	if req.ProblemID <= 0 {
-		return inbound.ProblemMetadata{}, domain.ErrInvalidInput
-	}
-
-	actorUserID := strings.TrimSpace(req.ActorUserID)
-	if actorUserID == "" || req.ActorRole == "" {
-		return inbound.ProblemMetadata{}, domain.ErrActorUnauthenticated
-	}
-	if req.ActorRole.Level() == 0 {
-		return inbound.ProblemMetadata{}, domain.ErrPermissionDenied
+	if err := validateProblemActorRequest(req); err != nil {
+		return inbound.ProblemMetadata{}, err
 	}
 
 	problem, err := uc.problemRepo.GetByID(ctx, req.ProblemID)
@@ -85,7 +77,7 @@ func (uc *getProblemUseCase) Execute(
 	if problem == nil {
 		return inbound.ProblemMetadata{}, domain.ErrInternalServer
 	}
-	if problem.IsDeleted() || !canAccessProblem(problem, actorUserID, req.ActorRole) {
+	if problem.IsDeleted() || !canAccessProblem(problem, strings.TrimSpace(req.ActorUserID), req.ActorRole) {
 		return inbound.ProblemMetadata{}, domain.ErrProblemNotFound
 	}
 
@@ -234,7 +226,7 @@ func canAccessProblemState(isHidden bool, authorID, actorUserID string, actorRol
 	}
 
 	switch actorRole {
-	case rbac.RoleContributor:
+	case rbac.RoleUser:
 		return authorID == actorUserID
 	case rbac.RoleModerator, rbac.RoleAdmin:
 		return true

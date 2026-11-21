@@ -88,7 +88,6 @@ func listSubmissionFixture() *entity.Submission {
 func TestListMySubmissionsSupportedRolesRemainOwnerScoped(t *testing.T) {
 	for _, role := range []rbac.Role{
 		rbac.RoleUser,
-		rbac.RoleContributor,
 		rbac.RoleModerator,
 		rbac.RoleAdmin,
 	} {
@@ -275,6 +274,12 @@ func TestListMySubmissionsRejectsInvalidRequests(t *testing.T) {
 		{
 			name:    "unsupported role",
 			claims:  auth.Claims{UserID: "actor", Role: rbac.Role("auditor")},
+			req:     dto.ListMySubmissionsRequest{},
+			wantErr: domain.ErrSubmissionForbidden,
+		},
+		{
+			name:    "retired role",
+			claims:  auth.Claims{UserID: "actor", Role: "contributor"},
 			req:     dto.ListMySubmissionsRequest{},
 			wantErr: domain.ErrSubmissionForbidden,
 		},

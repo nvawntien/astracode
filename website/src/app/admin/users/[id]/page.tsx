@@ -11,7 +11,7 @@ import { buttonStyles } from '@/components/ui';
 import { ApiError, NetworkError, adminUserApi } from '@/lib/api';
 import type { AdminUser, AdminUserRole } from '@/lib/types';
 
-const ROLES: AdminUserRole[] = ['user', 'contributor', 'moderator', 'admin'];
+const ROLES: AdminUserRole[] = ['user', 'moderator', 'admin'];
 
 type LoadError = 'forbidden' | 'not-found' | 'generic';
 

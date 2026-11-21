@@ -14,6 +14,7 @@ var (
 	ErrUsernameAlreadyExists     = response.NewAppError(response.CodeConflict, "username already exists", nil)
 	ErrUserNotFound              = response.NewAppError(response.CodeAccountNotFound, "user not found", nil)
 	ErrInvalidEmail              = response.NewAppError(response.CodeBadRequest, "invalid email format", nil)
+	ErrInvalidRole               = response.NewAppError(response.CodeBadRequest, "invalid role", nil)
 	ErrPasswordTooWeak           = response.NewAppError(response.CodeBadRequest, "password is too weak", nil)
 	ErrUserAlreadyExists         = response.NewAppError(response.CodeConflict, "user already exists", nil)
 	ErrInternalServer            = response.NewAppError(response.CodeInternalServer, "internal server error", nil)

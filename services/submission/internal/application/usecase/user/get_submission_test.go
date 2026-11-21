@@ -77,8 +77,6 @@ func TestGetSubmissionAccessMatrix(t *testing.T) {
 	}{
 		{name: "user reads own submission", role: rbac.RoleUser, actorUserID: "owner"},
 		{name: "user reads another submission", role: rbac.RoleUser, actorUserID: "another", wantErr: domain.ErrSubmissionNotFound},
-		{name: "contributor reads own submission", role: rbac.RoleContributor, actorUserID: "owner"},
-		{name: "contributor reads another submission", role: rbac.RoleContributor, actorUserID: "another", wantErr: domain.ErrSubmissionNotFound},
 		{name: "moderator reads own submission", role: rbac.RoleModerator, actorUserID: "owner"},
 		{name: "moderator reads another submission", role: rbac.RoleModerator, actorUserID: "another"},
 		{name: "admin reads own submission", role: rbac.RoleAdmin, actorUserID: "owner"},
@@ -104,7 +102,7 @@ func TestGetSubmissionAccessMatrix(t *testing.T) {
 			if repo.calls != 1 || repo.id != submission.ID {
 				t.Fatalf("repository calls/id = %d/%d, want 1/%d", repo.calls, repo.id, submission.ID)
 			}
-			if tt.role == rbac.RoleUser || tt.role == rbac.RoleContributor {
+			if tt.role == rbac.RoleUser {
 				if repo.ownerID == nil || *repo.ownerID != tt.actorUserID {
 					t.Fatalf("restricted read has wrong owner filter: %v", repo.ownerID)
 				}
@@ -204,6 +202,12 @@ func TestGetSubmissionValidation(t *testing.T) {
 		{
 			name:    "unsupported actor role",
 			claims:  auth.Claims{UserID: "actor", Role: rbac.Role("auditor")},
+			req:     dto.GetSubmissionRequest{SubmissionID: 77},
+			wantErr: domain.ErrSubmissionForbidden,
+		},
+		{
+			name:    "retired role for the owner",
+			claims:  auth.Claims{UserID: "actor", Role: "contributor"},
 			req:     dto.GetSubmissionRequest{SubmissionID: 77},
 			wantErr: domain.ErrSubmissionForbidden,
 		},

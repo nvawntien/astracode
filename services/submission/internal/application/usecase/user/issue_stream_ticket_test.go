@@ -53,33 +53,37 @@ func (*fakeIssueTicketService) Verify(string) (entity.SubmissionStreamTicketClai
 }
 
 func TestIssueSubmissionStreamTicketSuccess(t *testing.T) {
-	expiresAt := time.Date(2026, 7, 30, 9, 2, 0, 0, time.UTC)
-	snapshotRepo := &fakeIssueTicketSnapshotRepository{
-		snapshot: &entity.SubmissionStreamSnapshot{
-			SubmissionID: 77,
-			UserID:       "owner",
-			AttemptID:    "attempt-77",
-			Status:       entity.StatusJudging,
-		},
-	}
-	ticketService := &fakeIssueTicketService{ticket: "opaque-ticket", expiresAt: expiresAt}
+	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleModerator, rbac.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			expiresAt := time.Date(2026, 7, 30, 9, 2, 0, 0, time.UTC)
+			snapshotRepo := &fakeIssueTicketSnapshotRepository{
+				snapshot: &entity.SubmissionStreamSnapshot{
+					SubmissionID: 77,
+					UserID:       "owner",
+					AttemptID:    "attempt-77",
+					Status:       entity.StatusJudging,
+				},
+			}
+			ticketService := &fakeIssueTicketService{ticket: "opaque-ticket", expiresAt: expiresAt}
 
-	got, err := NewIssueSubmissionStreamTicketUseCase(snapshotRepo, ticketService).Execute(
-		context.Background(),
-		auth.Claims{UserID: "owner", Role: rbac.RoleUser},
-		dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77},
-	)
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if got.Ticket != "opaque-ticket" || !got.ExpiresAt.Equal(expiresAt) {
-		t.Fatalf("response = %+v", got)
-	}
-	if snapshotRepo.calls != 1 || snapshotRepo.id != 77 {
-		t.Fatalf("snapshot repo calls/id = %d/%d", snapshotRepo.calls, snapshotRepo.id)
-	}
-	if ticketService.issueCalls != 1 || ticketService.userID != "owner" || ticketService.submissionID != 77 {
-		t.Fatalf("ticket issue = calls %d user %q submission %d", ticketService.issueCalls, ticketService.userID, ticketService.submissionID)
+			got, err := NewIssueSubmissionStreamTicketUseCase(snapshotRepo, ticketService).Execute(
+				context.Background(),
+				auth.Claims{UserID: "owner", Role: role},
+				dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77},
+			)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got.Ticket != "opaque-ticket" || !got.ExpiresAt.Equal(expiresAt) {
+				t.Fatalf("response = %+v", got)
+			}
+			if snapshotRepo.calls != 1 || snapshotRepo.id != 77 {
+				t.Fatalf("snapshot repo calls/id = %d/%d", snapshotRepo.calls, snapshotRepo.id)
+			}
+			if ticketService.issueCalls != 1 || ticketService.userID != "owner" || ticketService.submissionID != 77 {
+				t.Fatalf("ticket issue = calls %d user %q submission %d", ticketService.issueCalls, ticketService.userID, ticketService.submissionID)
+			}
+		})
 	}
 }
 
@@ -93,6 +97,7 @@ func TestIssueSubmissionStreamTicketRejectsInvalidActorAndRequest(t *testing.T) 
 		{name: "invalid submission id", claims: auth.Claims{UserID: "owner", Role: rbac.RoleUser}, wantErr: domain.ErrInvalidSubmissionID},
 		{name: "missing user id", claims: auth.Claims{Role: rbac.RoleUser}, req: dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77}, wantErr: domain.ErrSubmissionUnauthenticated},
 		{name: "missing role", claims: auth.Claims{UserID: "owner"}, req: dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77}, wantErr: domain.ErrSubmissionUnauthenticated},
+		{name: "retired role", claims: auth.Claims{UserID: "owner", Role: "contributor"}, req: dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77}, wantErr: domain.ErrSubmissionForbidden},
 		{name: "unsupported role", claims: auth.Claims{UserID: "owner", Role: rbac.Role("guest")}, req: dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77}, wantErr: domain.ErrSubmissionForbidden},
 	}
 	for _, tt := range tests {
@@ -115,21 +120,25 @@ func TestIssueSubmissionStreamTicketRejectsInvalidActorAndRequest(t *testing.T) 
 }
 
 func TestIssueSubmissionStreamTicketRejectsOtherOwner(t *testing.T) {
-	snapshotRepo := &fakeIssueTicketSnapshotRepository{
-		snapshot: &entity.SubmissionStreamSnapshot{SubmissionID: 77, UserID: "owner"},
-	}
-	ticketService := &fakeIssueTicketService{}
+	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleModerator, rbac.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			snapshotRepo := &fakeIssueTicketSnapshotRepository{
+				snapshot: &entity.SubmissionStreamSnapshot{SubmissionID: 77, UserID: "owner"},
+			}
+			ticketService := &fakeIssueTicketService{}
 
-	_, err := NewIssueSubmissionStreamTicketUseCase(snapshotRepo, ticketService).Execute(
-		context.Background(),
-		auth.Claims{UserID: "attacker", Role: rbac.RoleAdmin},
-		dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77},
-	)
-	if !errors.Is(err, domain.ErrSubmissionNotFound) {
-		t.Fatalf("Execute() error = %v, want not found", err)
-	}
-	if ticketService.issueCalls != 0 {
-		t.Fatalf("ticket issue calls = %d, want 0", ticketService.issueCalls)
+			_, err := NewIssueSubmissionStreamTicketUseCase(snapshotRepo, ticketService).Execute(
+				context.Background(),
+				auth.Claims{UserID: "attacker", Role: role},
+				dto.IssueSubmissionStreamTicketRequest{SubmissionID: 77},
+			)
+			if !errors.Is(err, domain.ErrSubmissionNotFound) {
+				t.Fatalf("Execute() error = %v, want not found", err)
+			}
+			if ticketService.issueCalls != 0 {
+				t.Fatalf("ticket issue calls = %d, want 0", ticketService.issueCalls)
+			}
+		})
 	}
 }
 

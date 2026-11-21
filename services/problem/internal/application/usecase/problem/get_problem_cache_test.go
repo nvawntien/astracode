@@ -274,26 +274,24 @@ func TestCachedGetProblemPreservesHiddenAccessMatrix(t *testing.T) {
 	cache := &fakeSubmissionProblemCache{entries: map[int64]outbound.SubmissionProblemMetadata{42: metadata}}
 	useCase := newCachedUseCase(repo, cache)
 	tests := []struct {
-		name  string
-		role  rbac.Role
-		actor string
-		allow bool
+		name    string
+		role    rbac.Role
+		actor   string
+		wantErr error
 	}{
-		{name: "normal user", role: rbac.RoleUser, actor: "user"},
-		{name: "owner contributor", role: rbac.RoleContributor, actor: "owner", allow: true},
-		{name: "other contributor", role: rbac.RoleContributor, actor: "other"},
-		{name: "moderator", role: rbac.RoleModerator, actor: "moderator", allow: true},
-		{name: "admin", role: rbac.RoleAdmin, actor: "admin", allow: true},
+		{name: "owner user", role: rbac.RoleUser, actor: "owner"},
+		{name: "other user", role: rbac.RoleUser, actor: "other", wantErr: domain.ErrProblemNotFound},
+		{name: "moderator", role: rbac.RoleModerator, actor: "moderator"},
+		{name: "admin", role: rbac.RoleAdmin, actor: "admin"},
+		{name: "retired role owner", role: "contributor", actor: "owner", wantErr: domain.ErrPermissionDenied},
+		{name: "unsupported role owner", role: "owner", actor: "owner", wantErr: domain.ErrPermissionDenied},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := useCase.Execute(context.Background(), cachedRequest(42, tt.role, tt.actor))
-			if tt.allow && err != nil {
-				t.Fatalf("Execute() error = %v", err)
-			}
-			if !tt.allow && !errors.Is(err, domain.ErrProblemNotFound) {
-				t.Fatalf("Execute() error = %v, want not found", err)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Execute() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}

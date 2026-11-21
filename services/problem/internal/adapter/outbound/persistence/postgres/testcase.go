@@ -36,6 +36,10 @@ func NewTestCaseRepository(db *gorm.DB) outbound.TestCaseRepository {
 	return &testCaseRepository{db: db}
 }
 
+func NewTestCaseObjectReferences(db *gorm.DB) outbound.TestCaseObjectReferences {
+	return &testCaseRepository{db: db}
+}
+
 func NewOfficialTestCaseMetadataRepository(db *gorm.DB) outbound.OfficialTestCaseMetadataRepository {
 	return &testCaseRepository{db: db}
 }
@@ -43,7 +47,7 @@ func NewOfficialTestCaseMetadataRepository(db *gorm.DB) outbound.OfficialTestCas
 func (r *testCaseRepository) Upsert(ctx context.Context, tc *entity.TestCase) error {
 	dao := toTestCaseDAO(tc)
 
-	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	err := problemDB(ctx, r.db).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "problem_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"zip_object_key",
@@ -72,7 +76,7 @@ func (r *testCaseRepository) Upsert(ctx context.Context, tc *entity.TestCase) er
 func (r *testCaseRepository) GetByProblemID(ctx context.Context, problemID int64) (*entity.TestCase, error) {
 	var dao TestCaseDAO
 
-	if err := r.db.WithContext(ctx).
+	if err := problemDB(ctx, r.db).
 		Where("problem_id = ?", problemID).
 		First(&dao).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -101,7 +105,7 @@ func (r *testCaseRepository) GetOfficialTestCaseMetadata(ctx context.Context, pr
 }
 
 func (r *testCaseRepository) DeleteByProblemID(ctx context.Context, problemID int64) error {
-	return r.db.WithContext(ctx).
+	return problemDB(ctx, r.db).
 		Where("problem_id = ?", problemID).
 		Delete(&TestCaseDAO{}).Error
 }
@@ -110,7 +114,7 @@ func (r *testCaseRepository) ListAllZipObjectKeys(ctx context.Context) ([]string
 	var keys []string
 
 	err := r.db.WithContext(ctx).
-		Model(&TestCaseDAO{}).
+		Model(&TestCaseDAO{}).Distinct("zip_object_key").
 		Pluck("zip_object_key", &keys).Error
 
 	return keys, err

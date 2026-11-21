@@ -38,7 +38,7 @@ func NewCreateProblemUseCase(problemRepo outbound.ProblemRepository, tagRepo out
 }
 
 func (uc *createProblemUseCase) Execute(ctx context.Context, claims auth.Claims, req dto.CreateProblemRequest) (dto.ProblemDetailResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.ProblemDetailResponse{}, domain.ErrForbidden
 	}
 

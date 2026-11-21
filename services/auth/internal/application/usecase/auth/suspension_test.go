@@ -14,6 +14,56 @@ import (
 	"go-judge-system/services/auth/internal/domain/entity"
 )
 
+func TestLoginAndRefreshRequireSupportedRoles(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		role      rbac.Role
+		supported bool
+	}{
+		{name: "user", role: rbac.RoleUser, supported: true},
+		{name: "moderator", role: rbac.RoleModerator, supported: true},
+		{name: "admin", role: rbac.RoleAdmin, supported: true},
+		{name: "retired role", role: "contributor"},
+		{name: "unknown role", role: "owner"},
+		{name: "missing role"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			user := testSessionUser()
+			user.Role = test.role
+			repo := &sessionUserRepository{user: user}
+			store := &sessionIATStore{}
+			loginSigner := &sessionJWT{}
+			login := NewLoginUseCase(repo, sessionPasswordEncoder{}, loginSigner, store)
+			_, loginErr := login.Execute(ctx, dto.LoginRequest{Identifier: user.Username, Password: "correct"})
+
+			// A still-valid refresh token carries its original role after role assignment.
+			user.Role = rbac.RoleUser
+			refreshSigner := &sessionJWT{refreshRole: &test.role, refreshIAT: 101}
+			refresh := NewRefreshTokenUseCase(refreshSigner, repo, store)
+			_, refreshErr := refresh.Execute(ctx, "refresh")
+			if !test.supported {
+				if !errors.Is(loginErr, domain.ErrInvalidCredentials) || loginSigner.accessCalls != 0 ||
+					!errors.Is(refreshErr, domain.ErrInvalidOrExpiredToken) || refreshSigner.accessCalls != 0 {
+					t.Fatalf("login error/calls = %v/%d, refresh error/calls = %v/%d", loginErr, loginSigner.accessCalls, refreshErr, refreshSigner.accessCalls)
+				}
+				return
+			}
+			if loginErr != nil || refreshErr != nil {
+				t.Fatalf("login error = %v, refresh error = %v", loginErr, refreshErr)
+			}
+			if _, err := refresh.Execute(ctx, "refresh"); err != nil {
+				t.Fatalf("reusing still-valid refresh token: %v", err)
+			}
+			for _, signer := range []*sessionJWT{loginSigner, refreshSigner} {
+				if signer.issuedAccessRole != test.role || signer.issuedRefreshRole != test.role {
+					t.Errorf("issued access/refresh roles = %q/%q, want %q", signer.issuedAccessRole, signer.issuedRefreshRole, test.role)
+				}
+			}
+		})
+	}
+}
+
 func TestLoginRejectsSuspendedUser(t *testing.T) {
 	user := testSessionUser()
 	user.IsSuspended = true
@@ -95,22 +145,31 @@ func (sessionPasswordEncoder) ComparePasswords(_ string, provided []byte) bool {
 }
 
 type sessionJWT struct {
-	refreshIAT  int64
-	accessCalls int
+	refreshIAT        int64
+	refreshRole       *rbac.Role
+	accessCalls       int
+	issuedAccessRole  rbac.Role
+	issuedRefreshRole rbac.Role
 }
 
-func (j *sessionJWT) GenerateAccessToken(context.Context, string, string, rbac.Role) (string, int, error) {
+func (j *sessionJWT) GenerateAccessToken(_ context.Context, _, _ string, role rbac.Role) (string, int, error) {
 	j.accessCalls++
+	j.issuedAccessRole = role
 	return "access", 60, nil
 }
-func (j *sessionJWT) GenerateRefreshToken(context.Context, string, string, rbac.Role) (string, int, error) {
+func (j *sessionJWT) GenerateRefreshToken(_ context.Context, _, _ string, role rbac.Role) (string, int, error) {
+	j.issuedRefreshRole = role
 	return "refresh", 60, nil
 }
 func (j *sessionJWT) VerifyAccessToken(context.Context, string) (string, string, rbac.Role, error) {
 	return "", "", "", nil
 }
 func (j *sessionJWT) VerifyRefreshToken(context.Context, string) (string, string, rbac.Role, int64, error) {
-	return "a1cdbf51-5bd4-416d-a74e-35e3cb7b5f83", "session-user", rbac.RoleUser, j.refreshIAT, nil
+	role := rbac.RoleUser
+	if j.refreshRole != nil {
+		role = *j.refreshRole
+	}
+	return "a1cdbf51-5bd4-416d-a74e-35e3cb7b5f83", "session-user", role, j.refreshIAT, nil
 }
 
 type sessionIATStore struct {

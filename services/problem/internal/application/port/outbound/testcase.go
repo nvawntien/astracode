@@ -6,9 +6,13 @@ import (
 )
 
 type TestCaseRepository interface {
+	TestCaseObjectReferences
 	Upsert(ctx context.Context, tc *entity.TestCase) error
 	GetByProblemID(ctx context.Context, problemID int64) (*entity.TestCase, error)
 	DeleteByProblemID(ctx context.Context, problemID int64) error
+}
+
+type TestCaseObjectReferences interface {
 	ListAllZipObjectKeys(ctx context.Context) ([]string, error)
 }
 
