@@ -12,7 +12,7 @@ There are no checked-in SQL schema migrations or migration command. Repositories
 | Problem | `problems`, `tags`, `problem_tags`, `test_cases` | unique problem slug; author/deleted indexes; unique tag slug; join uniqueness; one testcase row per `problem_id` | `services/problem/.../postgres/{problem,tag,testcase}.go` |
 | Submission | `submissions`, `submission_attempts`, `submission_results`, `outbox_messages` | submission filters; unique attempt ID; attempt compound lookup/order indexes; outbox aggregate/status indexes | `services/submission/.../postgres/` |
 
-Problem persistence stores statement prose in `description`, `input_format`, and `output_format` text columns; examples, constraints and hints are PostgreSQL JSONB. Problem/Tag deletion is soft deletion by GORM model fields; testcase storage uses a physical row keyed by problem. Submission source code and optional testcase outputs are text columns; this has storage and sensitive-data implications described in [TECH_DEBT.md](TECH_DEBT.md).
+Problem persistence stores statement prose in `description`, `input_format`, and `output_format` text columns; examples, constraints and hints are PostgreSQL JSONB. Problem/Tag deletion is soft deletion by GORM model fields; testcase storage uses a physical row keyed by problem whose `zip_object_key` points at an immutable MinIO object, and a soft-deleted Problem keeps its testcase row and object. Submission source code and optional testcase outputs are text columns; this has storage and sensitive-data implications described in [TECH_DEBT.md](TECH_DEBT.md).
 
 ### Transaction boundaries
 
@@ -28,7 +28,7 @@ Redis is configured globally in Compose with AOF and an allkeys-LRU 128 MB polic
 
 ## MinIO and filesystem cache
 
-Auth owns MinIO avatar objects. Problem owns testcase ZIP objects and creates presigned URLs for workers. The Worker downloads these using a 30-second HTTP client, verifies/cache-checks SHA-256, extracts only numeric `.in`/`.out` files with ZIP size/path/symlink protections, and atomically promotes a per-problem local cache directory. Docker shares that cache volume read-only with the go-judge container (`docker-compose.yml`, `official_loader.go`).
+Auth owns MinIO avatar objects. Problem owns testcase ZIP objects and creates presigned URLs for workers. Every upload writes a fresh immutable object key; replacing or deleting a package leaves the previous object in place until the manual reconciler (`services/problem/cmd/reconcile-testcase-objects`) removes it. Presigned URLs last 15 minutes and the Worker download timeout is 30 seconds (`pkg/judge/limits.go`), so the reconciler requires testcase writers and URL issuers to be quiesced for that window plus the verified clock skew, compares MinIO keys with every `test_cases.zip_object_key` (including soft-deleted Problems), and removes only reviewed exact keys. The Worker downloads objects using a 30-second HTTP client, verifies/cache-checks SHA-256, extracts only numeric `.in`/`.out` files with ZIP size/path/symlink protections, and publishes each complete cache generation under `/cache/testcases/problem_<id>/<digest of storage origin and object path>/generation-*` by atomically replacing a `.current` reference. Earlier generations stay readable for active jobs and are reclaimed only after draining every Worker and executor that shares the volume. Docker shares that cache volume read-only with the go-judge container (`docker-compose.yml`, `official_loader.go`).
 
 ## Kafka
 
