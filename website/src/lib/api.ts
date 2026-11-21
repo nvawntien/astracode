@@ -366,11 +366,11 @@ export const adminProblemApi = {
   deleteTestCase: testcaseApi.delete,
 };
 
-/** Contributor-facing problem authoring API.
+/** Problem authoring API for the Contributions workspace.
  *
  * The write/detail endpoints are shared with the existing Problem Service
  * authoring handlers. Server-side role and ownership checks remain the
- * authority; this wrapper keeps contributor pages from depending on the
+ * authority; this wrapper keeps Contributions pages from depending on the
  * moderation-oriented admin client surface.
  */
 export const contributionProblemApi = {
@@ -394,6 +394,8 @@ export const contributionProblemApi = {
 
   updateOwn: (id: number, body: UpdateAdminProblemRequest) =>
     apiRequest<Problem>(`/api/v1/admin/problems/${id}`, { method: 'PUT', body }),
+
+  deleteOwn: adminProblemApi.delete,
 
   getTestCase: testcaseApi.get,
   uploadTestCase: testcaseApi.upload,

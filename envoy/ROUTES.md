@@ -35,17 +35,17 @@ in routes.json. Query allowlists below retain repeated values and original encod
 | GET | `/api/v1/problems` | problem-service | Public | Public | page, limit, difficulty, search, tag_slug | 3s |  |
 | GET | `/api/v1/problems/{slug}` | problem-service | Public | Public | None | 3s |  |
 | GET | `/api/v1/tags` | problem-service | Public | Public | None | 3s |  |
-| POST | `/api/v1/admin/problems` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
-| PUT | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
-| DELETE | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
+| POST | `/api/v1/admin/problems` | problem-service | Required | Authenticated; hidden draft owned by caller | None | 3s |  |
+| PUT | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | User: owned hidden draft; Moderator/Admin: any author | None | 3s |  |
+| DELETE | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | User: owned hidden draft; Moderator/Admin: any author | None | 3s |  |
 | PATCH | `/api/v1/admin/problems/{problem_id}/publish` | problem-service | Required | Moderator/Admin | None | 3s |  |
 | PATCH | `/api/v1/admin/problems/{problem_id}/hidden` | problem-service | Required | Moderator/Admin | None | 3s |  |
-| POST | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s | Multipart streaming |
-| GET | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
-| DELETE | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
-| GET | `/api/v1/my/problems` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | page, limit, difficulty, search, tag_slug | 3s |  |
+| POST | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | User: owned hidden draft; Moderator/Admin: any author | None | 3s | Multipart streaming |
+| GET | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | User: own problem; Moderator/Admin: any author | None | 3s |  |
+| DELETE | `/api/v1/admin/problems/{problem_id}/testcases` | problem-service | Required | User: owned hidden draft; Moderator/Admin: any author | None | 3s |  |
+| GET | `/api/v1/my/problems` | problem-service | Required | Authenticated; own catalog only | page, limit, difficulty, search, tag_slug | 3s |  |
 | GET | `/api/v1/admin/problems` | problem-service | Required | Moderator/Admin | page, limit, difficulty, search, tag_slug | 3s |  |
-| GET | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | Contributor; owned hidden draft for writes; Moderator/Admin override | None | 3s |  |
+| GET | `/api/v1/admin/problems/{problem_id}` | problem-service | Required | User: own problem; Moderator/Admin: any author | None | 3s |  |
 | GET | `/api/v1/admin/tags` | problem-service | Required | Moderator/Admin | None | 3s |  |
 | POST | `/api/v1/admin/tags` | problem-service | Required | Moderator/Admin | None | 3s |  |
 | PUT | `/api/v1/admin/tags/{tag_id}` | problem-service | Required | Moderator/Admin | None | 3s |  |

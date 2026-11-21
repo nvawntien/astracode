@@ -5,6 +5,7 @@ import (
 	"errors"
 	pkgauth "go-judge-system/pkg/auth"
 	"go-judge-system/pkg/config"
+	"go-judge-system/pkg/rbac"
 	"go-judge-system/services/auth/internal/application/dto"
 	"go-judge-system/services/auth/internal/application/port/inbound"
 	"go-judge-system/services/auth/internal/application/port/outbound"
@@ -37,7 +38,7 @@ func (uc *refreshTokenUseCase) Execute(ctx context.Context, refreshToken string)
 		}
 	}
 	id, username, role, refreshTokenIAT, err := uc.jwt.VerifyRefreshToken(ctx, refreshToken)
-	if err != nil {
+	if err != nil || !role.AtLeast(rbac.RoleUser) {
 		return &dto.LoginResponse{}, domain.ErrInvalidOrExpiredToken
 	}
 

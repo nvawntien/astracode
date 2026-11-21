@@ -169,6 +169,19 @@ class EdgeTests(unittest.TestCase):
                     status, _ = self.raw_request([("Cookie", "access_token=" + self.token(claims))] + forged, mode)
                     self.assertIn(status, (401, 403))
 
+    def test_supported_roles_at_gateway(self):
+        for mode in ("dev", "prod"):
+            for role in ("user", "moderator", "admin", "contributor", "unknown"):
+                with self.subTest(mode=mode, role=role):
+                    headers = {**self.identity(), "Authorization": "Bearer " + self.token({"role": role})}
+                    status, _, body = self.request("GET", "/api/v1/me", headers, mode=mode)
+                    if role in ("user", "moderator", "admin"):
+                        self.assertEqual(status, 200)
+                        forwarded = {key.lower(): value for key, value in json.loads(body)["headers"].items()}
+                        self.assertEqual(forwarded["x-role"], role)
+                    else:
+                        self.assertEqual(status, 403)
+
     def test_lua_errors_fail_closed_and_native_sanitization(self):
         for index, code in enumerate((
             'function envoy_on_request(h) error("injected before sanitizer") end',

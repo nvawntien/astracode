@@ -172,7 +172,7 @@ func TestGetAdminSubmissionDetailRejectsUnauthorizedAndForbiddenRoles(t *testing
 		{name: "missing user ID", claims: auth.Claims{Role: rbac.RoleModerator}, wantErr: domain.ErrSubmissionUnauthenticated},
 		{name: "missing role", claims: auth.Claims{UserID: "actor"}, wantErr: domain.ErrSubmissionUnauthenticated},
 		{name: "user forbidden", claims: auth.Claims{UserID: "actor", Role: rbac.RoleUser}, wantErr: domain.ErrSubmissionForbidden},
-		{name: "contributor forbidden", claims: auth.Claims{UserID: "actor", Role: rbac.RoleContributor}, wantErr: domain.ErrSubmissionForbidden},
+		{name: "contributor forbidden", claims: auth.Claims{UserID: "actor", Role: "contributor"}, wantErr: domain.ErrSubmissionForbidden},
 		{name: "unknown role forbidden", claims: auth.Claims{UserID: "actor", Role: rbac.Role("auditor")}, wantErr: domain.ErrSubmissionForbidden},
 	}
 

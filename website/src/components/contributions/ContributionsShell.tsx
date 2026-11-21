@@ -6,9 +6,9 @@ import { AppShell } from '@/components/AppShell';
 import { useAuth } from '@/components/AuthProvider';
 import { ErrorState, SkeletonBar } from '@/components/ui';
 import { ADMIN_CONSOLE_MIN_ROLE } from '@/components/admin/AdminNavigation';
-import { isContributorWorkspaceUser, roleAtLeast } from '@/components/admin/roles';
+import { isContributionsWorkspaceUser, roleAtLeast } from '@/components/admin/roles';
 
-export function ContributorShell({ children }: { children: ReactNode }) {
+export function ContributionsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -19,13 +19,13 @@ export function ContributorShell({ children }: { children: ReactNode }) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
-    if (!isContributorWorkspaceUser(user.role) && roleAtLeast(user.role, ADMIN_CONSOLE_MIN_ROLE)) {
+    if (roleAtLeast(user.role, ADMIN_CONSOLE_MIN_ROLE)) {
       router.replace('/admin/problems');
     }
   }, [loading, pathname, router, user]);
 
   const redirectingToAdmin = Boolean(
-    user && !isContributorWorkspaceUser(user.role) && roleAtLeast(user.role, ADMIN_CONSOLE_MIN_ROLE),
+    user && roleAtLeast(user.role, ADMIN_CONSOLE_MIN_ROLE),
   );
 
   if (loading || !user || redirectingToAdmin) {
@@ -43,12 +43,12 @@ export function ContributorShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!isContributorWorkspaceUser(user.role)) {
+  if (!isContributionsWorkspaceUser(user.role)) {
     return (
       <AppShell maxWidth={900}>
         <ErrorState
-          title="Contributor access required"
-          detail="Problem authoring is available in the Contributor Workspace."
+          title="Contributions unavailable"
+          detail="Sign in with a supported account to access contributions."
         />
       </AppShell>
     );

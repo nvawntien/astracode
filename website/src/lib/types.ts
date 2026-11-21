@@ -16,7 +16,7 @@ export interface ApiEnvelope<T> {
 
 /* ------------------------------------------------------------------ auth */
 
-export type Role = 'user' | 'contributor' | 'moderator' | 'admin';
+export type Role = 'user' | 'moderator' | 'admin';
 
 export interface LoginRequest {
   identifier: string;

@@ -19,6 +19,19 @@ type testcaseStorage struct {
 }
 
 func NewTestCaseStorage(client *minio.Client, cfg config.MinIOConfig) (outbound.TestCaseStorage, error) {
+	storage, err := NewExistingTestCaseStorage(client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := storage.EnsureBucket(ctx); err != nil {
+		return nil, err
+	}
+	return storage, nil
+}
+
+func NewExistingTestCaseStorage(client *minio.Client, cfg config.MinIOConfig) (outbound.TestCaseStorage, error) {
 	if client == nil {
 		return nil, fmt.Errorf("minio client is nil")
 	}
@@ -27,19 +40,10 @@ func NewTestCaseStorage(client *minio.Client, cfg config.MinIOConfig) (outbound.
 		return nil, fmt.Errorf("minio bucket is required")
 	}
 
-	storage := &testcaseStorage{
+	return &testcaseStorage{
 		client: client,
 		bucket: strings.TrimSpace(cfg.Bucket),
-	}
-
-	ctxInit, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := storage.EnsureBucket(ctxInit); err != nil {
-		return nil, err
-	}
-
-	return storage, nil
+	}, nil
 }
 
 func (s *testcaseStorage) UploadTestCase(ctx context.Context, objectKey string, filePath string) error {

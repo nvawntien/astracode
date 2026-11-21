@@ -2,7 +2,8 @@ package problem
 
 import (
 	"context"
-	"errors"
+	"strings"
+
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
 	"go-judge-system/services/problem/internal/application/dto"
@@ -10,6 +11,7 @@ import (
 	"go-judge-system/services/problem/internal/application/port/outbound"
 	"go-judge-system/services/problem/internal/application/usecase"
 	"go-judge-system/services/problem/internal/domain"
+	"go-judge-system/services/problem/internal/domain/entity"
 )
 
 type publishProblemUseCase struct {
@@ -30,30 +32,28 @@ func newPublishProblemUseCase(problemRepo outbound.ProblemRepository, cache outb
 }
 
 func (uc *publishProblemUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest) (dto.ProblemDetailResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleModerator) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleModerator) {
 		return dto.ProblemDetailResponse{}, domain.ErrForbidden
 	}
 
-	problem, err := uc.problemRepo.GetByID(ctx, params.ID)
-	if err != nil {
-		if errors.Is(err, domain.ErrProblemNotFound) {
-			return dto.ProblemDetailResponse{}, domain.ErrProblemNotFound
+	var updated *entity.Problem
+	err := uc.problemRepo.WithLockedProblem(ctx, params.ID, func(txCtx context.Context, locked *entity.Problem) error {
+		if hasInactiveTags(locked.Tags) {
+			return domain.ErrProblemContainsInactiveTags
 		}
-		return dto.ProblemDetailResponse{}, domain.ErrInternalServer.Wrap(err)
+		locked.Publish()
+		updated = locked
+		if err := uc.problemRepo.Update(txCtx, locked); err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return dto.ProblemDetailResponse{}, err
 	}
-
-	if hasInactiveTags(problem.Tags) {
-		return dto.ProblemDetailResponse{}, domain.ErrProblemContainsInactiveTags
-	}
-
-	problem.Publish()
-
-	if err := uc.problemRepo.Update(ctx, problem); err != nil {
-		return dto.ProblemDetailResponse{}, domain.ErrInternalServer.Wrap(err)
-	}
-	invalidateSubmissionProblemCache(ctx, uc.cache, problem.ID)
+	invalidateSubmissionProblemCache(ctx, uc.cache, params.ID)
 
 	return dto.ProblemDetailResponse{
-		ProblemResponse: usecase.MapProblemToResponse(problem, true),
+		ProblemResponse: usecase.MapProblemToResponse(updated, true),
 	}, nil
 }

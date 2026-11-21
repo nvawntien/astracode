@@ -6,8 +6,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go-judge-system/workers/judge/internal/application/port/outbound"
 	workerdomain "go-judge-system/workers/judge/internal/domain"
@@ -119,6 +122,114 @@ func TestOfficialLoaderCacheHitMissProvenance(t *testing.T) {
 	}
 	if changed.DatasetChecksum == miss.DatasetChecksum {
 		t.Fatalf("changed artifact checksum = %q, want different from %q", changed.DatasetChecksum, miss.DatasetChecksum)
+	}
+}
+
+func TestOfficialLoaderSeparatesObjectsWithReusedVersion(t *testing.T) {
+	firstZip := buildZip(t, map[string]string{"1.in": "old", "1.out": "old"})
+	secondZip := buildZip(t, map[string]string{"1.in": "new", "1.out": "new"})
+	var downloads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		downloads.Add(1)
+		if req.URL.Path == "/old.zip" {
+			_, _ = w.Write(firstZip)
+			return
+		}
+		_, _ = w.Write(secondZip)
+	}))
+	defer server.Close()
+	loader := NewOfficialLoader(zap.NewNop())
+	loader.cacheBaseDir = t.TempDir()
+	metadata := outbound.ProblemTestCaseMetadata{ProblemID: 42, Version: 1, TestCount: 1}
+	load := func(path string) outbound.OfficialTestCaseBundle {
+		t.Helper()
+		metadata.ZipDownloadURL = server.URL + path
+		bundle, err := loader.Load(context.Background(), metadata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bundle
+	}
+	old := load("/old.zip?signature=one")
+	newBundle := load("/new.zip?signature=two")
+	hit := load("/new.zip?signature=three")
+	if downloads.Load() != 2 || old.DatasetChecksum == newBundle.DatasetChecksum ||
+		newBundle.TestCases[0].SandboxInputPath != hit.TestCases[0].SandboxInputPath {
+		t.Fatalf("cache did not distinguish objects and reuse the refreshed URL: downloads=%d", downloads.Load())
+	}
+	requireGenerationInput(t, old, "old")
+	requireGenerationInput(t, newBundle, "new")
+}
+
+func TestOfficialLoaderConcurrentRepairPreservesActiveGeneration(t *testing.T) {
+	zipBytes := buildZip(t, map[string]string{"1.in": "held input", "1.out": "expected"})
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var repair atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if repair.Load() {
+			entered <- struct{}{}
+			select {
+			case <-release:
+			case <-req.Context().Done():
+				return
+			}
+		}
+		_, _ = w.Write(zipBytes)
+	}))
+	defer server.Close()
+	loader := NewOfficialLoader(zap.NewNop())
+	loader.cacheBaseDir = t.TempDir()
+	metadata := outbound.ProblemTestCaseMetadata{ProblemID: 42, Version: 1, TestCount: 1, ZipDownloadURL: server.URL + "/immutable.zip"}
+	held, err := loader.Load(context.Background(), metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	heldPath := held.TestCases[0].SandboxInputPath
+	if err := os.Remove(filepath.Join(filepath.Dir(heldPath), cacheSHA256File)); err != nil {
+		t.Fatal(err)
+	}
+	repair.Store(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	type loadResult struct {
+		bundle outbound.OfficialTestCaseBundle
+		err    error
+	}
+	results := make(chan loadResult, 2)
+	for range 2 {
+		go func() {
+			bundle, err := loader.Load(ctx, metadata)
+			results <- loadResult{bundle, err}
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("both repairs did not reach the download barrier")
+		}
+	}
+	requireGenerationInput(t, held, "held input")
+	close(release)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent repairs returned %v and %v", first.err, second.err)
+	}
+	for _, bundle := range []outbound.OfficialTestCaseBundle{held, first.bundle, second.bundle} {
+		requireGenerationInput(t, bundle, "held input")
+	}
+	if first.bundle.TestCases[0].SandboxInputPath == second.bundle.TestCases[0].SandboxInputPath {
+		t.Fatal("concurrent cache fills shared a generation directory")
+	}
+}
+
+func requireGenerationInput(t *testing.T, bundle outbound.OfficialTestCaseBundle, want string) {
+	t.Helper()
+	got, err := os.ReadFile(bundle.TestCases[0].SandboxInputPath)
+	if err != nil || string(got) != want {
+		t.Fatalf("generation input = %q, %v, want %q", got, err, want)
 	}
 }
 

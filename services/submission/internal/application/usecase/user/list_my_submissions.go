@@ -34,9 +34,7 @@ func (uc *listMySubmissionsUseCase) Execute(ctx context.Context, claims auth.Cla
 	if strings.TrimSpace(claims.UserID) == "" || claims.Role == "" {
 		return dto.ListMySubmissionsResponse{}, domain.ErrSubmissionUnauthenticated
 	}
-	switch claims.Role {
-	case rbac.RoleUser, rbac.RoleContributor, rbac.RoleModerator, rbac.RoleAdmin:
-	default:
+	if !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.ListMySubmissionsResponse{}, domain.ErrSubmissionForbidden
 	}
 

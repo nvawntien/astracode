@@ -7,7 +7,7 @@ type UserIDRequest struct {
 }
 
 type AssignRoleRequest struct {
-	Role rbac.Role `json:"role" binding:"required,oneof=user contributor moderator admin"`
+	Role rbac.Role `json:"role" binding:"required,oneof=user moderator admin"`
 }
 
 type ListAdminUsersRequest struct {

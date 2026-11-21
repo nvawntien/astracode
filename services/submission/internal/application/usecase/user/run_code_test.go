@@ -9,10 +9,56 @@ import (
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
+	"go-judge-system/pkg/response"
 	"go-judge-system/services/submission/internal/application/dto"
 	"go-judge-system/services/submission/internal/application/port/outbound"
 	"go-judge-system/services/submission/internal/domain"
 )
+
+func TestRunCodeRequiresAuthorizedProblemActor(t *testing.T) {
+	unauthorized := response.NewAppError(response.CodeUnauthorized, "unauthorized", nil)
+	for _, test := range []struct {
+		name     string
+		userID   string
+		role     rbac.Role
+		lookup   bool
+		notFound bool
+		wantErr  error
+	}{
+		{name: "owner user", userID: "owner", role: rbac.RoleUser, lookup: true},
+		{name: "other user", userID: "other", role: rbac.RoleUser, lookup: true, notFound: true, wantErr: domain.ErrProblemNotFound},
+		{name: "moderator", userID: "staff", role: rbac.RoleModerator, lookup: true},
+		{name: "admin", userID: "staff", role: rbac.RoleAdmin, lookup: true},
+		{name: "missing identity", role: rbac.RoleUser, wantErr: unauthorized},
+		{name: "missing role", userID: "owner", wantErr: unauthorized},
+		{name: "retired role", userID: "owner", role: "contributor", wantErr: domain.ErrProblemActorForbidden},
+		{name: "unknown role", userID: "owner", role: "owner", wantErr: domain.ErrProblemActorForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			problems := validProblemReader(1)
+			if test.notFound {
+				problems.err = domain.ErrProblemNotFound
+			}
+			runner := &stubJudgeRunner{}
+			useCase := NewRunCodeUseCase(problems, runner, dto.RunCodeLimits{})
+			req := validRunRequest([]dto.RunTestCaseInput{{ID: "custom-1", Kind: "custom"}})
+			_, err := useCase.Execute(context.Background(), auth.Claims{UserID: test.userID, Role: test.role}, req)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("error = %v, want %v", err, test.wantErr)
+			}
+			if test.lookup {
+				if problems.calls != 1 || problems.actor != (dto.ProblemActor{UserID: test.userID, Role: test.role}) {
+					t.Fatalf("problem calls/actor = %d/%+v", problems.calls, problems.actor)
+				}
+			} else if problems.calls != 0 {
+				t.Fatalf("problem calls = %d, want zero", problems.calls)
+			}
+			if (test.wantErr == nil && runner.calls != 1) || (test.wantErr != nil && runner.calls != 0) {
+				t.Fatalf("runner calls = %d with error %v", runner.calls, err)
+			}
+		})
+	}
+}
 
 func TestRunCodeUseCaseValidation(t *testing.T) {
 	claims := auth.Claims{UserID: "u1", Username: "alice", Role: rbac.RoleUser}

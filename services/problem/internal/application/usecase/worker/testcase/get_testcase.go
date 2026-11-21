@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"time"
 
 	"go-judge-system/pkg/judge"
 	"go-judge-system/services/problem/internal/application/dto"
@@ -10,8 +9,6 @@ import (
 	"go-judge-system/services/problem/internal/application/port/outbound"
 	"go-judge-system/services/problem/internal/domain"
 )
-
-const presignedURLexpiry = 15 * time.Minute
 
 type getTestCaseUseCase struct {
 	tcRepo    outbound.OfficialTestCaseMetadataRepository
@@ -40,7 +37,7 @@ func (uc *getTestCaseUseCase) Execute(ctx context.Context, problemID int64) (*dt
 		return nil, domain.ErrInvalidMemoryLimit
 	}
 
-	downloadURL, err := uc.tcStorage.GetPresignedURL(ctx, testcase.ZipObjectKey, presignedURLexpiry)
+	downloadURL, err := uc.tcStorage.GetPresignedURL(ctx, testcase.ZipObjectKey, judge.TestcaseDownloadURLLifetime)
 	if err != nil {
 		return nil, err
 	}

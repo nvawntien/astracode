@@ -96,11 +96,11 @@ func TestAssignRoleRequiresAdminInUseCase(t *testing.T) {
 				context.Background(),
 				pkgauth.Claims{UserID: "actor", Role: test.role},
 				dto.UserIDRequest{UserID: testUserID},
-				dto.AssignRoleRequest{Role: rbac.RoleContributor},
+				dto.AssignRoleRequest{Role: rbac.RoleModerator},
 			)
 
 			if test.allowed {
-				if err != nil || user.Role != rbac.RoleContributor || repo.updateCalls != 1 {
+				if err != nil || user.Role != rbac.RoleModerator || repo.updateCalls != 1 {
 					t.Fatalf("error/role/updates = %v/%q/%d", err, user.Role, repo.updateCalls)
 				}
 				return
@@ -109,6 +109,26 @@ func TestAssignRoleRequiresAdminInUseCase(t *testing.T) {
 				t.Fatalf("error/role/updates = %v/%q/%d, want forbidden/user/0", err, user.Role, repo.updateCalls)
 			}
 		})
+	}
+}
+
+func TestAssignRoleRejectsUnsupportedAndUnchangedRoles(t *testing.T) {
+	user := &entity.User{ID: testUserID, Role: rbac.RoleUser}
+	repo := &adminUsersRepository{users: map[string]*entity.User{testUserID: user}}
+	useCase := NewAssignRoleUseCase(repo)
+	for _, test := range []struct {
+		role    rbac.Role
+		wantErr error
+	}{
+		{role: "contributor", wantErr: domain.ErrInvalidRole},
+		{role: "owner", wantErr: domain.ErrInvalidRole},
+		{role: "", wantErr: domain.ErrInvalidRole},
+		{role: rbac.RoleUser, wantErr: domain.ErrAssignRoleAlreadyAssigned},
+	} {
+		err := useCase.Execute(context.Background(), adminClaims(), dto.UserIDRequest{UserID: testUserID}, dto.AssignRoleRequest{Role: test.role})
+		if !errors.Is(err, test.wantErr) || user.Role != rbac.RoleUser || repo.updateCalls != 0 {
+			t.Errorf("assign %q: error/role/updates = %v/%q/%d, want %v/user/0", test.role, err, user.Role, repo.updateCalls, test.wantErr)
+		}
 	}
 }
 

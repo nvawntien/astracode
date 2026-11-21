@@ -45,14 +45,14 @@ func TestGRPCProblemReaderMapsSuccess(t *testing.T) {
 	}}
 	var reader outbound.ProblemReader = NewGRPCProblemReader(client, time.Second)
 
-	got, err := reader.GetProblem(context.Background(), 42, dto.ProblemActor{UserID: "contributor-a", Role: rbac.RoleContributor})
+	got, err := reader.GetProblem(context.Background(), 42, dto.ProblemActor{UserID: "user-a", Role: rbac.RoleUser})
 	if err != nil {
 		t.Fatalf("GetProblem() error = %v", err)
 	}
 	if got.ID != 42 || got.Title != "Two Sum" || got.Slug != "two-sum" {
 		t.Fatalf("result = %+v", got)
 	}
-	if client.request.GetProblemId() != 42 || client.request.GetActorUserId() != "contributor-a" || client.request.GetActorRole() != "contributor" {
+	if client.request.GetProblemId() != 42 || client.request.GetActorUserId() != "user-a" || client.request.GetActorRole() != "user" {
 		t.Fatalf("request = %+v", client.request)
 	}
 }

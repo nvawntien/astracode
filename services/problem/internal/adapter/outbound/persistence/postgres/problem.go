@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // exampleJSON is an adapter-level struct with json tags for JSONB serialization.
@@ -149,6 +151,42 @@ func (ProblemDAO) TableName() string { return "problems" }
 
 type problemRepository struct{ db *gorm.DB }
 
+type problemTxKey struct{}
+
+func problemDB(ctx context.Context, db *gorm.DB) *gorm.DB {
+	if tx, ok := ctx.Value(problemTxKey{}).(*gorm.DB); ok {
+		return tx.WithContext(ctx)
+	}
+	return db.WithContext(ctx)
+}
+
+func (r *problemRepository) WithLockedProblem(ctx context.Context, id int64, mutate func(context.Context, *entity.Problem) error) error {
+	readyToCommit := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row ProblemDAO
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrProblemNotFound
+			}
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		tags, err := loadTagsByProblemIDs(ctx, tx, []int64{id})
+		if err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		txCtx := context.WithValue(ctx, problemTxKey{}, tx)
+		if err := mutate(txCtx, toProblemEntity(&row, tags[id])); err != nil {
+			return err
+		}
+		readyToCommit = true
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if readyToCommit && err != nil {
+		return domain.ErrInternalServer.Wrap(errors.Join(outbound.ErrMutationCommitUncertain, err))
+	}
+	return err
+}
+
 type submissionProblemRepository struct{ db *gorm.DB }
 
 func NewProblemRepository(db *gorm.DB) outbound.ProblemRepository {
@@ -245,13 +283,14 @@ func (r *problemRepository) GetByID(ctx context.Context, id int64) (*entity.Prob
 
 func (r *problemRepository) GetBySlug(ctx context.Context, slug string) (*entity.Problem, error) {
 	var dao ProblemDAO
-	if err := r.db.WithContext(ctx).Where("title_slug = ?", slug).First(&dao).Error; err != nil {
+	db := problemDB(ctx, r.db)
+	if err := db.Where("title_slug = ?", slug).First(&dao).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrProblemNotFound
 		}
 		return nil, err
 	}
-	tagsByProblemID, err := loadTagsByProblemIDs(ctx, r.db, []int64{dao.ID})
+	tagsByProblemID, err := loadTagsByProblemIDs(ctx, db, []int64{dao.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +298,15 @@ func (r *problemRepository) GetBySlug(ctx context.Context, slug string) (*entity
 }
 
 func (r *problemRepository) Update(ctx context.Context, problem *entity.Problem) error {
-	tx := r.db.WithContext(ctx).Begin()
-	if tx.Error != nil {
-		return tx.Error
+	if tx, ok := ctx.Value(problemTxKey{}).(*gorm.DB); ok {
+		return updateProblem(tx.WithContext(ctx), problem)
 	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return updateProblem(tx, problem)
+	})
+}
 
+func updateProblem(tx *gorm.DB, problem *entity.Problem) error {
 	if err := tx.Model(&ProblemDAO{}).Where("id = ?", problem.ID).
 		Updates(map[string]interface{}{
 			"title_slug":    problem.TitleSlug,
@@ -280,23 +323,17 @@ func (r *problemRepository) Update(ctx context.Context, problem *entity.Problem)
 			"is_hidden":     problem.IsHidden,
 			"updated_at":    time.Now(),
 		}).Error; err != nil {
-		tx.Rollback()
 		if isUniqueViolation(err) {
 			return domain.ErrProblemAlreadyExists
 		}
 		return err
 	}
 
-	if err := syncProblemTags(tx, problem.ID, problem.Tags); err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	return tx.Commit().Error
+	return syncProblemTags(tx, problem.ID, problem.Tags)
 }
 
 func (r *problemRepository) Delete(ctx context.Context, id int64) error {
-	result := r.db.WithContext(ctx).Delete(&ProblemDAO{}, id)
+	result := problemDB(ctx, r.db).Delete(&ProblemDAO{}, id)
 	if result.Error != nil {
 		return result.Error
 	}

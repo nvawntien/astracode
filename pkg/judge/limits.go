@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// Object reconciliation retains retired packages through both download windows.
+const (
+	TestcaseDownloadURLLifetime = 15 * time.Minute
+	TestcaseDownloadTimeout     = 30 * time.Second
+)
+
 // The executor converts milliseconds to nanoseconds (with a doubled clock
 // limit) and KiB to bytes using signed arithmetic.
 const (

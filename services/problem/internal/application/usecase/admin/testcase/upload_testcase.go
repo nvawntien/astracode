@@ -3,6 +3,7 @@ package testcase
 import (
 	"archive/zip"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"go-judge-system/pkg/auth"
@@ -14,11 +15,13 @@ import (
 	"go-judge-system/services/problem/internal/domain"
 	"go-judge-system/services/problem/internal/domain/entity"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -45,7 +48,7 @@ func NewUploadTestCaseUseCase(problemRepo outbound.ProblemRepository, testcaseRe
 }
 
 func (uc *uploadTestCaseUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest, req dto.UploadTestCaseRequest) (dto.TestCaseMetadataResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" || !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.TestCaseMetadataResponse{}, domain.ErrForbidden
 	}
 
@@ -57,14 +60,8 @@ func (uc *uploadTestCaseUseCase) Execute(ctx context.Context, claims auth.Claims
 		return dto.TestCaseMetadataResponse{}, domain.ErrInternalServer.Wrap(err)
 	}
 
-	if !claims.Role.AtLeast(rbac.RoleModerator) {
-		if problem.AuthorID != claims.UserID {
-			return dto.TestCaseMetadataResponse{}, domain.ErrForbidden
-		}
-
-		if !problem.IsHidden {
-			return dto.TestCaseMetadataResponse{}, domain.ErrForbidden
-		}
+	if !canMutateTestcase(claims, problem) {
+		return dto.TestCaseMetadataResponse{}, domain.ErrForbidden
 	}
 
 	if req.File == nil {
@@ -102,35 +99,49 @@ func (uc *uploadTestCaseUseCase) Execute(ctx context.Context, claims auth.Claims
 		return dto.TestCaseMetadataResponse{}, domain.ErrInvalidTestCase.Wrap(err)
 	}
 
-	version := 1
-	var oldObjectKey string
-
-	oldTC, err := uc.testcaseRepo.GetByProblemID(ctx, problem.ID)
-	if err == nil {
-		version = oldTC.Version + 1
-		oldObjectKey = oldTC.ZipObjectKey
-	} else if !errors.Is(err, domain.ErrTestCaseNotFound) {
-		return dto.TestCaseMetadataResponse{}, domain.ErrInternalServer.Wrap(err)
-	}
-
-	objectKey := fmt.Sprintf("problems/%d/testcases/v%d.zip", problem.ID, version)
-
+	objectKey := fmt.Sprintf("problems/%d/testcases/%s.zip", problem.ID, strings.ToLower(rand.Text()))
 	if err := uc.testcaseStorage.UploadTestCase(ctx, objectKey, tmpPath); err != nil {
+		slog.WarnContext(ctx, "staged testcase upload failed", "object_key", objectKey)
 		return dto.TestCaseMetadataResponse{}, domain.ErrInternalServer.Wrap(err)
 	}
 
-	tc := entity.NewTestCase(problem.ID, objectKey, testCount, version)
+	var committed *entity.TestCase
+	err = uc.problemRepo.WithLockedProblem(ctx, params.ID, func(txCtx context.Context, locked *entity.Problem) error {
+		if !canMutateTestcase(claims, locked) {
+			return domain.ErrForbidden
+		}
 
-	if err := uc.testcaseRepo.Upsert(ctx, tc); err != nil {
-		_ = uc.testcaseStorage.DeleteTestCase(ctx, objectKey)
-		return dto.TestCaseMetadataResponse{}, domain.ErrInternalServer.Wrap(err)
+		version := 1
+		current, err := uc.testcaseRepo.GetByProblemID(txCtx, locked.ID)
+		if err == nil {
+			version = current.Version + 1
+		} else if !errors.Is(err, domain.ErrTestCaseNotFound) {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		committed = entity.NewTestCase(locked.ID, objectKey, testCount, version)
+		if err := uc.testcaseRepo.Upsert(txCtx, committed); err != nil {
+			return domain.ErrInternalServer.Wrap(err)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, outbound.ErrMutationCommitUncertain) {
+			slog.WarnContext(ctx, "testcase upload commit needs reconciliation", "object_key", objectKey)
+		} else {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			if err := uc.testcaseStorage.DeleteTestCase(cleanupCtx, objectKey); err != nil {
+				slog.WarnContext(ctx, "staged testcase cleanup failed", "object_key", objectKey)
+			}
+		}
+		return dto.TestCaseMetadataResponse{}, err
 	}
 
-	if oldObjectKey != "" {
-		_ = uc.testcaseStorage.DeleteTestCase(ctx, oldObjectKey)
-	}
+	return usecase.MapTestCaseToMetadataResponse(committed), nil
+}
 
-	return usecase.MapTestCaseToMetadataResponse(tc), nil
+func canMutateTestcase(claims auth.Claims, problem *entity.Problem) bool {
+	return claims.Role.AtLeast(rbac.RoleModerator) || (problem.AuthorID == claims.UserID && problem.IsHidden)
 }
 
 func validateTestCaseZip(filePath string) (int, error) {

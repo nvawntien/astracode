@@ -11,7 +11,7 @@ import { useViewportWidth } from '@/lib/hooks';
 import type { AdminUser, AdminUserRole, AdminUserStatus } from '@/lib/types';
 
 const PAGE_SIZE = 20;
-const ROLES: AdminUserRole[] = ['user', 'contributor', 'moderator', 'admin'];
+const ROLES: AdminUserRole[] = ['user', 'moderator', 'admin'];
 const STATUSES: AdminUserStatus[] = ['active', 'unverified', 'suspended'];
 
 function errorMessage(err: unknown) {

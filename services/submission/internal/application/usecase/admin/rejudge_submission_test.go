@@ -297,7 +297,7 @@ func TestRejudgeAdminSubmissionAllowsModeratorAndAdmin(t *testing.T) {
 }
 
 func TestRejudgeAdminSubmissionRejectsForbiddenRole(t *testing.T) {
-	for _, role := range []rbac.Role{rbac.RoleUser, rbac.RoleContributor} {
+	for _, role := range []rbac.Role{rbac.RoleUser, "contributor"} {
 		t.Run(string(role), func(t *testing.T) {
 			uc := NewRejudgeAdminSubmissionUseCase(
 				&fakeRejudgeSubmissionRepo{submission: rejudgeSubmissionFixture(entity.StatusAccepted)},

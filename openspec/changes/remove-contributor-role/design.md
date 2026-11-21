@@ -15,7 +15,7 @@ Auth owns account roles and issues credentials. Envoy verifies access JWTs and s
 
 ## Concurrent Problem and testcase mutations
 
-The project owner approved this design extension on 2026-11-21 for tasks 2.1 and 2.3. The focused Gate 1 addendum for the revised CM-20 deletion contract is pending. Start the concurrency implementation after that review is confirmed. The original Gate 1 review records the role-model approval. [CM-20 delta](specs/content-moderation/spec.md#requirement-cm-20-testcase-package-deletion) · [Review evidence](progress.md)
+The project owner approved this design extension on 2026-11-21 for tasks 2.1 and 2.3 and confirmed the focused Gate 1 addendum for CM-20 at commit `1cfbda7`. The original Gate 1 review records the role-model approval. [CM-20 delta](specs/content-moderation/spec.md#requirement-cm-20-testcase-package-deletion) · [Review evidence](progress.md)
 
 ### PostgreSQL transaction scope
 
@@ -38,6 +38,8 @@ Use a manual local maintenance window and the existing Problem testcase object l
 2. Wait the full 15-minute presigned URL lifetime plus the worker's 30-second download timeout and the maximum clock skew between the issuer and MinIO. For example, wait at least 16 minutes when the verified skew bound is 30 seconds. Defer cleanup if the window or quiescence cannot be established. An object's modification time alone gives no evidence about when its last download URL was issued.
 3. Read every current package key from the primary Problem database using `SELECT DISTINCT zip_object_key FROM test_cases`. Include metadata for soft-deleted Problems. After quiescence, this complete read resolves references from previously uncertain commits. List the managed keys in the private Problem testcase prefixes in MinIO. Produce a dry-run list of keys in storage and absent from the complete reference set. A failed or incomplete database read or storage listing stops cleanup.
 4. Refresh the primary reference set before deleting the reviewed, exact candidate keys while writers remain paused. Keep referenced keys and unresolved candidates. Record removal failures for a later run, using a fresh retention and reference check for each retry. Resume service access after the maintenance window.
+
+For this manual procedure, run `go run ./cmd/reconcile-testcase-objects -quiesced-at "$TESTCASE_DRAINED_AT" -max-clock-skew "$TESTCASE_CLOCK_SKEW_BOUND"` from `services/problem` with a local configuration. Save the JSON candidate array and review the exact keys. Rerun with the same verified quiescence inputs and `-apply-reviewed <reviewed.json>` while the services remain paused. The command requires loopback PostgreSQL and MinIO endpoints and uses the existing tables and bucket. An apply failure identifies keys to recheck during the next reconciliation.
 
 ### Worker official testcase cache
 

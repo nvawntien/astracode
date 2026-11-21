@@ -25,13 +25,13 @@ func (uc *getSubmissionUseCase) Execute(ctx context.Context, claims auth.Claims,
 	if req.SubmissionID <= 0 {
 		return dto.GetSubmissionResponse{}, domain.ErrInvalidSubmissionID
 	}
-	if claims.UserID == "" || claims.Role == "" {
+	if strings.TrimSpace(claims.UserID) == "" || claims.Role == "" {
 		return dto.GetSubmissionResponse{}, domain.ErrSubmissionUnauthenticated
 	}
 
 	var ownerID *string
 	switch claims.Role {
-	case rbac.RoleUser, rbac.RoleContributor:
+	case rbac.RoleUser:
 		ownerID = &claims.UserID
 	case rbac.RoleModerator, rbac.RoleAdmin:
 	default:

@@ -255,14 +255,17 @@ func TestCreateSubmission_Validation(t *testing.T) {
 		wantErr error
 	}{
 		{name: "missing authenticated user", req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: "x"}, wantErr: response.NewAppError(response.CodeUnauthorized, "unauthorized", nil)},
-		{name: "invalid problem ID", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{Language: "GO", SourceCode: "x"}, wantErr: domain.ErrInvalidProblemID},
-		{name: "empty source", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO"}, wantErr: domain.ErrInvalidSourceCode},
-		{name: "whitespace source", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: " \n\t"}, wantErr: domain.ErrInvalidSourceCode},
-		{name: "source over limit", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: strings.Repeat("x", entity.MaxSourceCodeBytes+1)}, wantErr: domain.ErrSourceCodeTooLarge},
-		{name: "C unsupported", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "C", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
-		{name: "JavaScript unsupported", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "JAVASCRIPT", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
-		{name: "lowercase alias unsupported", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "go", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
-		{name: "unknown language", claims: auth.Claims{UserID: "u"}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "RUST", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
+		{name: "missing authenticated role", claims: auth.Claims{UserID: "u"}, wantErr: response.NewAppError(response.CodeUnauthorized, "unauthorized", nil)},
+		{name: "retired actor role", claims: auth.Claims{UserID: "u", Role: "contributor"}, wantErr: domain.ErrProblemActorForbidden},
+		{name: "unknown actor role", claims: auth.Claims{UserID: "u", Role: "owner"}, wantErr: domain.ErrProblemActorForbidden},
+		{name: "invalid problem ID", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{Language: "GO", SourceCode: "x"}, wantErr: domain.ErrInvalidProblemID},
+		{name: "empty source", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO"}, wantErr: domain.ErrInvalidSourceCode},
+		{name: "whitespace source", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: " \n\t"}, wantErr: domain.ErrInvalidSourceCode},
+		{name: "source over limit", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "GO", SourceCode: strings.Repeat("x", entity.MaxSourceCodeBytes+1)}, wantErr: domain.ErrSourceCodeTooLarge},
+		{name: "C unsupported", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "C", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
+		{name: "JavaScript unsupported", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "JAVASCRIPT", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
+		{name: "lowercase alias unsupported", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "go", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
+		{name: "unknown language", claims: auth.Claims{UserID: "u", Role: rbac.RoleUser}, req: dto.CreateSubmissionRequest{ProblemID: 1, Language: "RUST", SourceCode: "x"}, wantErr: domain.ErrInvalidLanguage},
 	}
 
 	for _, tt := range tests {
@@ -347,7 +350,8 @@ func TestCreateSubmissionProblemValidationFailureStartsNoTransaction(t *testing.
 			tx := &fakeTransactionManager{}
 			repo := &fakeSubmissionRepository{}
 			publisher := &fakeJudgePublisher{}
-			uc := NewCreateSubmissionUseCase(repo, tx, publisher, fakeAttemptIDGenerator{}, problemReader, &fakeSubmissionCooldown{})
+			cooldown := &fakeSubmissionCooldown{}
+			uc := NewCreateSubmissionUseCase(repo, tx, publisher, fakeAttemptIDGenerator{}, problemReader, cooldown)
 
 			_, err := uc.Execute(
 				context.Background(),
@@ -357,8 +361,8 @@ func TestCreateSubmissionProblemValidationFailureStartsNoTransaction(t *testing.
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("Execute() error = %v, want %v", err, wantErr)
 			}
-			if problemReader.calls != 1 || tx.called || repo.created != nil || publisher.called {
-				t.Fatalf("calls: problem=%d transaction=%t repository=%t publisher=%t", problemReader.calls, tx.called, repo.created != nil, publisher.called)
+			if problemReader.calls != 1 || len(cooldown.calls) != 0 || tx.called || repo.created != nil || publisher.called {
+				t.Fatalf("calls: problem=%d cooldown=%d transaction=%t repository=%t publisher=%t", problemReader.calls, len(cooldown.calls), tx.called, repo.created != nil, publisher.called)
 			}
 		})
 	}
@@ -475,7 +479,7 @@ func TestCreateSubmissionPropagatesActorRoleForHiddenProblemAccess(t *testing.T)
 		name string
 		role rbac.Role
 	}{
-		{name: "contributor own hidden", role: rbac.RoleContributor},
+		{name: "user own hidden", role: rbac.RoleUser},
 		{name: "moderator hidden", role: rbac.RoleModerator},
 		{name: "admin hidden", role: rbac.RoleAdmin},
 	}

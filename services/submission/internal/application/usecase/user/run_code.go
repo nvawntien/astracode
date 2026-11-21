@@ -7,6 +7,7 @@ import (
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/judge"
+	"go-judge-system/pkg/rbac"
 	"go-judge-system/pkg/response"
 	"go-judge-system/services/submission/internal/application/dto"
 	inbound "go-judge-system/services/submission/internal/application/port/inbound/user"
@@ -43,8 +44,11 @@ func (uc *runCodeUseCase) Execute(
 	claims auth.Claims,
 	req dto.RunCodeRequest,
 ) (dto.RunCodeResponse, error) {
-	if claims.UserID == "" {
+	if strings.TrimSpace(claims.UserID) == "" || claims.Role == "" {
 		return dto.RunCodeResponse{}, response.NewAppError(response.CodeUnauthorized, "unauthorized", nil)
+	}
+	if !claims.Role.AtLeast(rbac.RoleUser) {
+		return dto.RunCodeResponse{}, domain.ErrProblemActorForbidden
 	}
 	if req.ProblemID <= 0 {
 		return dto.RunCodeResponse{}, domain.ErrInvalidProblemID

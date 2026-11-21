@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { ContributorShell } from '@/components/contributions/ContributorShell';
+import { ContributionsShell } from '@/components/contributions/ContributionsShell';
 
 export default function ContributionsLayout({ children }: { children: ReactNode }) {
-  return <ContributorShell>{children}</ContributorShell>;
+  return <ContributionsShell>{children}</ContributionsShell>;
 }

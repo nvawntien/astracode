@@ -22,7 +22,10 @@ func NewListMyProblemsUseCase(problemRepo outbound.ProblemRepository) inbound.Li
 }
 
 func (uc *listMyProblemsUseCase) Execute(ctx context.Context, claims auth.Claims, req dto.ListProblemsRequest) (dto.ListProblemsResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" {
+		return dto.ListProblemsResponse{}, domain.ErrActorUnauthenticated
+	}
+	if !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.ListProblemsResponse{}, domain.ErrForbidden
 	}
 

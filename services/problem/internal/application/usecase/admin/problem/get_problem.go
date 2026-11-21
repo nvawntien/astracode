@@ -3,6 +3,7 @@ package problem
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"go-judge-system/pkg/auth"
 	"go-judge-system/pkg/rbac"
@@ -26,7 +27,10 @@ func NewGetProblemUseCase(problemRepo outbound.ProblemRepository, testcaseRepo o
 }
 
 func (uc *getProblemUseCase) Execute(ctx context.Context, claims auth.Claims, params dto.ProblemIDRequest) (dto.AdminProblemDetailResponse, error) {
-	if !claims.Role.AtLeast(rbac.RoleContributor) {
+	if strings.TrimSpace(claims.UserID) == "" {
+		return dto.AdminProblemDetailResponse{}, domain.ErrActorUnauthenticated
+	}
+	if !claims.Role.AtLeast(rbac.RoleUser) {
 		return dto.AdminProblemDetailResponse{}, domain.ErrForbidden
 	}
 

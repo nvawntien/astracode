@@ -45,7 +45,7 @@ func (r *Router) SetupRoutes() {
 	})
 
 	v1 := r.engine.Group("/api/v1")
-	isContributor := pkgmiddleware.RequireRole(rbac.RoleContributor)
+	isUser := pkgmiddleware.RequireRole(rbac.RoleUser)
 	isModerator := pkgmiddleware.RequireRole(rbac.RoleModerator)
 
 	v1.GET("/problems", r.userHandler.ListProblems.Handle)
@@ -54,7 +54,7 @@ func (r *Router) SetupRoutes() {
 	my := v1.Group("/my")
 	my.Use(r.authMiddleware)
 	{
-		my.GET("/problems", isContributor, r.userHandler.ListMyProblems.Handle)
+		my.GET("/problems", isUser, r.userHandler.ListMyProblems.Handle)
 	}
 
 	// Admin routes
@@ -63,10 +63,10 @@ func (r *Router) SetupRoutes() {
 	{
 		// Problem management
 		admin.GET("/problems", isModerator, r.adminHandler.ListProblems.Handle)
-		admin.GET("/problems/:problem_id", isContributor, r.adminHandler.GetProblem.Handle)
-		admin.POST("/problems", isContributor, r.adminHandler.CreateProblem.Handle)
-		admin.PUT("/problems/:problem_id", isContributor, r.adminHandler.UpdateProblem.Handle)
-		admin.DELETE("/problems/:problem_id", isContributor, r.adminHandler.DeleteProblem.Handle)
+		admin.GET("/problems/:problem_id", isUser, r.adminHandler.GetProblem.Handle)
+		admin.POST("/problems", isUser, r.adminHandler.CreateProblem.Handle)
+		admin.PUT("/problems/:problem_id", isUser, r.adminHandler.UpdateProblem.Handle)
+		admin.DELETE("/problems/:problem_id", isUser, r.adminHandler.DeleteProblem.Handle)
 		admin.PATCH("/problems/:problem_id/publish", isModerator, r.adminHandler.PublishProblem.Handle)
 		admin.PATCH("/problems/:problem_id/hidden", isModerator, r.adminHandler.HiddenProblem.Handle)
 		// tag management
@@ -75,9 +75,9 @@ func (r *Router) SetupRoutes() {
 		admin.PUT("/tags/:tag_id", isModerator, r.adminHandler.UpdateTag.Handle)
 		admin.DELETE("/tags/:tag_id", isModerator, r.adminHandler.DeleteTag.Handle)
 		// test case management
-		admin.GET("/problems/:problem_id/testcases", isContributor, r.adminHandler.GetTestCase.Handle)
-		admin.POST("/problems/:problem_id/testcases", isContributor, r.adminHandler.UploadTestCase.Handle)
-		admin.DELETE("/problems/:problem_id/testcases", isContributor, r.adminHandler.DeleteTestCase.Handle)
+		admin.GET("/problems/:problem_id/testcases", isUser, r.adminHandler.GetTestCase.Handle)
+		admin.POST("/problems/:problem_id/testcases", isUser, r.adminHandler.UploadTestCase.Handle)
+		admin.DELETE("/problems/:problem_id/testcases", isUser, r.adminHandler.DeleteTestCase.Handle)
 	}
 }
 

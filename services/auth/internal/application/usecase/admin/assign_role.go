@@ -23,6 +23,9 @@ func (uc *assignRoleUseCase) Execute(ctx context.Context, claims auth.Claims, pa
 	if !claims.Role.AtLeast(rbac.RoleAdmin) {
 		return domain.ErrForbidden
 	}
+	if !body.Role.AtLeast(rbac.RoleUser) {
+		return domain.ErrInvalidRole
+	}
 
 	user, err := uc.userRepo.GetUserById(ctx, params.UserID)
 	if err != nil {

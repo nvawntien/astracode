@@ -2,7 +2,6 @@ import type { Role } from '@/lib/types';
 
 const ROLE_LEVEL: Record<Role, number> = {
   user: 1,
-  contributor: 2,
   moderator: 3,
   admin: 4,
 };
@@ -12,12 +11,8 @@ export function roleAtLeast(role: Role | undefined | null, minimum: Role): boole
   return ROLE_LEVEL[role] >= ROLE_LEVEL[minimum];
 }
 
-/**
- * Contributor Workspace is a dedicated authoring surface, not a projection of
- * every role that inherits contributor-level backend capabilities.
- */
-export function isContributorWorkspaceUser(role: Role | undefined | null): role is 'contributor' {
-  return role === 'contributor';
+export function isContributionsWorkspaceUser(role: Role | undefined | null): role is 'user' {
+  return role === 'user';
 }
 
 export function roleLabel(role: Role): string {

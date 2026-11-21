@@ -20,6 +20,17 @@ func NewAuthMiddleware(logoutAllStore auth.LogoutAllIATStore) gin.HandlerFunc {
 			return
 		}
 
+		roleHeader := c.GetHeader("X-Role")
+		if roleHeader == "" {
+			response.Error(c, response.CodeUnauthorized, "unauthorized: missing role from gateway")
+			return
+		}
+		role, ok := rbac.ParseRole(roleHeader)
+		if !ok {
+			response.Error(c, response.CodeForbidden, "forbidden: unsupported role")
+			return
+		}
+
 		tokenIAT, ok := parseTokenIAT(c.GetHeader("X-Token-Iat"))
 		if !ok {
 			response.Error(c, response.CodeUnauthorized, "unauthorized: missing or invalid token iat")
@@ -40,7 +51,7 @@ func NewAuthMiddleware(logoutAllStore auth.LogoutAllIATStore) gin.HandlerFunc {
 		auth.SetClaims(c, auth.Claims{
 			UserID:        userID,
 			Username:      c.GetHeader("X-Username"),
-			Role:          rbac.Role(c.GetHeader("X-Role")),
+			Role:          role,
 			TokenIssuedAt: tokenIAT,
 		})
 

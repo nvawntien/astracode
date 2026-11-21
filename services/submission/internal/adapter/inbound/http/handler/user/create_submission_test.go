@@ -76,7 +76,7 @@ func performRequestWithUseCase(
 }
 
 func TestCreateSubmissionHandler_Success(t *testing.T) {
-	claims := auth.Claims{UserID: "trusted-user", Username: "trusted-name", Role: rbac.RoleContributor}
+	claims := auth.Claims{UserID: "trusted-user", Username: "trusted-name", Role: rbac.RoleUser}
 	recorder, useCase := performRequest(t, `{
 		"problem_id": 42,
 		"problem_title": "Attacker Title",
