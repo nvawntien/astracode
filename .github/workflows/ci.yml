@@ -74,7 +74,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT: '55432'
       ASTRACODE_DETAIL_TEST_PGPORT: '55432'
     steps:
@@ -96,6 +95,8 @@ jobs:
       # fails the job instead of passing silently.
       - name: Run PostgreSQL integration suites
         shell: bash
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           set -euo pipefail
           psql_admin() {
