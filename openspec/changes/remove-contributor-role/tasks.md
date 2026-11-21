@@ -1,0 +1,16 @@
+## 1. Role boundary and account conversion
+
+- [ ] 1.1 Update shared RBAC, protected middleware, Auth refresh validation, and Admin role assignment to accept User, Moderator, and Admin. Verify with `(cd pkg && go test ./...)` and `(cd services/auth && go test ./...)`, covering supported and retired roles, role assignment permissions, and refresh rejection and reuse cases.
+- [ ] 1.2 Add an Auth-owned preview and apply command that converts stored Contributor roles and records per-account cutoffs as described in the design. Verify dry run, conversion of active and suspended or unverified accounts, repeat runs, cutoff write failure before commit, and preservation of post-cutover sessions using Auth tests with PostgreSQL and Redis.
+
+## 2. Problem and Submission permissions
+
+- [ ] 2.1 Open shared problem authoring routes to authenticated Users and apply owner and visibility rules in Problem use cases. Verify with `(cd services/problem && go test ./...)` for guest rejection, own-list and detail behavior, draft creation/edit/delete, Testcase metadata and mutation, published read-only behavior, other-author denial, and staff catalog, tag, publish and hide permissions.
+- [ ] 2.2 Allow recognized draft owners through internal Problem metadata authorization and update Submission role checks for history, source-bearing detail, profile stats, and stream ticket issuance. Verify with `(cd services/problem && go test ./...)` and `(cd services/submission && go test ./...)` for owner and unrelated-user Run and Submit, invalid actor claims, staff detail rights, personal history, and owner-only ticket issuance including missing Submissions and unsupported roles.
+- [ ] 2.3 Update the Envoy role allowlist and authoring authorization annotations per the contract draft. Regenerate the outputs with the checked-in generator. Verify with `python3 envoy/generate.py --check`, local Compose configuration validation, and gateway tests covering retired-role JWT rejection, supported-role admission, anonymous requests, and replacement of caller-supplied identity headers.
+
+## 3. Website and cutover verification
+
+- [ ] 3.1 Enable Contributions navigation and workspace access for Users and remove Contributor from Admin role choices. Verify with `(cd website && npm test && npm run typecheck)` for guest sign-in and return, User workspace navigation and existing drafts, read-only Published detail, staff redirect and Admin Console controls, and success, failure, and deletion feedback.
+- [ ] 3.2 Rehearse the cutover through the local gateway and website or HTTP API with a legacy Contributor fixture that owns a draft, Testcase package, Published problem, and existing Submission. Verify old access and refresh credentials fail, a fresh User session reaches the same data and gets a live ticket, another User cannot read or edit the draft, ordinary Users can create drafts, and staff retain the publication controls. Include a control account whose existing credentials remain valid.
+- [ ] 3.3 Update the documentation listed in the design and record evidence in the change's progress log. Verify architecture and route docs against the implemented role matrix, then run `scripts/verify.sh` and `openspec validate remove-contributor-role --strict --no-interactive`.
