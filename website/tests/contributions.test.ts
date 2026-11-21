@@ -121,7 +121,9 @@ it('offers Contributions navigation and draft and Published items for a User', a
   expect(view.container.querySelector('a[href="/problems/published"]')?.textContent).toBe(
     'View problem',
   );
-  expect(view.container.querySelector('.ac-contribution-state.is-draft')?.textContent).toBe('Draft');
+  expect(view.container.querySelector('.ac-contribution-state.is-draft')?.textContent).toBe(
+    'Draft',
+  );
   expect(view.container.querySelector('.ac-contribution-state.is-published')?.textContent).toBe(
     'Published',
   );
