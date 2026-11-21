@@ -5,7 +5,7 @@
 Own-catalog reads SHALL require an authenticated User, Moderator, or Admin and restrict results to that caller's authored, nondeleted problems, including Published and Hidden problems. Returned items SHALL include author identity and indicate Hidden state when true. Own-catalog tag filtering SHALL also accept inactive nondeleted tags.
 
 #### Scenario: Contributor reads their own catalog
-- **WHEN** a former Contributor signs in as a User and requests their catalog
+- **WHEN** a User, Moderator, or Admin requests their own catalog
 - **THEN** it contains only their own nondeleted problems, whether Published or Hidden, with no other author's problems
 
 #### Scenario: Own catalog filters by an inactive tag
@@ -17,8 +17,8 @@ Own-catalog reads SHALL require an authenticated User, Moderator, or Admin and r
 - **THEN** access is denied
 
 #### Scenario: Base User requests an own catalog
-- **WHEN** an authenticated User requests their catalog
-- **THEN** the system returns the User's own problems or an empty catalog if they have authored none
+- **WHEN** an authenticated User who has authored no problems requests their catalog
+- **THEN** the system returns an empty catalog
 
 ### Requirement: Staff-catalog visibility
 
@@ -40,8 +40,12 @@ Privileged individual reads SHALL require an authenticated User, Moderator, or A
 - **WHEN** a User reads their own Hidden problem, or a Moderator or Admin reads any author's Hidden problem
 - **THEN** the read succeeds and includes the problem's author and visibility information
 
+#### Scenario: User reads their own Published problem
+- **WHEN** a User requests their own Published problem through privileged individual reads
+- **THEN** the read succeeds and includes the problem's author and visibility information
+
 #### Scenario: Contributor reads another author's problem
-- **WHEN** a former Contributor signs in as a User and requests another author's problem through privileged individual reads
+- **WHEN** a User requests another author's problem through privileged individual reads
 - **THEN** access is forbidden even if the problem is Published
 
 #### Scenario: Deleted problem is read by staff
@@ -50,10 +54,10 @@ Privileged individual reads SHALL require an authenticated User, Moderator, or A
 
 ### Requirement: Internal problem metadata visibility
 
-Internal problem metadata reads SHALL require a positive problem identity and a nonblank actor identity with a recognized role. Given the problem state read, any recognized role SHALL access Published problems; Hidden problems SHALL be accessible only to their authenticated author, Moderator, or Admin. Unavailable or disallowed problems SHALL be reported as not found.
+Internal problem metadata reads SHALL require a positive problem identity and a nonblank actor identity with the User, Moderator, or Admin role. Unsupported roles SHALL be forbidden. A caller with a supported role SHALL be able to resolve Published problems. Hidden problems SHALL be accessible only to their User author, Moderator, or Admin. Unavailable or disallowed problems SHALL be reported as not found.
 
 #### Scenario: Hidden metadata respects actor visibility
-- **WHEN** a Hidden problem's metadata is requested by its authenticated author or by staff
+- **WHEN** a Hidden problem's metadata is requested by its User author, a Moderator, or an Admin
 - **THEN** its identity, title, slug, and configured limits are returned without statement or Testcase package content
 
 #### Scenario: Base User cannot access Hidden metadata
@@ -61,8 +65,12 @@ Internal problem metadata reads SHALL require a positive problem identity and a 
 - **THEN** the result is problem not found
 
 #### Scenario: Internal caller omits or supplies invalid identity information
-- **WHEN** the problem identity is not positive, actor identity or role is missing, or the role is unrecognized
+- **WHEN** the problem identity is not positive, actor identity or role is missing, or the role is unsupported
 - **THEN** the request is rejected as invalid input, unauthenticated, or forbidden respectively
+
+#### Scenario: Internal caller has the retired role
+- **WHEN** a caller with the retired Contributor role requests metadata for a problem they own
+- **THEN** access is forbidden
 
 ### Requirement: Taxonomy administration access
 

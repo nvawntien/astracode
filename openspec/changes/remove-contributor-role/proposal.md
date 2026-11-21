@@ -2,16 +2,23 @@ Implements: F-01 (role removal), F-03 (draft authoring) | Addresses: NFR-S01, NF
 
 ## Why
 
-Problem authors currently need an Admin to assign the Contributor role before they can draft a problem. Removing that role lets verified Users prepare their own drafts and leaves staff responsible for moderation.
+Problem authors currently need an Admin to assign the Contributor role before they can draft a problem. M1-01 opens draft authoring to authenticated Users and keeps moderation with staff.
 
 ## What Changes
 
-- **BREAKING** Remove `contributor` from the supported authorization roles. Convert existing Contributor accounts to User, preserve their IDs and authored data, and require affected accounts to sign in again.
-- Open the existing Contributions workspace and authenticated draft operations to Users. Users may manage their own hidden drafts and Testcase packages, and read their own Published problems in the workspace.
-- Keep publication, hiding, staff catalog access, and taxonomy changes restricted to Moderator and Admin. Retain the existing staff publication action for the pilot.
-- Preserve owner-scoped solution history, live updates, and access to problem metadata for draft testing after the migration.
+- **BREAKING** Retire `contributor`. User, Moderator, and Admin are the supported roles. Protected services and credential validation reject unsupported roles.
+- Open the existing Contributions workspace and draft authoring routes to Users. Ownership and current visibility govern edits and testcase package changes. Users can also read their own Published contributions.
+- Keep publication, hiding, the staff catalog, taxonomy administration, and cross-author management with Moderators and Admins. The existing staff publication action stays available in M1-01.
+- Reuse the existing routes and payload structures, including the actor role field used for internal problem metadata.
 
-Out of scope for M1-01 are track persistence and DSA backfill (M1-03), premium entitlements (M1-04), and submitting a problem for review, automatic pre-check, review queues, and review decisions (M1-07). M1-07 remains responsible for requiring a verified email, five distinct Accepted problems, access to the target track, and fewer than three pending items at submission time.
+Versioned schema migrations (M1-02), Tracks and DSA backfill (M1-03), premium entitlements (M1-04), and the community review lifecycle, automatic pre-check, moderation queue, and eligibility enforcement (M1-07) are out of scope. The five distinct Accepted problems and pending-item limit apply when an author submits a draft for review in M1-07. Draft creation in M1-01 requires an authenticated account and valid draft content.
+
+## Acceptance Outcomes
+
+- Eligible sessions for all three supported roles work. A signed access or refresh credential carrying an unsupported role is rejected, and Admin role assignment rejects unsupported values.
+- A User with zero Accepted problems can create a draft. The author can read, edit, and delete their own hidden draft and manage its testcase package. Their Published contribution is read-only. Another User is denied access to the hidden draft. Staff can publish and hide it, and hiding restores author editing.
+- An author can Run Code and create a Submission against their hidden draft through the existing metadata check. An unrelated User receives the existing not-found outcome. Private testcase inputs and expected outputs stay protected.
+- Personal Submission history and SSE ticket issuance stay owner-scoped for all three roles. Staff retain their existing cross-owner detail access.
 
 ## Capabilities
 
@@ -19,21 +26,17 @@ Out of scope for M1-01 are track persistence and DSA backfill (M1-03), premium e
 
 ### Modified Capabilities
 
-- `identity-session` covers supported roles, existing account conversion, and credential rejection at cutover.
-- `content-moderation` covers the Contributions workspace, draft ownership, and author Testcase permissions.
-- `problem-catalog` covers own-catalog access, author-specific detail, and internal visibility for draft testing.
-- `submission` covers the supported roles for owner history and source-bearing detail and retains the staff boundary.
-- `realtime-updates` covers the supported roles for owner-only stream ticket issuance.
+- `identity-session` defines the role set and covers credential validation, protected access, and role assignment.
+- `content-moderation` covers the Contributions workspace, draft ownership, and author testcase permissions.
+- `problem-catalog` covers the own catalog, privileged detail, and internal metadata authorization for draft testing.
+- `submission` covers supported roles for Submission creation, personal history, and source-bearing detail.
+- `realtime-updates` covers supported roles for owner-only stream ticket issuance.
 
 ## Impact
 
-Auth, shared RBAC and middleware, Envoy, Problem, Submission, and the website consume the supported role list. The Auth-owned data conversion updates existing account roles. Existing protected HTTP paths and the role field in the internal problem metadata request are reused.
+Auth, shared RBAC and protected middleware, Envoy, Problem, Submission, and the website need the same supported role set. The design records the authorization contract changes and the local development data policy.
 
-## Open Questions and Suggested Answers
+## Gate 1 Review
 
-| Question | Suggested answer used by this proposal |
-| --- | --- |
-| When should the five-solved requirement and pending limit apply? | Apply both when the User submits a draft for review in M1-07. Verified Users can prepare drafts during the pilot. |
-| How should staff publish during the pilot? | Keep the existing Moderator/Admin publication action. Add the required automatic pre-check and review gate for community problems in M1-07, including enforcement on existing publication paths. |
-| Should affected users have to sign in again? | Revoke pre-cutover sessions for migrated accounts and reject credentials carrying `contributor`. This provides a clear cutover and preserves existing refresh behavior for the supported roles. |
-| Should private draft solves count toward future contribution eligibility? | Preserve existing draft testing during the pilot. For M1-07, count distinct Accepted problems from the published catalog so draft testing cannot satisfy the activity requirement. Define the exact counting rule in that change. |
+- **Five-capability exception.** Request a human waiver of the workflow's three-capability maximum. The five existing specs describe the same role across credential admission, draft authoring and reads, Submission access, and ticket issuance. Revising them together keeps the supported set and authorization outcomes consistent across those boundaries. The waiver remains pending. [Workflow §§4–5](../../../docs/process/workflow.md)
+- **ADR disposition.** PRD D-01 already records the product decision to remove Contributor. M1-01 applies it through the existing authorization and service boundaries. That limited design may be sufficiently documented by D-01 and this change. The reviewer still needs to determine whether the cross-capability change requires a separate ADR under §10. [PRD Appendix B](../../../docs/product/prd.md#appendix-b--decision-log) · [Workflow §10](../../../docs/process/workflow.md#10-adrs)

@@ -1,8 +1,28 @@
 ## MODIFIED Requirements
 
+### Requirement: Authenticated creation ownership
+
+The system SHALL require authenticated identity and the User, Moderator, or Admin role to create a Submission. It SHALL derive the owner identity and username from the authenticated identity and reject unsupported roles.
+
+#### Scenario: Guest attempts creation
+- **WHEN** a Guest requests a new Submission
+- **THEN** the request is rejected as unauthenticated and no Submission is created
+
+#### Scenario: Owner is assigned on creation
+- **WHEN** an authenticated User, Moderator, or Admin successfully creates a Submission
+- **THEN** the Submission belongs to that caller and records their authenticated username
+
+#### Scenario: Caller with an unsupported role attempts creation
+- **WHEN** a caller with an unsupported role requests a new Submission
+- **THEN** the request is forbidden before any Submission is created
+
 ### Requirement: Personal history owner scope
 
 The system SHALL allow an authenticated User, Moderator, or Admin to read personal Submission history, always restricted to that caller's own Submissions. Missing identity or Role SHALL be rejected as unauthenticated and other Roles SHALL be forbidden.
+
+#### Scenario: User reads personal history
+- **WHEN** an authenticated User requests personal history
+- **THEN** only that User's Submissions are returned
 
 #### Scenario: Staff reads personal history
 - **WHEN** a Moderator or Admin requests personal history
@@ -11,10 +31,6 @@ The system SHALL allow an authenticated User, Moderator, or Admin to read person
 #### Scenario: Guest or unknown Role reads personal history
 - **WHEN** the caller lacks identity or Role, or has an unsupported Role
 - **THEN** the request is rejected as unauthenticated or forbidden respectively
-
-#### Scenario: Migrated owner reads history
-- **WHEN** a former Contributor signs in as a User and requests personal history
-- **THEN** their own existing Submissions remain available
 
 ### Requirement: Source-bearing detail access
 

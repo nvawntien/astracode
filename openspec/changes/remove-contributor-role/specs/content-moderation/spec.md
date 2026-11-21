@@ -1,9 +1,17 @@
-## ADDED Requirements
+## RENAMED Requirements
+
+- FROM: `### Requirement: CM-02 Contributor Workspace access and states`
+- TO: `### Requirement: CM-02 Contributions workspace access and states`
+
+- FROM: `### Requirement: CM-04 Contributor Workspace navigation`
+- TO: `### Requirement: CM-04 Contributions workspace navigation`
+
+## MODIFIED Requirements
 
 ### Requirement: CM-02 Contributions workspace access and states
 The website SHALL provide the Contributions workspace to authenticated Users, send unauthenticated visitors to sign-in, and direct Moderators and Admins to the Admin Console. A Published contribution SHALL be read-only in the Contributions workspace.
 
-#### Scenario: Staff opens the Contributions workspace
+#### Scenario: Staff opens the Contributor Workspace
 - **WHEN** a Moderator or Admin opens the Contributions workspace
 - **THEN** the website directs them to administrative problem management
 
@@ -12,7 +20,7 @@ The website SHALL provide the Contributions workspace to authenticated Users, se
 - **THEN** the website directs them to sign-in with a return destination
 
 #### Scenario: Base-role User opens the workspace
-- **WHEN** an authenticated User with a verified email opens the Contributions workspace
+- **WHEN** an authenticated User opens the Contributions workspace
 - **THEN** the website opens the Contributions workspace and offers draft creation
 
 #### Scenario: Author opens a Published contribution
@@ -27,28 +35,30 @@ The Contributions workspace SHALL label returned hidden contributions as Draft a
 - **WHEN** the workspace receives a hidden and a Published contribution
 - **THEN** the hidden item has an Edit draft action and the Published item has Open and View problem actions
 
-## MODIFIED Requirements
-
 ### Requirement: CM-01 Authoring and moderation roles
-The system SHALL permit authenticated Users, Moderators, and Admins to create coding problems and perform authoring mutations subject to ownership and visibility checks. It SHALL reserve publication and hiding for Moderators and Admins.
+The backend SHALL permit only authenticated Users, Moderators, and Admins to create coding problem drafts and perform authoring mutations subject to ownership and visibility checks. It SHALL reserve publication and hiding for Moderators and Admins.
 
 #### Scenario: Base-role user attempts authoring
-- **WHEN** an authenticated User creates a valid coding problem or edits their own hidden draft
+- **WHEN** an authenticated User requests creation of a valid coding problem draft or edits their own hidden draft
 - **THEN** the system accepts the operation
 
 #### Scenario: Contributor attempts a moderation action
-- **WHEN** a former Contributor signs in as a User and attempts to publish or hide a coding problem, including their own
+- **WHEN** a User attempts to publish or hide a coding problem, including their own
 - **THEN** the system denies the operation
 
 #### Scenario: Missing authenticated identity
 - **WHEN** an authoring mutation, publication, or hiding is requested without an authenticated identity
 - **THEN** the system rejects it before performing the operation
 
+#### Scenario: Actor has an unsupported role
+- **WHEN** an actor with an unsupported role requests an authoring mutation, publication, or hiding
+- **THEN** the backend rejects the operation
+
 ### Requirement: CM-03 Hidden draft creation and ownership
 The system SHALL create each new coding problem as a hidden Draft owned by the authenticated creator, including when the creator is a Moderator or Admin. Creation SHALL NOT allow the caller to choose another author or publish the problem.
 
 #### Scenario: Contributor creates a problem
-- **WHEN** a former Contributor signs in as a User and successfully creates a coding problem
+- **WHEN** a User successfully creates a coding problem
 - **THEN** the new problem is hidden and owned by that User
 
 #### Scenario: Staff creates a problem
@@ -56,14 +66,14 @@ The system SHALL create each new coding problem as a hidden Draft owned by the a
 - **THEN** the new problem is also hidden and owned by the authenticated creator
 
 ### Requirement: CM-05 Ownership and draft mutation
-The system SHALL permit a User to edit or delete only their own hidden problem. Moderators and Admins SHALL be allowed to edit or delete any undeleted problem regardless of author and visibility.
+The system SHALL permit a User to edit or delete only their own undeleted hidden problem. Moderators and Admins SHALL be allowed to edit or delete any undeleted problem regardless of author and visibility.
 
 #### Scenario: Contributor mutates another author's draft
-- **WHEN** a former Contributor signs in as a User and attempts to edit or delete another author's hidden problem
+- **WHEN** a User attempts to edit or delete another author's hidden problem
 - **THEN** the system denies the operation
 
 #### Scenario: Contributor edits a Published problem
-- **WHEN** a former Contributor signs in as a User and attempts to edit or delete their own Published problem
+- **WHEN** a User attempts to edit or delete their own Published problem
 - **THEN** the system denies the operation
 
 #### Scenario: Staff edits another author's Published problem
@@ -104,10 +114,14 @@ The system SHALL let a Moderator or Admin hide an undeleted problem regardless o
 - **THEN** the operation succeeds and the problem remains hidden
 
 ### Requirement: CM-15 Testcase package permissions
-The system SHALL allow a User to read testcase metadata for their own hidden or Published problem and to upload, replace, or delete a package only while their own problem is hidden. Moderators and Admins SHALL have those package-management permissions for any undeleted problem, including Published problems.
+The system SHALL allow a User to read testcase metadata for their own undeleted hidden or Published problem and to upload, replace, or delete a package only while their own undeleted problem is hidden. Moderators and Admins SHALL have those package-management permissions for any undeleted problem, including Published problems.
+
+#### Scenario: User manages an owned hidden package
+- **WHEN** a User requests testcase metadata, a valid upload or replacement, or deletion of an existing package for their own hidden draft
+- **THEN** the system permits the operation under the existing package validation rules
 
 #### Scenario: Contributor mutates a Published package
-- **WHEN** a former Contributor signs in as a User and attempts to upload, replace, or delete a testcase package for their Published problem
+- **WHEN** a User attempts to upload, replace, or delete a testcase package for their Published problem
 - **THEN** the system denies the mutation even though the author can read its metadata
 
 #### Scenario: Other author's package
@@ -136,13 +150,3 @@ The website SHALL ask for confirmation before staff deletes a problem or an auth
 #### Scenario: Management mutation fails
 - **WHEN** a management request fails
 - **THEN** the website shows an error and permits retry after the request finishes
-
-## REMOVED Requirements
-
-### Requirement: CM-02 Contributor Workspace access and states
-**Reason**: The Contributions workspace is open to authenticated Users.
-**Migration**: Existing workspace links continue to open the Contributions workspace.
-
-### Requirement: CM-04 Contributor Workspace navigation
-**Reason**: Workspace navigation is specified under the Contributions workspace requirements.
-**Migration**: Use the same draft and Published problem actions from the Contributions workspace.
