@@ -121,6 +121,11 @@ it('offers Contributions navigation and draft and Published items for a User', a
   expect(view.container.querySelector('a[href="/problems/published"]')?.textContent).toBe(
     'View problem',
   );
+  expect(view.container.querySelector('.ac-contribution-state.is-draft')?.textContent).toBe('Draft');
+  expect(view.container.querySelector('.ac-contribution-state.is-published')?.textContent).toBe(
+    'Published',
+  );
+  expect(view.container.querySelector('a[href="/contributions/43"]')?.textContent).toBe('Open');
 });
 
 it.each([
@@ -154,6 +159,13 @@ it('renders a Published contribution without draft controls', async () => {
   mocks.api.getOwn.mockResolvedValue({ ...problem, is_hidden: false });
   view = await renderReact(createElement(ContributionDetail));
   expect(view.container.textContent).toContain('Published contribution');
+  expect(view.container.textContent).toContain('fixture-problem · Published');
+  expect(view.container.querySelector('a[href="/contributions"]')?.textContent).toBe(
+    'Back to contributions',
+  );
+  expect(view.container.querySelector('a[href="/problems/fixture-problem"]')?.textContent).toBe(
+    'View problem',
+  );
   expect(view.container.textContent).not.toContain('Draft editor');
   expect(view.container.textContent).not.toContain('Delete draft');
   expect(view.container.querySelector('#testcase-manager-heading')).toBeNull();
