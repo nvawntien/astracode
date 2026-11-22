@@ -31,8 +31,8 @@ for version history and release notes.
 - **Correctness-aware results** — `AttemptID` correlates a submit or rejudge
   attempt, while result application rejects stale and duplicate updates before
   live SSE notifications are emitted.
-- **Authoring and moderation** — Contributors own hidden drafts and testcase
-  packages; Moderator/Admin roles control publication and catalog management.
+- **Authoring and moderation** — Users own hidden drafts and testcase packages;
+  Moderator/Admin roles control publication, hiding, and catalog management.
 - **User-facing product** — authentication, profiles, aggregate competitive
   statistics, activity heatmaps, public user search, and responsive light/dark UI.
 
@@ -116,7 +116,7 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 
 ### Authoring and moderation
 
-- Contributor-owned hidden drafts with authoritative server-side `author_id`.
+- User-owned hidden drafts with authoritative server-side `author_id`.
 - Structured problem authoring for content, tags, examples, constraints, and hints.
 - Private testcase ZIP management for an owned hidden draft.
 - Moderator/Admin publication, hiding, catalog management, and tag taxonomy
@@ -133,9 +133,9 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 
 | Component | Responsibility |
 | --- | --- |
-| `website` | Next.js application for solvers, contributors, and administrators. |
+| `website` | Next.js application for solvers, problem authors, and administrators. |
 | `auth-service` | Identity, sessions, profile media, roles, suspension, and public-user lookup. |
-| `problem-service` | Problems, tags, contributor ownership, testcase metadata, and object storage access. |
+| `problem-service` | Problems, tags, author ownership, testcase metadata, and object storage access. |
 | `submission-service` | Submission/attempt/result state, transactional outbox, profile statistics, and SSE. |
 | `judge-worker` | Kafka consumption, testcase retrieval, executor orchestration, and result publication. |
 | `envoy` | Public routing, JWT validation, trusted identity propagation, and SSE. |
@@ -157,14 +157,13 @@ result application. See [architecture](docs/codebase/ARCHITECTURE.md) and
 
 | Role | Primary product responsibility |
 | --- | --- |
-| User | Browse public problems, run code, submit solutions, and view personal statistics. |
-| Contributor | Manage owned hidden problem drafts and testcase packages. Published contributions are read-only in the Contributor Workspace. |
+| User | Browse public problems, run code, submit solutions, view personal statistics, and manage owned hidden problem drafts and testcase packages. Published contributions are read-only in the Contributions workspace. |
 | Moderator | Review and manage the problem catalog, including publication/hiding and moderation actions. |
 | Admin | Platform administration plus the full Admin Console management surface. |
 
-Contributor Workspace and Admin Console are deliberately separate product
-surfaces. Backend role inheritance does not make Moderator/Admin accounts use
-the Contributor navigation workflow.
+The Contributions workspace and Admin Console are deliberately separate product
+surfaces. Moderator/Admin accounts are routed to the Admin Console and do not
+use the Contributions navigation workflow.
 
 ## Quick start
 
@@ -355,8 +354,8 @@ before a multi-replica or public deployment.
   identity claims to internal services.
 - Auth records Redis-backed issued-at cutoffs for logout-all, suspension, and
   password lifecycle invalidation.
-- Role middleware and Problem ownership checks enforce contributor, moderator,
-  and admin boundaries server-side.
+- Role middleware and Problem ownership checks enforce user, moderator, and
+  admin boundaries server-side.
 - Hidden testcase packages are separate from public problem statements; workers
   receive presigned metadata rather than exposing bundles to users.
 - Untrusted code executes through go-judge with configured resource limits.

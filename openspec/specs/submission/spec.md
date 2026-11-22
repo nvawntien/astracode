@@ -7,15 +7,19 @@ Record the existing behavior for official Submission creation, Attempts, history
 
 ### Requirement: Authenticated creation ownership
 
-The system SHALL require an authenticated user to create a Submission and SHALL derive its owner identity and username from the authenticated identity.
+The system SHALL require authenticated identity and the User, Moderator, or Admin role to create a Submission. It SHALL derive the owner identity and username from the authenticated identity and reject unsupported roles.
 
 #### Scenario: Guest attempts creation
 - **WHEN** a Guest requests a new Submission
 - **THEN** the request is rejected as unauthenticated and no Submission is created
 
 #### Scenario: Owner is assigned on creation
-- **WHEN** an authenticated user successfully creates a Submission
-- **THEN** the Submission belongs to that user and records that user's authenticated username
+- **WHEN** an authenticated User, Moderator, or Admin successfully creates a Submission
+- **THEN** the Submission belongs to that caller and records their authenticated username
+
+#### Scenario: Caller with an unsupported role attempts creation
+- **WHEN** a caller with an unsupported role requests a new Submission
+- **THEN** the request is forbidden before any Submission is created
 
 ### Requirement: Creation input validation
 
@@ -95,7 +99,11 @@ The system SHALL assign a nonblank identity to each newly created Attempt, make 
 
 ### Requirement: Personal history owner scope
 
-The system SHALL allow an authenticated User, legacy Contributor, Moderator, or Admin to read personal Submission history, always restricted to that caller's own Submissions. Missing identity or Role SHALL be rejected as unauthenticated and other Roles SHALL be forbidden.
+The system SHALL allow an authenticated User, Moderator, or Admin to read personal Submission history, always restricted to that caller's own Submissions. Missing identity or Role SHALL be rejected as unauthenticated and other Roles SHALL be forbidden.
+
+#### Scenario: User reads personal history
+- **WHEN** an authenticated User requests personal history
+- **THEN** only that User's Submissions are returned
 
 #### Scenario: Staff reads personal history
 - **WHEN** a Moderator or Admin requests personal history
@@ -171,10 +179,10 @@ Personal history SHALL return Submission identity, problem identity and recorded
 
 ### Requirement: Source-bearing detail access
 
-The system SHALL require a positive Submission identifier and authenticated identity and Role for source-bearing detail. Users and legacy Contributors SHALL be restricted to their own Submissions; Moderators and Admins SHALL be able to read any owner's Submission. A missing or other owner's Submission requested without staff privileges SHALL return the same not-found outcome, and unsupported Roles SHALL be forbidden.
+The system SHALL require a positive Submission identifier and authenticated identity and Role for source-bearing detail. Users SHALL be restricted to their own Submissions; Moderators and Admins SHALL be able to read any owner's Submission. A missing or other owner's Submission requested without staff privileges SHALL return the same not-found outcome, and unsupported Roles SHALL be forbidden.
 
 #### Scenario: Owner reads detail
-- **WHEN** a User or legacy Contributor requests their own existing Submission
+- **WHEN** a User requests their own existing Submission
 - **THEN** the detail, including stored source code, is returned
 
 #### Scenario: Other owner and absent Submission are indistinguishable
@@ -214,7 +222,7 @@ The system SHALL restrict staff Submission detail to authenticated Moderators an
 - **THEN** testcase summaries are returned while trigger, initiator, Attempt time, version, reported total, and checksum remain null
 
 #### Scenario: Lower Role requests staff detail
-- **WHEN** a User or legacy Contributor requests staff detail
+- **WHEN** a User requests staff detail
 - **THEN** access is forbidden
 
 ### Requirement: Rejudge eligibility
