@@ -78,5 +78,17 @@ Checks with no findings:
 - **Finding 2.5 is unchanged.** The docs still describe Contributor-only authoring.
 - **Status:** `changes-requested`, round 1. Round 2 waits for the author's response to 2.1, 2.3, 2.4 and 2.5.
 
+## Author response for round 2 (findings as of 1ac7945)
+
+| Finding | Author response | Evidence |
+|---|---|---|
+| 2.1 blocking | Fixed. Added a stateful-fake test (author edit and delete denied while Published, allowed after hide, not found after delete; hiding an already-hidden problem succeeds) and a PostgreSQL case for author package management after hide. | `services/problem/.../admin/problem/hide_restores_author_test.go` (commit 47b2341); `go test ./internal/application/usecase/admin/problem` PASS; testcase suite case `hiding_a_published_problem_restores_author_package_management` PASS |
+| 2.2 major | Fixed in code. `postgres-integration` job added (PostgreSQL 15.6 service, database recreated per suite, fails on SKIP or no PASS), with the job-context fix in e59f7d3. Not yet run on a GitHub runner. | `.github/workflows/ci.yml` (3be08a1, e59f7d3); local simulation: all three suites PASS, and the unset-port case fails with `::error::` |
+| 2.3 minor | Fixed. PostgreSQL case: staff deletes a Published problem and its package is kept; author edit after deletion is not found. | `testcase_mutation_integration_test.go` (47b2341), subtest `staff_deletes_a_published_problem_and_its_package_is_kept` PASS |
+| 2.4 minor | Fixed. Draft/Published labels, Open link, and Published-detail Back and View links asserted. | `website/tests/contributions.test.ts` (39fc007, formatting in 4c27cd8); vitest 11 PASS, typecheck exit 0 |
+| 2.5 major | Fixed. Updated all listed passages plus the root `README.md` (roles table, services table, authoring bullets, ownership bullet), which also described Contributor as a role. Product documents under `docs/product/` and the glossary deprecation entry are unchanged. | `docs/codebase/*`, `envoy/README.md`, `services/submission/README.md`, `website/README.md` (0c19332); root `README.md` (this commit). Remaining `contributor` mentions are the rejection statements in `envoy/README.md:94` and `ARCHITECTURE.md:75`, plus product and historical documents. |
+
+Reviewer: please re-check 2.2 against a real CI run, which is not yet available.
+
 ## Summary for the human reviewer
 This change retires `contributor` at every trust boundary: Envoy regex, shared RBAC and middleware, Auth sign-in, refresh and assignment, internal `GetProblem`, and Submission. It opens the Contributions workspace and draft authoring to Users. It also implements the approved concurrency extension: a `SELECT … FOR UPDATE` Problem lock for every mutation, immutable staged testcase keys with metadata-first deletion, a manual loopback-only orphan reconciler, and generation-based worker caching. The code matches the specs and verify passes, so confidence in the authorization logic is high. One blocking test gap remains (2.1): nothing proves that hiding a Published problem restores the author's edit and package rights, even though Gate 1 explicitly required it. Look first at `WithLockedProblem` in `postgres/problem.go:163-188` and its commit-uncertain handling. The env-gated PostgreSQL suites now pass locally (2.2), but CI still skips them. Decide where the stale docs get fixed (2.5).
