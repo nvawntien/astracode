@@ -156,19 +156,23 @@ The catalog SHALL allow Guests to read the complete active, nondeleted tag direc
 
 ### Requirement: Own-catalog visibility
 
-Own-catalog reads SHALL require an authenticated Contributor, Moderator, or Admin and restrict results to that caller's authored, nondeleted problems, including Published and Hidden problems. Returned items SHALL include author identity and indicate Hidden state when true. Own-catalog tag filtering SHALL also accept inactive nondeleted tags.
+Own-catalog reads SHALL require an authenticated User, Moderator, or Admin and restrict results to that caller's authored, nondeleted problems, including Published and Hidden problems. Returned items SHALL include author identity and indicate Hidden state when true. Own-catalog tag filtering SHALL also accept inactive nondeleted tags.
 
 #### Scenario: Contributor reads their own catalog
-- **WHEN** a Contributor requests their catalog
-- **THEN** it contains only their own eligible problems, whether Published or Hidden, with no other author's problems
+- **WHEN** a User, Moderator, or Admin requests their own catalog
+- **THEN** it contains only their own nondeleted problems, whether Published or Hidden, with no other author's problems
 
 #### Scenario: Own catalog filters by an inactive tag
 - **WHEN** an eligible caller filters their catalog by an attached inactive nondeleted tag
 - **THEN** their matching problems remain eligible
 
+#### Scenario: Guest requests an own catalog
+- **WHEN** a caller requests an own-catalog read without an authenticated identity
+- **THEN** access is denied
+
 #### Scenario: Base User requests an own catalog
-- **WHEN** a signed-in User without a higher role requests an own-catalog read
-- **THEN** access is forbidden
+- **WHEN** an authenticated User who has authored no problems requests their catalog
+- **THEN** the system returns an empty catalog
 
 ### Requirement: Staff-catalog visibility
 
@@ -179,19 +183,23 @@ The staff catalog SHALL require an authenticated Moderator or Admin and include 
 - **THEN** matching Published and Hidden nondeleted problems from any author are eligible
 
 #### Scenario: Lower role requests staff listing
-- **WHEN** a User or Contributor requests the staff catalog
+- **WHEN** a User requests the staff catalog
 - **THEN** access is forbidden
 
 ### Requirement: Privileged individual problem visibility
 
-Privileged individual reads SHALL require an authenticated Contributor, Moderator, or Admin. Contributors SHALL be restricted to their own problems; Moderator and Admin SHALL be allowed to read across authors. Both Published and Hidden nondeleted problems SHALL be eligible, with author, visibility, creation, and update information returned.
+Privileged individual reads SHALL require an authenticated User, Moderator, or Admin. Users SHALL be restricted to their own problems; Moderator and Admin SHALL be allowed to read across authors. Both Published and Hidden nondeleted problems SHALL be eligible, with author, visibility, creation, and update information returned.
 
 #### Scenario: Owner or staff reads a Hidden problem
-- **WHEN** a Contributor reads their own Hidden problem, or a Moderator or Admin reads any author's Hidden problem
+- **WHEN** a User reads their own Hidden problem, or a Moderator or Admin reads any author's Hidden problem
+- **THEN** the read succeeds and includes the problem's author and visibility information
+
+#### Scenario: User reads their own Published problem
+- **WHEN** a User requests their own Published problem through privileged individual reads
 - **THEN** the read succeeds and includes the problem's author and visibility information
 
 #### Scenario: Contributor reads another author's problem
-- **WHEN** a Contributor requests another author's problem through privileged individual reads
+- **WHEN** a User requests another author's problem through privileged individual reads
 - **THEN** access is forbidden even if the problem is Published
 
 #### Scenario: Deleted problem is read by staff
@@ -200,19 +208,23 @@ Privileged individual reads SHALL require an authenticated Contributor, Moderato
 
 ### Requirement: Internal problem metadata visibility
 
-Internal problem metadata reads SHALL require a positive problem identity and a nonblank actor identity with a recognized role. Given the problem state read, any recognized role SHALL access Published problems; Hidden problems SHALL be accessible only to their Contributor author, Moderator, or Admin. Unavailable or disallowed problems SHALL be reported as not found.
+Internal problem metadata reads SHALL require a positive problem identity and a nonblank actor identity with the User, Moderator, or Admin role. Unsupported roles SHALL be forbidden. A caller with a supported role SHALL be able to resolve Published problems. Hidden problems SHALL be accessible only to their User author, Moderator, or Admin. Unavailable or disallowed problems SHALL be reported as not found.
 
 #### Scenario: Hidden metadata respects actor visibility
-- **WHEN** a Hidden problem's metadata is requested by its Contributor author or by staff
+- **WHEN** a Hidden problem's metadata is requested by its User author, a Moderator, or an Admin
 - **THEN** its identity, title, slug, and configured limits are returned without statement or Testcase package content
 
 #### Scenario: Base User cannot access Hidden metadata
-- **WHEN** a User or another Contributor requests metadata for a problem whose read state is Hidden
+- **WHEN** a User requests metadata for another author's Hidden problem
 - **THEN** the result is problem not found
 
 #### Scenario: Internal caller omits or supplies invalid identity information
-- **WHEN** the problem identity is not positive, actor identity or role is missing, or the role is unrecognized
+- **WHEN** the problem identity is not positive, actor identity or role is missing, or the role is unsupported
 - **THEN** the request is rejected as invalid input, unauthenticated, or forbidden respectively
+
+#### Scenario: Internal caller has the retired role
+- **WHEN** a caller with the retired Contributor role requests metadata for a problem they own
+- **THEN** access is forbidden
 
 ### Requirement: Taxonomy administration access
 
@@ -223,7 +235,7 @@ Tag creation, updates, deactivation, and the complete staff tag directory SHALL 
 - **THEN** active and inactive nondeleted tags are returned together with their activation and audit information
 
 #### Scenario: Lower role attempts taxonomy administration
-- **WHEN** a User or Contributor attempts to read the staff directory or change the taxonomy
+- **WHEN** a User attempts to read the staff directory or change the taxonomy
 - **THEN** access is forbidden
 
 ### Requirement: Default tag creation and slug uniqueness
