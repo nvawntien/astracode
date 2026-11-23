@@ -1,221 +1,96 @@
-# ADR-0006 — Schema Migration Policy (Goose)
+# ADR-0006 — Version PostgreSQL schema migrations with Goose
 
 | Field | Value |
 |---|---|
-| Project | AstraCode — Online Education Platform |
-| Milestone | **M0-11** |
-| Decision type | Architecture Decision Record (ADR) |
-| Status | **Proposed — decisions agreed in discussion; not yet approved/merged through ADR review** |
+| Status | Proposed |
 | Date | 2026-11-23 |
-| Owner | Orchestrator / review by Infra & service owners |
-| NFR | **NFR-D05** — versioned, backward-compatible migrations; no runtime auto-migration in production |
-| Implementation change | **M1-02 `add-versioned-migrations`** |
-| Intended repository path | `docs/architecture/adr/0006-schema-migration-policy.md` |
+| Milestone | M0-11 |
+| Requirement | NFR-D05, backward-compatible versioned migrations and no runtime auto-migration in production |
+| Implementation | M1-02 `add-versioned-migrations` |
+| Owner | Orchestrator |
+| Review | Infrastructure and service owners |
 
-> **Decision scope.** This ADR selects the schema-management approach and specifies the local cutover and future release safety rules. It does not claim that Goose migrations, new runtime images, CI gates, or a database reset have been implemented.
+M0-11 records the decision. M1-02 implements the initial schemas, local cutover and verification. A protected release may use managed migrations once the release gate in this ADR is implemented and rehearsed. [Delivery plan](../../product/delivery-plan.md) · [NFR-D05](../../product/nfr.md) · [ADR workflow](../../process/workflow.md#10-adrs)
 
-## 1. Context and verified repository state
+## Context
 
-AstraCode currently uses **one PostgreSQL server with three separate databases** created by `infra/postgres/init.sql`: `auth_db`, `problem_db`, and `submission_db`. Auth owns `users`; Problem owns `problems`, `tags`, `problem_tags`, `test_cases`; Submission owns `submissions`, `submission_attempts`, `submission_results`, `outbox_messages`. Services use GORM as an ORM.
+Local Compose runs PostgreSQL 15.6. On first initialization, `infra/postgres/init.sql` creates `auth_db`, `problem_db` and `submission_db`. GORM repository constructors create or reconcile application tables with `AutoMigrate`. Several callers discard its errors, and the Submission attempt repository also invokes `AlterColumn` on `TriggeredByUserID`. The current protected App/Judge rollout verifies application and worker health without a schema migration gate. [Local Compose](../../../docker-compose.yml) · [Database bootstrap](../../../infra/postgres/init.sql) · [Submission attempt repository](../../../services/submission/internal/adapter/outbound/persistence/postgres/submission_attempt.go) · [Deployment guide](../../DEPLOYMENT.md)
 
-Repository constructors currently execute GORM `AutoMigrate`. In particular, `NewSubmissionAttemptRepository` invokes both `AutoMigrate(&SubmissionAttemptDAO{})` and `db.Migrator().AlterColumn(&SubmissionAttemptDAO{}, "TriggeredByUserID")` during construction. Several AutoMigrate results are ignored. There is no checked-in versioned SQL migration runner. `docker-compose.yml` mounts `infra/postgres/init.sql` for initial database creation, which does **not** create the application tables.
+Running DDL at startup ties schema changes to replica restarts and leaves no reviewed, versioned path from one release schema to the next. M1-02 can start from empty databases for new development installations and explicitly approved disposable local data. The contents and ownership of shared or managed databases require separate verification. [Data ownership](../../codebase/DATA.md) · [Development workflow](../../codebase/DEVELOPMENT.md)
 
-The protected production deployment currently performs application/config rollout and health verification, **not a database-migration gate**. Existing PostgreSQL integration tests create fresh fixture databases and must be adapted to use the managed schema rather than relying on runtime AutoMigrate.
+## Options
 
-**Explicit project-specific assumption accepted by the user:** the current operational dataset is local/development-only and **may be discarded**. No existing PostgreSQL data needs preservation or historical adoption. This assumption must never be extended implicitly to shared staging, production, or another contributor's environment.
+| Option | Trade-off |
+|---|---|
+| Keep GORM startup migration | Convenient for fresh development databases. Schema changes still depend on application startup and lack an explicit version history and deployment gate. |
+| Run SQL scripts directly | Makes DDL reviewable. AstraCode would need to maintain its own ordering, transaction handling and migration history. |
+| Use Goose with SQL migrations | Provides ordered SQL, per-file transactions and database-local history. AstraCode supplies target verification, runner serialization and release compatibility checks. |
 
-## 2. Final decisions
+## Decision
 
-| ID | Decision | Policy |
-|---|---|---|
-| M11-01 | Tool | **Pressly Goose v3**, standalone SQL-capable CLI/container; do not add Goose as a runtime dependency of Auth, Problem, or Submission. |
-| M11-02 | Tool pinning | Target **Goose v3.30.0** for M1-02. Resolve and pin the verified OCI digest/tool artifact in implementation; do not use `latest` in CI or deployments. Review compatibility and security before merging. |
-| M11-03 | Migration language | **SQL-only migrations**, not Go migration callbacks in this phase. |
-| M11-04 | Versioning | Sequential, zero-padded numeric filenames beginning at `00001`, independent per database, e.g. `00001_initial_schema.sql`; never reuse a version within its owner. |
-| M11-05 | Ownership | Each service exclusively owns the schema migrations and version history of its own database. No cross-service table DDL or direct cross-database reads. Judge Worker has no PostgreSQL migration ownership. |
-| M11-06 | History | Default Goose tracking table `goose_db_version` **in each database independently**. Track release/source revision and migration content hash separately in CI/release evidence; do not treat Goose's version table as a migration-file checksum store. |
-| M11-07 | Runtime responsibility | **No schema mutation at service initialization**: remove `AutoMigrate`, `AlterColumn`, and analogous startup DDL from production and local service constructors. GORM remains for ordinary DML/querying. |
-| M11-08 | Fresh database | `infra/postgres/init.sql` creates databases only; a dedicated Goose job creates application tables, constraints, defaults, indexes and version metadata before services start. |
-| M11-09 | Existing local database | **Destructive local cutover is permitted**. No schema adoption, version forcing, old-data backfill or compatibility with pre-Goose local volumes is required. |
-| M11-10 | Local cutover safety | Reset **only explicitly named local/dev PostgreSQL data** after an explicit opt-in. The reset script must verify project/environment/volume identity and reject staging/production; never use broad destructive wildcard cleanup. Do not reset other contributors' volumes. |
-| M11-11 | Initial schema fidelity | Initial SQL migrations must reproduce all tables, column types/nullability/defaults, primary keys, foreign keys, uniqueness rules and indexes needed by the existing GORM DAOs and behaviors, including `attempt_id`, Submission outbox and Problem-tag relationships. |
-| M11-12 | Seeds vs schema | Keep development sample data and the existing curated-tag seeding workflow **separate** from schema migrations. Seed steps must be explicit, environment-aware, rerunnable, and not alter Goose history. |
-| M11-13 | Execution timing | Run migrations through a **dedicated one-shot job**, not on every application replica start. For local Compose: PostgreSQL healthy → Goose migrations pass → application services start. For a future protected release: preflight → approved compatible migrations → verify → activate release. |
-| M11-14 | Serialization | **One runner per database**. M1-02 must enforce deployment/runner serialization and test two concurrent attempts. For multi-runner/shared environments, use an explicitly implemented PostgreSQL-backed lock held across the entire Goose invocation (e.g. session advisory lock via wrapper / a separate migrator using Goose Provider `WithSessionLocker`); do **not** assume the stock Goose CLI automatically locks. |
-| M11-15 | Migration transactions | Use Goose's transactional SQL migration behavior by default. `-- +goose NO TRANSACTION` is exception-only; its file must contain a recovery procedure and be validated on a disposable database. |
-| M11-16 | Changes after initial cutover | Use **Expand → Backfill/Adapt → Contract** for backward compatibility. A released migration must not be edited or deleted; corrective changes get a new version. |
-| M11-17 | Rollback | **Never automatically run `goose down` during application rollback.** Verify old/new application compatibility with the migrated schema before allowing production promotion. Destructive `Down` is not part of the standard protected release path. |
-| M11-18 | Failure behavior | Any migration error, unknown state, unverified version, lock conflict, or schema incompatibility **blocks service activation/promotion**. No partial success claim across three databases; recovery is manual and evidence-based. |
-| M11-19 | Permissions | Migration identity has scoped DDL rights for its owned database; runtime service identities should not have DDL rights in managed environments. Secrets stay outside images, source, CI logs and migration files. |
-| M11-20 | CI/quality gates | Validate migration syntax/sequence, fresh installs, no-op second `up`, DAO/contract compatibility, deterministic fixture tests, failed-migration behavior, concurrent-run exclusion and application smoke tests. |
-| M11-21 | Docs and OpenSpec | This is an **infrastructure implementation change, not a product behavior change**. Do not edit existing `openspec/changes/archive/**` or `openspec/specs/**` solely to replace AutoMigrate with Goose. Add fresh verification evidence. If behavior actually changes, propose an independent OpenSpec delta. |
-| M11-22 | Scope split | **M0-11:** approve this ADR. **M1-02:** implement migrations, database reset tooling, refactor runtime constructors/tests, pipeline integration and evidence. |
+### Tool and ownership
 
-### Tooling rationale
+Use Pressly Goose v3 as a dedicated one-shot migration tool. M1-02 targets **v3.30.0** and must verify the binary checksum or OCI digest, target architecture and PostgreSQL CLI behavior before pinning the artifact for local and CI use. Protected releases use the same verified pin. The upstream SQL-only image supports Linux amd64 and arm64 and runs without a shell. A wrapper, if needed, runs outside that stock image or in dedicated migrator packaging. Keep Goose out of the application binaries and their Go modules. Building this Goose version from source requires Go 1.26, while AstraCode CI pins Go 1.25.8. [Goose v3.30.0 release](https://github.com/pressly/goose/releases/tag/v3.30.0) · [Tagged Go module](https://github.com/pressly/goose/blob/v3.30.0/go.mod) · [AstraCode CI](../../../.github/workflows/ci.yml)
 
-Goose supports versioned SQL files with `-- +goose Up`, optional `-- +goose Down`, transactional execution by default and opt-out with `-- +goose NO TRANSACTION`. As of the decision date the v3.30.0 release provides an official `ghcr.io/pressly/goose` image for SQL migrations. Goose v3.28+ requires Go 1.26 if compiled from source, while AstraCode CI uses Go 1.25.8; keeping Goose as a pinned, external image/binary avoids coupling this decision to a runtime Go upgrade. An exact deployable digest, platform and binary behavior still require verification in M1-02.
+| Owner | Database | Migration directory | Initial schema to verify |
+|---|---|---|---|
+| Auth | `auth_db` | `services/auth/migrations/` | `users`, including UUID identity, username/email uniqueness and independent activation and suspension flags |
+| Problem | `problem_db` | `services/problem/migrations/` | `problems`, `tags`, `problem_tags` and `test_cases`, including slug and join uniqueness, soft deletion and one testcase metadata row per problem |
+| Submission | `submission_db` | `services/submission/migrations/` | `submissions`, `submission_attempts`, `submission_results` and `outbox_messages`, including unique attempt IDs, the current-attempt reference used by reads, and nullable `triggered_by_user_id` |
 
-## 3. Target repository layout (proposed; M1-02 creates these)
+Each owner manages only its own schema and its own `goose_db_version` table. Services communicate through APIs and events across database boundaries. Judge Worker owns no PostgreSQL migrations. Derive each initial schema from the DAOs, queries and the PostgreSQL schema produced on a disposable database. Check types, nullability, defaults, sequences, keys, foreign keys, delete actions and indexes. Preserve the Problem mutation transaction, the Submission/attempt/outbox transaction and attempt-aware result handling. [Data ownership](../../codebase/DATA.md) · [Submission and Problem flows](../../codebase/FLOWS.md)
 
-```text
-services/
-  auth/migrations/
-    00001_initial_schema.sql
-  problem/migrations/
-    00001_initial_schema.sql
-  submission/migrations/
-    00001_initial_schema.sql
-scripts/migrations/
-  migrate.sh                 # one-shot, scoped migrations; fail-closed
-  reset-local-postgres.sh    # explicitly opt-in local-only operation
-  verify.sh                  # schema/version/compatibility checks
-```
+### Migration files and release history
 
-The actual structure may adapt to packaging constraints, but **ownership and three independent migration histories are fixed**. The initial SQL is generated/reviewed against the existing GORM DAOs and verified PostgreSQL schema behavior—not guessed from a simplified entity diagram.
+- Use SQL-only files with sequential, zero-padded versions starting at `00001_initial_schema.sql` per database. Each file has one `-- +goose Up` section. A `Down` section is optional and requires a verified reversal. Deployment uses the forward path.
+- Preserve the name, version and contents of every released migration. Correct an already released migration with a new version. CI rejects duplicate versions, gaps, and changes to the released sequence. The runner rejects out-of-order or unversioned execution.
+- Bind the source revision, Goose artifact pin, file names and content hashes, and each database's target version to the release. Goose records applied versions. CI and release evidence retain file hashes separately, and schema checks detect drift a version number alone cannot identify.
+- Use one transaction per migration file by default. For `-- +goose NO TRANSACTION`, require a reviewed recovery procedure and a disposable-database failure rehearsal. For example, a failed concurrent index build can leave an invalid index. Check the actual object state before resuming.
+- Keep development fixtures and curated Problem tags in explicit, rerunnable seed commands after the schema gate. Schema changes may include data changes needed for compatibility. Large backfills run as separately verified, bounded batches with progress that survives a restart. [Goose SQL migrations](https://github.com/pressly/goose/tree/v3.30.0#sql-migrations) · [PostgreSQL concurrent index builds](https://www.postgresql.org/docs/15/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY) · [Problem tag seeder](../../../services/problem/cmd/seed-tags/main.go)
 
-Example migration syntax (illustrative **only**, not a complete AstraCode schema):
+### Execution and privileges
 
-```sql
--- +goose Up
-CREATE TABLE example_record (
-    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    name TEXT NOT NULL
-);
+The runner must verify the environment, PostgreSQL instance, database, schema and role before any write. The migration directory and database must correspond to the same owner. Use read-only catalog queries for initial inspection. In Goose v3.30.0, `status` can create the version table on an empty database, so it belongs inside the guarded migration path. [Goose v3.30.0 status implementation](https://github.com/pressly/goose/blob/v3.30.0/status.go)
 
--- +goose Down
-DROP TABLE example_record;
-```
+| State at preflight | Runner behavior |
+|---|---|
+| Confirmed empty application schema without Goose history | Apply the initial migration and the rest of the approved sequence. |
+| Known history and schema matching an applied prefix of the release manifest | Apply only the pending versions up to the release target. At the target version, finish without DDL after verification. |
+| Application objects without trusted history, or an unexpected schema or version | Stop. Resolve legacy adoption or drift separately before applying migrations. This includes missing, unknown, or newer applied versions. |
 
-For the real initial schema, the `Down` section may be omitted rather than shipping an easily misused destructive production rollback; Goose permits an optional Down. Local reset is an explicit separate procedure, not a standard `down-to 0` deployment.
+A dedicated migrator holds the DDL rights and writes the version history for its database. In managed environments, application roles receive only the required reads, writes and sequence privileges on their own databases. They have no application-schema DDL rights, direct or inherited object ownership, or write access to the Goose ledger. Keep migration credentials separate from runtime credentials and out of source, images and logs. [PostgreSQL privileges](https://www.postgresql.org/docs/15/ddl-priv.html)
 
-## 4. Local cutover sequence (M1-02)
+Run one migrator at a time per database. Shared environments require a PostgreSQL-backed lock with the same identity across releases and entry points. Hold it from history inspection through migration and post-checks. The stock Goose CLI has no such lock configured. Use a PostgreSQL session advisory lock in a wrapper or configure locking in a dedicated Goose Provider runner. A wrapper using a separate lock connection must demonstrate that migration DDL cannot continue once the lock is lost and another runner can enter. Use bounded acquisition and execution time. On lock loss, abort and block promotion until the database is reconciled. A second runner must either time out without writing or acquire the lock and recheck the history before applying anything. Serialize the managed release across all three databases so releases cannot interleave. [Goose locking options](https://pressly.github.io/goose/documentation/provider/#withsessionlocker) · [Goose v3.30.0 CLI](https://github.com/pressly/goose/blob/v3.30.0/cmd/goose/main.go) · [PostgreSQL advisory locks](https://www.postgresql.org/docs/15/explicit-locking.html#ADVISORY-LOCKS)
 
-1. **Inventory** all existing AutoMigrate/`AlterColumn` locations and dependent test setup. Capture the legacy schema shape sufficiently to define a functionally equivalent fresh schema (not to preserve local records).
-2. **Create** three initial Goose SQL migrations, including the exact foreign keys/indexes/defaults that ensure existing code invariants. Build the schema on empty PostgreSQL 15.6 databases and inspect it.
-3. **Refactor** repository constructors and service startup: remove startup DDL, preserve dependency-injection interfaces, and make schema absence an explicit startup/test failure rather than silently migrating.
-4. **Refactor test fixtures** to run Goose on disposable databases first. Existing PostgreSQL integration suites must no longer assume DAO constructors implicitly create tables.
-5. **Introduce one-shot migrations** in local bootstrapping with explicit PostgreSQL health/readiness dependencies; ensure applications are not started against a missing/partially migrated schema.
-6. **Approve local reset** using an environment-guarded exact PostgreSQL volume/database target; reset dev-only PostgreSQL data. Coordinate with Kafka/MinIO/Redis/dev fixtures because stale submission IDs, user references and testcase objects may otherwise remain. Reset those stores **only when explicitly intended**, not via a generic `docker compose down -v` default.
-7. **Run** the three Goose migration sets, rerun `up` to confirm no-op, and run any required idempotent development seed workflows separately.
-8. **Build new application images** and test Auth, Problem, Submission, Judge Worker interactions, including the complete Submit → Outbox → Kafka → Judge → Verdict journey.
-9. **Record evidence**: clean schema versions for all three databases, table/index/constraint verification, tests, new image identifiers, reset scope, known limitations and a follow-up plan for release migrations.
+## Local cutover in M1-02
 
-No legacy data import, historical baselining or migration `force`/fake version step is part of this cutover.
+1. Capture the legacy schema on disposable PostgreSQL 15.6 and build and compare the three initial migration sets. Remove startup `AutoMigrate`, `AlterColumn` and equivalent DDL from application constructors and startup paths. Make missing or incompatible schemas fail startup through a read-only check. GORM continues to handle queries and writes.
+2. Keep database creation in Compose bootstrap. Start the one-shot migration job after PostgreSQL is healthy. On a fresh deployment, Auth, Problem and Submission wait for successful migration and verification of all three databases. Make the same gate available for services run directly from Go. Ensure local startup uses migration results for the current checkout so a prior successful job cannot satisfy a newer schema. [Compose startup order](https://docs.docker.com/compose/how-tos/startup-order/)
+3. For an existing, explicitly disposable local dataset, require opt-in for the exact Docker context, Compose project and PostgreSQL volume or database before any reset. Refuse shared, managed, unrecognized or ambiguous targets. Keep reset separate from routine startup and avoid broad volume cleanup. Reconcile stale Kafka jobs, Redis state and MinIO references through explicit fixture isolation or separately approved cleanup. There is no legacy data import or version adoption in the local cutover.
+4. Apply the three migration sets, check that a second run performs no schema changes, and run the required seeds separately. Start newly built application images and exercise Auth, Problem and Submit → Outbox → Kafka → Judge → Verdict, including rejudge correlation. Record the exact reset scope if a rehearsal uses a reset.
 
-## 5. Future managed deployment order
+## Managed releases and recovery
 
-```text
-Approved release candidate
-  → verify immutable source/config/migration artifact and target environment
-  → check schema versions, ownership permissions, migration serialization
-  → run only backward-compatible pending migrations (Auth, Problem, Submission)
-  → verify ALL required migration outcomes and compatibility
-  → continue existing protected App/Judge release sequence
-  → smoke + evidence
-```
+Before the first managed rollout, verify that each target is either new or already managed under a trusted Goose history. An existing pre-Goose managed database requires a separately reviewed, data-preserving adoption plan with schema and data checks, backup, a compatible DDL-free rollback target and a rehearsed recovery path. Routine deployment must stop on that state. Manual edits to mark unverified versions as applied and destructive resets are forbidden for shared and managed targets.
 
-There is **no atomic transaction across three PostgreSQL databases**. Earlier successful compatible migrations may remain applied if a later database fails; in that event stop deployment and reconcile explicitly. A successful application rollback does not reverse applied database migrations. In-place destructive schema operations require a later separately reviewed Contract phase after the supported rollback window closes.
+1. **Preflight.** Validate the promoted artifact and target, inspect all three histories and confirm the tested schema range for the running and rollback application versions. Review the backup and recovery point and the applicable PostgreSQL lock and statement timeouts.
+2. **Migrate and verify.** Apply only approved forward migrations compatible with the live release. Verify all three target histories and required schema invariants before activating the candidate. Retain redacted evidence with the source revision, tool pin, migration hashes, target identity, before/after versions and check results.
+3. **Activate.** Continue the protected App/Judge rollout with the existing Worker suspension, Kafka consumer-group verification and cross-node rollback protections. An application rollback leaves the database versions in place and requires a verified compatible application target. Legacy images that perform startup DDL are ineligible as routine rollback targets after adoption. Never invoke `goose down` automatically. [Protected rollout](../../DEPLOYMENT.md#normal-protected-rollout) · [Rollback](../../DEPLOYMENT.md#rollback)
 
-If production deployment remains an App/Judge coordinated rollout, the migration gate must be added **without weakening** the existing Worker suspension, Kafka-group and cross-node rollback protections. This is implementation work for M1-02 / subsequent release-pipeline changes, not an action performed by this ADR.
+Use **Expand → Backfill/Adapt → Contract**. Expand with changes the running and rollback versions can tolerate. Complete and verify resumable backfill before switching reads or requiring new data. Schedule removal or tighter constraints in a later reviewed release once no deployed or eligible rollback version depends on the legacy schema. Review table locks and rewrite costs on representative data.
 
-## 6. Risk register — revised for the local reset decision
+There is no transaction spanning the three databases or multiple migration files. If a later step fails, earlier successful migrations remain applied. Stop activation, retain the per-database outcome and inspect the actual history and schema before an operator retries. Resume the same approved artifact only when the remaining work is safe. Use a reviewed forward repair for partial nontransactional changes or a tested restore when forward repair is unsafe. Treat runner contention, lock loss, compatibility failure and unknown outcomes as failed promotion.
 
-| Risk | Local-cutover disposition | Future managed-environment guardrail |
-|---|---|---|
-| R1 — Incorrect initial schema | **HIGH / BLOCKER.** May violate archived behavioral specs even with no data. Require table/index/default/FK parity, fixture tests and E2E smoke. | Mandatory compatibility tests and schema review. |
-| R2 — Loss of existing PostgreSQL records | **ACCEPTED for user-approved local dev data only.** Reset scope must be explicit. | **NOT ACCEPTED** for shared, staging or production data. Require backup/recovery policy. |
-| R3 — Old image incompatibility / old AutoMigrate | **ACCEPTED locally:** deploy freshly built DDL-free images; no local legacy-image rollback requirement. | Require tested rollback target and backward-compatible expand migrations; block unsafe old images. |
-| R4 — Partial migration | **HIGH.** Transactional default, explicit recovery for nontransactional files. | Stop promotion and reconcile, no automatic `down`. |
-| R5 — Concurrent migration runners | **HIGH.** One-shot serial jobs; test concurrency. | DB-backed cross-runner lock or equivalent demonstrated serialization, not an assumed CLI feature. |
-| R6 — Lock-heavy or destructive DDL | Not a concern for empty initial local schema, but validate new migrations. | Lock/statement timeout; review indexes and large-table backfills. |
-| R7 — Three databases on different versions | **MEDIUM.** Verify all before application starts. | Fail-closed version gate; compatible phased deployments. |
-| R8 — ORM vs SQL drift | **HIGH.** Compare against DAOs and application behavior. | CI schema contract tests. |
-| R9 — Edited/reordered migration histories | **MEDIUM.** Sequential naming and PR checks. | Hash/manifest checking outside Goose history table. |
-| R10 — Toolchain/version drift | **LOW if isolated.** Pin official SQL migration image/tool, never `latest`. | Verify selected digest, platform and CLI behavior. |
-| R11 — Stale Kafka, Redis or MinIO state after DB reset | **MEDIUM.** Coordinate explicit dev fixture reset or isolation; do not accidentally delete non-Postgres volumes. | Forbid destructive reset in managed environments. |
-| R12 — CI tests rely on runtime AutoMigrate | **HIGH.** Update existing fresh-DB integration suites to run Goose first. | Regression gates remain required. |
+## Consequences and implementation evidence
 
-## 7. OpenSpec and documentation impact
+Schema changes become reviewable and application replicas no longer need to coordinate startup DDL. The trade-off is a required migration step for developer setup, test fixtures and managed releases, plus maintenance of immutable release history and rehearsed recovery.
 
-**No modifications required just because of the migration tool swap:**
+| Gate | Evidence expected |
+|---|---|
+| Artifact and history | Record the pinned Goose checksum or digest and verify it on the target platform. Validate SQL and reject duplicate, out-of-order, modified or unknown migrations. Run against empty PostgreSQL 15.6, rerun at target and compare the schema with the DAO contract. |
+| Upgrade and failure | Test an upgrade from a prior managed schema when one exists, including representative data. Inject transactional and applicable nontransactional failures and a failure after another database has advanced. Verify service activation is blocked and that recovery checks use the recorded versions and actual schema. |
+| Serialization and privileges | Demonstrate two concurrent runner attempts and lock-loss behavior. Verify that application roles can perform required operations and cannot modify the schema or migration history. |
+| Local startup and fixtures | Rehearse a clean Compose installation, a repeat run and refusal of out-of-scope reset targets. Apply Goose to each disposable PostgreSQL CI fixture before running its suite. Require the existing Problem mutation, testcase mutation and Submission detail suites to run and pass. [Existing fixture workflow](../../codebase/DEVELOPMENT.md#build-test-and-quality-checks) |
+| Behavior and release | Build images and run service smoke tests and the complete submission/rejudge path against the migrated schema. Before first managed use, rehearse the protected gate and compatibility of the supported rollback version against the resulting schema. |
 
-- `openspec/changes/archive/**` (immutable history and past verification context).
-- `openspec/specs/**` for existing capabilities, provided all observable behavior remains the same.
-- Product PRD/FRD and NFR-D05, which already demands versioned compatible migrations.
-
-**Artifacts to create/update:**
-
-| Stage | Artifact | Action |
-|---|---|---|
-| M0-11 | `docs/architecture/adr/0006-schema-migration-policy.md` | Review and accept this ADR through a draft PR; do not mark Accepted before approval. |
-| M1-02 | `services/{auth,problem,submission}/migrations/` | Add first schema and subsequent SQL migrations. |
-| M1-02 | GORM repository constructors and tests | Remove startup DDL, migrate fixture setup. |
-| M1-02 | Compose/startup, CI and protected deployment scripts | Add one-shot Goose execution and verification, preserve current rollout protections. |
-| M1-02 | `docs/codebase/DATA.md`, `docs/codebase/DEVELOPMENT.md`, `CONTRIBUTING.md`, `AGENTS.md` | Replace outdated AutoMigrate guidance with Goose workflow. |
-| M1-02 | `docs/architecture/deployment.md` (when created) | Record managed migration order and rollback compatibility. |
-| M1-02 | `docs/evidence/` or approved CI artifacts | New schema comparison, functional regression and migration-gate evidence. |
-
-**Archived baseline rule:** replacing infrastructure does not require rewriting behavioral specs. If a migration causes an externally observable behavior change (e.g. a uniqueness guarantee disappears or a submission is not durably created), that is a defect against an existing spec, **not** justification to edit archive history. Restore compliance or propose a separate reviewed behavior change.
-
-### Important evidence distinction
-
-The archived `baseline-problem-catalog` includes a dated local tag inventory snapshot. Once the developer database is reset, those row counts no longer describe the live local instance; the archive remains a truthful historical record. Seed and verify new fixtures as necessary; do not rewrite that archived evidence.
-
-## 8. Gate 1 — M0-11 ADR acceptance
-
-- [ ] Reviewer confirms the accepted **local-only data-loss assumption** and prohibition against implicit managed-environment data resets.
-- [ ] Goose, SQL-only, version sequencing and three database owners are explicit.
-- [ ] Initial schema fidelity and no runtime DDL are non-negotiable.
-- [ ] One-shot migration ordering, failure behavior and serialization policy are recorded.
-- [ ] Future compatibility/rollback policy is explicit even though today's cutover discards local data.
-- [ ] OpenSpec archives and behavioral main specs are correctly protected from unnecessary changes.
-- [ ] M1-02 implementation/verification tasks and documentation impacts are stated.
-- [ ] ADR reviewed/merged under the repository's ADR approval workflow.
-
-## 9. M1-02 handoff / Definition of Done (not part of M0-11 implementation)
-
-- [ ] All 3 fresh PostgreSQL databases migrate from empty to target Goose versions.
-- [ ] No production/local application constructor calls `AutoMigrate`, `AlterColumn`, or equivalent schema-mutating GORM methods.
-- [ ] DB version table exists independently in each of `auth_db`, `problem_db`, `submission_db`.
-- [ ] Schema constraints/indexes/defaults are validated against DAO expectations and archived behavior.
-- [ ] Goose `up` on an already-current database is a no-op; duplicate versions are rejected.
-- [ ] Two concurrent migration attempts do not overlap their DDL execution.
-- [ ] Local reset is explicit and refuses environments/volumes outside approved developer scope.
-- [ ] Auth, Problem, Submission and complete judge submission journey pass on newly migrated schema.
-- [ ] PostgreSQL integration tests are migrated to Goose-owned schema setup.
-- [ ] CI fails closed for migration syntax/version/schema/behavior regression.
-- [ ] New application image release is built and tested; deployment evidence includes schema versions.
-- [ ] Docs/harness guidance updated; no existing archive or main behavioral spec modified solely for tooling.
-
-## 10. Remaining verification tasks, not open architecture decisions
-
-No further user choice is necessary to draft/review M0-11. The following are intentionally **implementation evidence gates** for M1-02, not unspecified ADR policy:
-
-1. Verify the exact pinned Goose v3.30.0 image digest and supported CLI invocation in the target environment.
-2. Derive the full initial SQL schemas from current DAOs and test against PostgreSQL 15.6; this ADR is not a generated DDL dump.
-3. Identify the exact Compose project/volume in each developer environment before any destructive reset.
-4. Verify that cross-process locking and failure recovery work as designed.
-5. Run integration/E2E tests and collect new evidence after rebuilding the application images.
-
----
-
-## Sources
-
-### Internal (reviewed on `develop`)
-
-- [Delivery plan: M0-11 / M1-02](https://github.com/nvawntien/astracode/blob/develop/docs/product/delivery-plan.md)
-- [NFR-D05](https://github.com/nvawntien/astracode/blob/develop/docs/product/nfr.md)
-- [OpenSpec config](https://github.com/nvawntien/astracode/blob/develop/openspec/config.yaml)
-- [Team workflow / ADR rules](https://github.com/nvawntien/astracode/blob/develop/docs/process/workflow.md)
-- [PostgreSQL data ownership and AutoMigrate](https://github.com/nvawntien/astracode/blob/develop/docs/codebase/DATA.md)
-- [Repository development / integration tests](https://github.com/nvawntien/astracode/blob/develop/docs/codebase/DEVELOPMENT.md)
-- [SubmissionAttempt constructor runtime DDL](https://github.com/nvawntien/astracode/blob/develop/services/submission/internal/adapter/outbound/persistence/postgres/submission_attempt.go)
-- [Current production deployment contract](https://github.com/nvawntien/astracode/blob/develop/docs/DEPLOYMENT.md)
-- [Archived catalog review snapshot](https://github.com/nvawntien/astracode/blob/develop/openspec/changes/archive/2026-11-21-baseline-problem-catalog/progress.md)
-
-### Tool documentation
-
-- [Pressly Goose CLI/SQL documentation](https://github.com/pressly/goose)
-- [Pressly Goose releases](https://github.com/pressly/goose/releases)
-- [Goose Provider and locking](https://pressly.github.io/goose/documentation/provider/)
-- [Goose CLI commands](https://pressly.github.io/goose/documentation/cli-commands/)
+M1-02 updates the data and development guides, contributor setup and relevant operator documentation as those workflows change. Record fresh verification evidence. Historical OpenSpec archives, including the dated Problem tag inventory, remain historical records. Preserve the behavior in the current specs. Any intentional externally observable change requires a separately reviewed OpenSpec delta. [Workflow and documentation policy](../../process/workflow.md)
