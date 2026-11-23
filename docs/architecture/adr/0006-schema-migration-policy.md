@@ -2,8 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted |
 | Date | 2026-11-23 |
+| Acceptance | Repository maintainer authorized an exception for ADR acceptance on 2026-11-23. [PR #65](https://github.com/nvawntien/astracode/pull/65) tracks review and merge eligibility. |
 | Milestone | M0-11 |
 | Requirement | NFR-D05, backward-compatible versioned migrations and no runtime auto-migration in production |
 | Implementation | M1-02 `add-versioned-migrations` |
