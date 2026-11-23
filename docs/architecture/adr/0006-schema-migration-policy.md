@@ -14,7 +14,7 @@ M0-11 records the decision. M1-02 implements the initial schemas, local cutover 
 
 ## Context
 
-Local Compose runs PostgreSQL 15.6. On first initialization, `infra/postgres/init.sql` creates `auth_db`, `problem_db` and `submission_db`. GORM repository constructors create or reconcile application tables with `AutoMigrate`. Several callers discard its errors, and the Submission attempt repository also invokes `AlterColumn` on `TriggeredByUserID`. The current protected App/Judge rollout verifies application and worker health without a schema migration gate. [Local Compose](../../../docker-compose.yml) · [Database bootstrap](../../../infra/postgres/init.sql) · [Submission attempt repository](../../../services/submission/internal/adapter/outbound/persistence/postgres/submission_attempt.go) · [Deployment guide](../../DEPLOYMENT.md)
+AstraCode currently operates in local development only. Local Compose runs PostgreSQL 15.6. On first initialization, `infra/postgres/init.sql` creates `auth_db`, `problem_db` and `submission_db`. GORM repository constructors create or reconcile application tables with `AutoMigrate`. Several callers discard its errors, and the Submission attempt repository also invokes `AlterColumn` on `TriggeredByUserID`. [Local Compose](../../../docker-compose.yml) · [Database bootstrap](../../../infra/postgres/init.sql) · [Submission attempt repository](../../../services/submission/internal/adapter/outbound/persistence/postgres/submission_attempt.go)
 
 Running DDL at startup ties schema changes to replica restarts and leaves no reviewed, versioned path from one release schema to the next. M1-02 can start from empty databases for new development installations and explicitly approved disposable local data. The contents and ownership of shared or managed databases require separate verification. [Data ownership](../../codebase/DATA.md) · [Development workflow](../../codebase/DEVELOPMENT.md)
 
@@ -69,7 +69,9 @@ Run one migrator at a time per database. Shared environments require a PostgreSQ
 3. For an existing, explicitly disposable local dataset, require opt-in for the exact Docker context, Compose project and PostgreSQL volume or database before any reset. Refuse shared, managed, unrecognized or ambiguous targets. Keep reset separate from routine startup and avoid broad volume cleanup. Reconcile stale Kafka jobs, Redis state and MinIO references through explicit fixture isolation or separately approved cleanup. There is no legacy data import or version adoption in the local cutover.
 4. Apply the three migration sets, check that a second run performs no schema changes, and run the required seeds separately. Start newly built application images and exercise Auth, Problem and Submit → Outbox → Kafka → Judge → Verdict, including rejudge correlation. Record the exact reset scope if a rehearsal uses a reset.
 
-## Managed releases and recovery
+## Future managed releases and recovery
+
+The repository's protected App/Judge deployment workflow checks application and worker health. The schema gate below is a prerequisite for its future use with managed migrations. [Deployment guide](../../DEPLOYMENT.md)
 
 Before the first managed rollout, verify that each target is either new or already managed under a trusted Goose history. An existing pre-Goose managed database requires a separately reviewed, data-preserving adoption plan with schema and data checks, backup, a compatible DDL-free rollback target and a rehearsed recovery path. Routine deployment must stop on that state. Manual edits to mark unverified versions as applied and destructive resets are forbidden for shared and managed targets.
 
@@ -81,9 +83,11 @@ Use **Expand → Backfill/Adapt → Contract**. Expand with changes the running 
 
 There is no transaction spanning the three databases or multiple migration files. If a later step fails, earlier successful migrations remain applied. Stop activation, retain the per-database outcome and inspect the actual history and schema before an operator retries. Resume the same approved artifact only when the remaining work is safe. Use a reviewed forward repair for partial nontransactional changes or a tested restore when forward repair is unsafe. Treat runner contention, lock loss, compatibility failure and unknown outcomes as failed promotion.
 
-## Consequences and implementation evidence
+## Trade-offs
 
-Schema changes become reviewable and application replicas no longer need to coordinate startup DDL. The trade-off is a required migration step for developer setup, test fixtures and managed releases, plus maintenance of immutable release history and rehearsed recovery.
+Goose makes schema changes reviewable and removes DDL coordination from application startup. It adds a required migration step for developer setup, test fixtures and managed releases, along with maintenance of immutable release history and rehearsed recovery.
+
+## Consequences and implementation evidence
 
 | Gate | Evidence expected |
 |---|---|
