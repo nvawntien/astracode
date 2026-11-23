@@ -46,10 +46,10 @@ Goal: harness working, current behaviour specified, existing platform running on
 | M0-07 | `baseline-judging` | Baseline | — | judging | M0-01 | TBD |
 | M0-08 | `baseline-realtime-updates` | Baseline | — | realtime-updates | M0-01 | TBD |
 | M0-16 | `baseline-code-run` — custom runs from the editor (direct judge-worker path, outside the submission queue; results not stored as submissions) | Baseline | — | code-run | M0-01 | TBD |
-| M0-09 | ADR-0001 Azure topology and subscription layout (needs measured stack footprint) | ADR | NFR-F01 | — | — | TBD |
-| M0-10 | ADR-0002 API and event conventions (error format, event envelope, versioning, compatibility) | ADR | — | — | — | TBD |
-| M0-11 | ADR-0003 Schema migration policy (replace runtime auto-migration) | ADR | NFR-D05 | — | — | TBD |
-| M0-12 | ADR-0004 Service boundaries and data ownership for new capabilities | ADR | FRD-1 | all new | M0-02…M0-08, M0-16 | TBD |
+| M0-09 | ADR-0004 Azure topology and subscription layout (needs measured stack footprint) | ADR | NFR-F01 | — | — | TBD |
+| M0-10 | ADR-0005 API and event conventions (error format, event envelope, versioning, compatibility) | ADR | — | — | — | TBD |
+| M0-11 | ADR-0006 Schema migration policy (replace runtime auto-migration) | ADR | NFR-D05 | — | — | TBD |
+| M0-12 | ADR-0007 Service boundaries and data ownership for new capabilities | ADR | FRD-1 | all new | M0-02…M0-08, M0-16 | TBD |
 | M0-13 | `azure-walking-skeleton` — IaC for staging, unchanged release deployed through the pipeline, health checks | Enabler | NFR-D01, D02, D04, D06 | — | M0-09 | TBD |
 | M0-14 | `observability-baseline` — centralized logs, health and basic service metrics on staging | Enabler | NFR-O01, O02 (partial) | — | M0-13 | TBD |
 | M0-15 | Architecture docs v1: `deployment.md`, `finops.md`, `security.md` draft, `workload-capacity.md`, `application.md`, `data.md`, `canvas.md` | Enabler | — | — | M0-09, M0-12 | TBD |
@@ -62,13 +62,13 @@ Goal: harness working, current behaviour specified, existing platform running on
 | M1-02 | `add-versioned-migrations` | Enabler | NFR-D05 | all existing | M0-11 | TBD |
 | M1-03 | `add-content-tracks` — track attribute on content; track-aware catalog | Feature | F-02 | problem-catalog | M0-04, M1-02 | TBD |
 | M1-04 | `add-premium-entitlement` (minimal) — entitlement, expiry, server-side track access checks | Feature | F-16, NFR-S03 | membership, identity-session | M1-03 | TBD |
-| M1-05 | ADR-0005 Feature-flag mechanism | ADR | NFR-D08 | — | — | TBD |
+| M1-05 | ADR-0008 Feature-flag mechanism | ADR | NFR-D08 | — | — | TBD |
 | M1-06 | `add-notification-event-contract` — **contracts first**: event envelope and event types for all producers | Feature | F-21 | notification (contract only) | M0-10 | TBD |
 | M1-07 | `add-community-submission-lifecycle` — eligibility, auto pre-check, review queue, claim, decisions | Feature | F-03 | content-moderation | M1-01, M1-04, M1-06 | TBD |
 | M1-08 | `add-quizzes` | Feature | F-06 | quiz, content-moderation | M1-07 | TBD |
 | M1-09 | `add-follow` | Feature | F-12 | social-follow, user-profile | M1-06 | TBD |
 | M1-10 | `add-notifications-core` — in-app inbox, unread count, core events, moderator digest | Feature | F-21, NFR-R04 | notification, realtime-updates | M1-06 | TBD |
-| M1-11 | ADR-0006 Email provider | ADR | F-21 | — | — | TBD |
+| M1-11 | ADR-0009 Email provider | ADR | F-21 | — | — | TBD |
 
 ## M2 — Competition and learning
 
@@ -82,7 +82,7 @@ Goal: harness working, current behaviour specified, existing platform running on
 | M2-06 | `scale-judge-workers` — scaling by queue backlog; custom-run capacity isolated or limited so runs cannot starve contest submissions | Enabler | NFR-C02, C03, C06 | judging, code-run | M0-13, M0-16 | TBD |
 | M2-07 | Contest load test + 10× analysis (evidence) | Enabler | NFR-C01, C05, P01–P04, R01 | — | M2-01, M2-06 | TBD |
 | M2-08 | `add-backups-and-dr` — daily backups to the DR subscription; restore drill | Enabler | NFR-R07, R08 | — | M0-13 | TBD |
-| M2-09 | ADR-0007 LLM provider and vector storage | ADR | F-19 | — | — | TBD |
+| M2-09 | ADR-0010 LLM provider and vector storage | ADR | F-19 | — | — | TBD |
 | M2-10 | `ai.md` v1 — corpus, retrieval, guardrails, evaluation design | Enabler | F-19 | — | M2-05, M2-09 | TBD |
 
 ## M3 — Discussion, AI and production readiness
