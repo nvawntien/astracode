@@ -376,8 +376,61 @@ jobs:
           bash -n scripts/collect-container-stats.sh
           bash -n scripts/collect-kafka-lag.sh
 
+  image-scope:
+    name: Classify image build changes
+    if: >-
+      github.event_name == 'pull_request' && !inputs.git_ref &&
+      startsWith(github.workflow_ref, format('{0}/.github/workflows/ci.yml@', github.repository))
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v6
+        id: checkout
+        continue-on-error: true # Only the classification checkout is optional.
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare PR base and head
+        id: changes
+        if: steps.checkout.outcome == 'success'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changes="$RUNNER_TEMP/image-build-changes"
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+             ! merge_base=$(git merge-base --all "$BASE_SHA" "$HEAD_SHA") ||
+             [[ ! "$merge_base" =~ ^[0-9a-f]{40}$ ]] ||
+             ! git diff --raw -z --no-ext-diff --no-renames "$merge_base" "$HEAD_SHA" -- >"$changes" ||
+             [[ ! -s "$changes" ]]; then
+            echo "PR changes could not be classified. Build all images."
+            exit 0
+          fi
+
+          # Disabled rename detection checks both paths of every rename.
+          while IFS= read -r -d '' entry; do
+            IFS= read -r -d '' path || exit 0
+            read -r old_mode new_mode _ <<< "${entry#:}"
+            case "$old_mode:$new_mode" in
+              100644:100644|000000:100644|100644:000000) ;;
+              *) exit 0 ;;
+            esac
+            case "$path" in
+              .github/workflows/*|.github/actions/*) exit 0 ;;
+              *.md|docs/assets/*.svg) ;;
+              *) exit 0 ;;
+            esac
+          done <"$changes"
+          echo "docs_only=true" >>"$GITHUB_OUTPUT"
+
   images:
     name: Build image (${{ matrix.image }})
+    needs: image-scope
+    # Keep all six required checks, including when classification is unavailable.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -402,15 +455,22 @@ jobs:
             context: .
             dockerfile: ./build/sandbox/Dockerfile
     steps:
+      - name: Report documentation-only build skip
+        if: needs.image-scope.outputs.docs_only == 'true'
+        run: echo "Documentation-only PR. Docker build skipped."
+
       - name: Check out repository
+        if: needs.image-scope.outputs.docs_only != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Docker Buildx
+        if: needs.image-scope.outputs.docs_only != 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build without publishing
+        if: needs.image-scope.outputs.docs_only != 'true'
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
