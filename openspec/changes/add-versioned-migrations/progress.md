@@ -2,7 +2,7 @@
 
 ## Scope
 
-The maintainer authorized ADR-0007 and simplification in PR #66 before
+The maintainer authorized ADR-0011 and simplification in PR #66 before
 implementation. Scope record `b19b025` preserves the previous review and ADR.
 The prior implementation is `be4758d`. Session-start quick verification passed.
 
@@ -20,4 +20,4 @@ The prior implementation is `be4758d`. Session-start quick verification passed.
 ## Pending
 
 Hosted CI and independent Gate 2 review. Managed
-deployment work belongs to the infrastructure implementation under ADR-0007.
+deployment work belongs to the infrastructure implementation under ADR-0011.

@@ -1,4 +1,4 @@
-# ADR-0007 — Use the Goose CLI for M1-02
+# ADR-0011 — Use the Goose CLI for M1-02
 
 | Field | Value |
 | --- | --- |

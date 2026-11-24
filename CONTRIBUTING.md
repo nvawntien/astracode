@@ -108,7 +108,7 @@ service's numbered migration sequence and update that service's expected
 version. Preserve the names and bytes of released migrations. Describe
 data impact, compatibility in both directions, deployment ordering, and
 rollback limits. Use service APIs and events for cross-service data access.
-[Local migration policy](docs/architecture/adr/0007-local-goose-migrations.md)
+[Local migration policy](docs/architecture/adr/0011-local-goose-migrations.md)
 
 Start local services with `docker compose --profile dev --profile worker up -d
 --build`. Run `bash scripts/test-postgres-integration.sh` to verify

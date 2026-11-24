@@ -1,4 +1,4 @@
-Addresses: NFR-D05 | Follows: ADR-0007
+Addresses: NFR-D05 | Follows: ADR-0011
 
 ## Why
 
@@ -26,4 +26,4 @@ supersedes the earlier assumption of a production cutover.
   product capabilities and contracts stay intact.
 - M0-11 supplies the original decision. M1-03 continues to depend on M1-02.
   [ADR-0006](../../../docs/architecture/adr/0006-schema-migration-policy.md) ·
-  [ADR-0007](../../../docs/architecture/adr/0007-local-goose-migrations.md)
+  [ADR-0011](../../../docs/architecture/adr/0011-local-goose-migrations.md)

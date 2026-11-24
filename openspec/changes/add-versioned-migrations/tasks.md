@@ -1,6 +1,6 @@
 ## 1. Scope and retained schema
 
-- [x] 1.1 Record the maintainer correction in ADR-0007 and the Gate 1 history. Validate the revised change strictly.
+- [x] 1.1 Record the maintainer correction in ADR-0011 and the Gate 1 history. Validate the revised change strictly.
 - [x] 1.2 Preserve the initial SQL and parity captures. Verify the official Goose v3.30.0 pin and compare fresh PostgreSQL 15.6 schemas against the retained dumps.
 
 ## 2. CLI and startup

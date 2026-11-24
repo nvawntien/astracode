@@ -1,6 +1,6 @@
 ## Local execution
 
-The maintainer approved the simpler design recorded in ADR-0007. Keep the
+The maintainer approved the simpler design recorded in ADR-0011. Keep the
 current branch, initial SQL and PostgreSQL 15.6 capture. Use the official
 Goose v3.30.0 distribution pinned by digest or release checksums. The existing
 Compose file builds a one-shot migration image containing the three SQL
@@ -42,5 +42,5 @@ Update the project and contributor quick starts, codebase data/development
 guides, service READMEs and deployment guide. Preserve the legacy evidence and
 accepted ADR history. The infrastructure guide requires successful migrations
 before deployment activation. Managed rollout design is future work.
-[ADR-0007](../../../docs/architecture/adr/0007-local-goose-migrations.md) ·
+[ADR-0011](../../../docs/architecture/adr/0011-local-goose-migrations.md) ·
 [NFR-D05](../../../docs/product/nfr.md)

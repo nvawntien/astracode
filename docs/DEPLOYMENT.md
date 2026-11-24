@@ -23,7 +23,7 @@ Each service also checks its expected version read-only at startup.
 The local Compose migration job uses local credentials and is excluded from
 the protected Compose graph. Managed rollout, backup, release compatibility
 and deployment orchestration belong to the infrastructure implementation
-before first deployment. [ADR-0007](architecture/adr/0007-local-goose-migrations.md)
+before first deployment. [ADR-0011](architecture/adr/0011-local-goose-migrations.md)
 
 ## Release policy
 

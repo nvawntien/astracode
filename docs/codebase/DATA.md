@@ -9,7 +9,7 @@ service's `migrations/` directory, starting with `00001_initial_schema.sql`.
 Judge Worker has no PostgreSQL schema. Goose records an independent history
 in each owning database. The initial migrations were compared against the
 legacy GORM-generated schema on PostgreSQL 15.6.
-[Migration policy](../architecture/adr/0007-local-goose-migrations.md)
+[Migration policy](../architecture/adr/0011-local-goose-migrations.md)
 
 GORM handles application queries and transactions. Each application reads its
 own Goose history at startup and requires its expected version. Local Compose

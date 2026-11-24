@@ -117,7 +117,7 @@ No independent GitHub approval has been obtained. The approval is the maintainer
 
 The maintainer confirmed that AstraCode has yet to deploy to production and
 explicitly authorized revising and applying M1-02 in the existing PR #66.
-ADR-0007 supersedes the local execution and protected cutover provisions of
+ADR-0011 supersedes the local execution and protected cutover provisions of
 ADR-0006 while retaining NFR-D05, database ownership and business baselines.
 The previous promotion freeze is replaced by a future deployment prerequisite
 to migrate successfully before application activation. The earlier review
