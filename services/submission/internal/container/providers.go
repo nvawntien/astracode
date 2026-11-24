@@ -41,6 +41,7 @@ import (
 	"github.com/google/wire"
 	"go.uber.org/zap"
 	googlegrpc "google.golang.org/grpc"
+	"gorm.io/gorm"
 )
 
 func ProvideProblemGRPCConfig(cfg *config.Config) (config.ProblemGRPCConfig, error) {
@@ -217,8 +218,12 @@ func ProvideAdminHandler(
 	return handler.NewAdminHandler(listSubmissions, getSubmissionDetail, rejudgeSubmission)
 }
 
+func ProvideDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
+	return database.ConnectServiceDatabase(cfg, "submission")
+}
+
 var InfrastructureProviderSet = wire.NewSet(
-	database.ConnectDatabase,
+	ProvideDatabase,
 	cache.ConnectRedis,
 	logger.NewLogger,
 	kafka.NewSyncProducer,

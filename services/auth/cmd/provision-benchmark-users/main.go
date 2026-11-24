@@ -134,7 +134,7 @@ func openCommandRuntime(configDir string) (commandRuntime, error) {
 	if err != nil {
 		return commandRuntime{}, err
 	}
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "auth")
 	if err != nil {
 		return commandRuntime{}, errors.New("connect configured Auth database")
 	}

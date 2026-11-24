@@ -59,9 +59,9 @@ func (r *Router) SetupRoutes() {
 	r.engine.GET("/events/submissions/:submission_id", r.userHandler.SubmissionEvents.Handle)
 }
 
-func (r *Router) Start(port string) error {
+func (r *Router) Start(address string) error {
 	r.server = &http.Server{
-		Addr:    ":" + port,
+		Addr:    address,
 		Handler: r.engine,
 	}
 

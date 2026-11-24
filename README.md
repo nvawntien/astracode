@@ -170,7 +170,7 @@ use the Contributions navigation workflow.
 ### Requirements
 
 - Git
-- Docker Engine with Docker Compose
+- Linux amd64 or arm64, Docker Engine with Docker Compose 2.24.4+, Bash, jq, and OpenSSL
 - Node.js 22.12+ in the Node 22 series and npm for the Next.js frontend
 - Go 1.25.8 for local JWK generation and Go checks
 
@@ -195,14 +195,15 @@ cd astracode
     JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
   )
 
-  docker compose --profile dev --profile worker up -d --build
+  bash scripts/local-stack.sh default astracode-dev-local up
 )
-docker compose ps
+docker --context default compose -p astracode-dev-local ps
 ```
 
-The `worker` profile is required for official asynchronous judging; `dev` enables
-MailHog and Kafka UI. Compose starts the edge, services, Kafka,
-storage, and executor. Start the Next.js app separately.
+The launcher waits for healthy PostgreSQL and verifies versioned migrations for
+Auth, Problem, and Submission before starting the stack. It starts the Worker,
+MailHog, and Kafka UI. Start the Next.js app separately. See the development
+guide for direct Go startup, explicit tag seeding, and recovery. [Development workflow](docs/codebase/DEVELOPMENT.md)
 
 If JWK validation fails, check the local Auth access secret and follow the
 [Envoy key replacement and activation steps](envoy/README.md#configuration-and-secrets).
@@ -231,7 +232,7 @@ your environment before opening the browser app.
 Stop the local stack with:
 
 ```bash
-docker compose down
+docker --context default compose -p astracode-dev-local down --remove-orphans
 ```
 
 ## Development and validation
@@ -345,7 +346,7 @@ files, firewall rules, backups, smoke checks, and schema-aware rollback limits.
 The reference Compose deployment is intentionally not described as zero downtime.
 
 Known limits include in-process SSE fan-out, no checked-in DLT replay consumer,
-and runtime `AutoMigrate` schema changes. Review [technical debt](docs/codebase/TECH_DEBT.md)
+and the pending managed database release gate. Review [technical debt](docs/codebase/TECH_DEBT.md)
 before a multi-replica or public deployment.
 
 ## Security model

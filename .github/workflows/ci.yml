@@ -59,28 +59,12 @@ jobs:
   postgres-integration:
     name: PostgreSQL integration suites
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15.6-alpine
-        env:
-          POSTGRES_USER: fixture_admin
-          POSTGRES_PASSWORD: fixture_admin
-          POSTGRES_DB: postgres
-        ports:
-          - 55432:5432
-        options: >-
-          --health-cmd "pg_isready -U fixture_admin -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT: '55432'
-      ASTRACODE_DETAIL_TEST_PGPORT: '55432'
     steps:
-      - name: Check out repository
+      - name: Check out repository and legacy migration baseline
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -89,35 +73,20 @@ jobs:
           cache-dependency-path: |
             services/problem/go.sum
             services/submission/go.sum
+            tools/migrations/go.sum
 
-      # Each suite refuses a database that already has its tables, so the
-      # database is recreated before every suite. A skipped or missing suite
-      # fails the job instead of passing silently.
       - name: Run PostgreSQL integration suites
-        shell: bash
-        env:
-          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-        run: |
-          set -euo pipefail
-          psql_admin() {
-            docker exec "$POSTGRES_CONTAINER" psql -U fixture_admin -d postgres -v ON_ERROR_STOP=1 "$@"
-          }
-          run_suite() {
-            module=$1; database=$2; owner=$3; suite=$4
-            psql_admin -c "DROP DATABASE IF EXISTS $database WITH (FORCE)" -c "CREATE DATABASE $database OWNER $owner"
-            log="$RUNNER_TEMP/$suite.log"
-            (cd "$module" && go test ./internal/adapter/outbound/persistence/postgres -run "^${suite}\$" -count=1 -v) | tee "$log"
-            if grep -q -- '--- SKIP' "$log" || ! grep -q -- "--- PASS: ${suite} " "$log"; then
-              echo "::error::$suite was skipped or did not pass"
-              exit 1
-            fi
-          }
-          psql_admin \
-            -c "CREATE ROLE problem_fixture LOGIN PASSWORD 'problem_fixture'" \
-            -c "CREATE ROLE detail_fixture LOGIN PASSWORD 'detail_fixture'"
-          run_suite services/problem problem_mutation_test problem_fixture TestProblemMutationPostgresConcurrency
-          run_suite services/problem problem_mutation_test problem_fixture TestTestcaseMutationPostgresConcurrency
-          run_suite services/submission submission_detail_test detail_fixture TestGetCurrentDetailPostgresSnapshots
+        run: bash scripts/test-postgres-integration.sh
+
+      - name: Retain PostgreSQL fixture verification
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: postgres-integration-evidence
+          path: |
+            ${{ runner.temp }}/astracode-postgres.*/*/migration.log
+            ${{ runner.temp }}/astracode-postgres.*/*/test.log
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend checks

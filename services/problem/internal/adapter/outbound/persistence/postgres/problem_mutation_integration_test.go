@@ -13,6 +13,7 @@ import (
 	"go-judge-system/pkg/config"
 	"go-judge-system/pkg/database"
 	"go-judge-system/pkg/rbac"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/problem/internal/adapter/outbound/persistence/postgres"
 	"go-judge-system/services/problem/internal/application/dto"
 	"go-judge-system/services/problem/internal/application/port/outbound"
@@ -41,11 +42,9 @@ func mutationFixture(t *testing.T) (*gorm.DB, outbound.ProblemRepository, outbou
 	sqlDB, err := db.DB()
 	requireMutation(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	for _, table := range []string{"problems", "tags", "problem_tags", "test_cases"} {
-		if db.Migrator().HasTable(table) {
-			t.Fatalf("fixture is not fresh: table %s exists", table)
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	requireMutation(t, schema.VerifyFixture(ctx, sqlDB, "problem", os.Getenv("ASTRACODE_TEST_FIXTURE_RECEIPT")))
 	return db, postgres.NewProblemRepository(db), postgres.NewTagRepository(db)
 }
 

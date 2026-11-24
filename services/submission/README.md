@@ -18,6 +18,13 @@ along with the infrastructure required to deliver judge jobs reliably.
 - transactional outbox repository and Kafka relay
 - Kafka judge-result consumer for `judge.submission.results`
 
+## Local startup
+
+Use the guarded local launcher to migrate all three service databases before
+activation. Submission verifies `submission_db` with runtime credentials
+before serving HTTP or starting its outbox relay and Kafka consumer.
+[Compose and direct Go](../../docs/codebase/DEVELOPMENT.md)
+
 ## Judge attempt correlation
 
 Every newly created Submission stores an internal `current_attempt_id`. The same

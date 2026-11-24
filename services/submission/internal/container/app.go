@@ -71,7 +71,7 @@ func (a *App) Run() error {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		serverErrCh <- a.Router.Start(port)
+		serverErrCh <- a.Router.Start(a.Config.Server.ListenAddress(a.Config.Server.Port))
 	}()
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())

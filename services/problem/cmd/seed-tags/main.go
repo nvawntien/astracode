@@ -23,7 +23,7 @@ func main() {
 	}
 
 	fmt.Printf("Target database: %s:%d/%s\n", cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName)
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "problem")
 	if err != nil {
 		log.Fatalf("connect database failed: %v", err)
 	}

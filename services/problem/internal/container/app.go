@@ -43,7 +43,7 @@ func (a *App) Run() error {
 
 	go func() {
 		a.Logger.Info("Starting Problem Service HTTP server", zap.String("port", httpPort))
-		httpErrCh <- a.Router.Start(httpPort)
+		httpErrCh <- a.Router.Start(a.Config.Server.ListenAddress(a.Config.Server.Port))
 	}()
 
 	go func() {

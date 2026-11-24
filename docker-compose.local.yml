@@ -1,0 +1,134 @@
+# Use through scripts/local-stack.sh, which enrolls the target and stages a fresh run.
+x-local-app: &local-app
+  container_name: !reset null
+  restart: "no"
+  environment:
+    ASTRACODE_MIGRATION_RUN: ${ASTRA_MIGRATION_RUN:?use scripts/local-stack.sh}
+    ASTRACODE_MIGRATION_BUNDLE: ${ASTRA_MIGRATION_BUNDLE:?use scripts/local-stack.sh}
+    ASTRACODE_MIGRATION_RECEIPT: /app/migration-receipt.json
+
+x-local-receipt: &local-receipt
+  type: bind
+  source: ${ASTRA_MIGRATION_RUN_DIR:?use scripts/local-stack.sh}/receipt.json
+  target: /app/migration-receipt.json
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  postgres:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d auth_db" ]
+
+  migrate:
+    image: postgres:15.6-alpine
+    user: "${ASTRA_MIGRATION_UID:?use scripts/local-stack.sh}:${ASTRA_MIGRATION_GID:?use scripts/local-stack.sh}"
+    restart: "no"
+    read_only: true
+    cap_drop: [ "ALL" ]
+    security_opt: [ "no-new-privileges:true" ]
+    entrypoint: [ "/bin/sh", "-ec" ]
+    command:
+      - |
+        exec /run/migration/migrator apply \
+          --state-dir /var/lib/astracode/migrations \
+          --snapshot /run/migration/bundle.json \
+          --tool-sha256 "$$TOOL_SHA256" --bundle "$$BUNDLE" \
+          --enrollment /var/lib/astracode/migrations/enrollment.json \
+          --host postgres --approve-dirty "$$DIRTY_APPROVAL" --reconcile="$$RECONCILE" \
+          --run "$$RUN_ID" --receipt /run/migration/receipt.json \
+          < /var/lib/astracode/migrations/migration-passwords.json
+    environment:
+      TOOL_SHA256: ${ASTRA_MIGRATION_TOOL_SHA:?use scripts/local-stack.sh}
+      BUNDLE: ${ASTRA_MIGRATION_BUNDLE:?use scripts/local-stack.sh}
+      RUN_ID: ${ASTRA_MIGRATION_RUN:?use scripts/local-stack.sh}
+      DIRTY_APPROVAL: ${ASTRACODE_APPROVE_DIRTY_BUNDLE:-}
+      RECONCILE: ${ASTRACODE_RECONCILE_MIGRATIONS:-false}
+    volumes:
+      - ${ASTRA_MIGRATION_RUN_DIR:?use scripts/local-stack.sh}:/run/migration
+      - ${ASTRA_MIGRATION_STATE:?use scripts/local-stack.sh}:/var/lib/astracode/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - judge_internal
+
+  auth-service:
+    <<: *local-app
+    env_file:
+      - ${ASTRA_MIGRATION_STATE}/auth-runtime.env
+    volumes:
+      - *local-receipt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  problem-service:
+    <<: *local-app
+    env_file:
+      - ${ASTRA_MIGRATION_STATE}/problem-runtime.env
+    volumes:
+      - *local-receipt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  submission-service:
+    <<: *local-app
+    env_file:
+      - ${ASTRA_MIGRATION_STATE}/submission-runtime.env
+    volumes:
+      - *local-receipt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  envoy:
+    container_name: !reset null
+    ports: !override
+      - "${ASTRA_DEV_GATEWAY_PORT:-8080}:8080"
+  redis:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_REDIS_PORT:-6379}:6379"
+  kafka:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_KAFKA_PORT:-9094}:9094"
+    environment:
+      KAFKA_CFG_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://127.0.0.1:${ASTRA_DEV_KAFKA_PORT:-9094}
+  kafka-init:
+    container_name: !reset null
+  minio:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${ASTRA_DEV_MINIO_CONSOLE_PORT:-9001}:9001"
+  go-judge:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_SANDBOX_HTTP_PORT:-5050}:5050"
+      - "127.0.0.1:${ASTRA_DEV_SANDBOX_GRPC_PORT:-5051}:5051"
+    networks:
+      judge_internal:
+        aliases:
+          - judge_sandbox
+  judge-worker:
+    container_name: !reset null
+    labels:
+      astracode.local.migration-run: ${ASTRA_MIGRATION_RUN:?use scripts/local-stack.sh}
+    depends_on:
+      problem-service:
+        condition: service_healthy
+  mailhog:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${ASTRA_DEV_MAILHOG_PORT:-8025}:8025"
+  kafka-ui:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${ASTRA_DEV_KAFKA_UI_PORT:-8081}:8080"

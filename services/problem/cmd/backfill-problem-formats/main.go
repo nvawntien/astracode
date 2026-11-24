@@ -22,7 +22,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config failed: %v", err)
 	}
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "problem")
 	if err != nil {
 		log.Fatalf("connect database failed: %v", err)
 	}

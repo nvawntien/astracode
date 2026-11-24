@@ -19,7 +19,7 @@ type Server struct {
 func NewServer(cfg config.ServerConfig, publicUserServer *PublicUserServer) *Server {
 	grpcServer := sharedgrpc.NewServer()
 	authv1.RegisterPublicUserServiceServer(grpcServer, publicUserServer)
-	return &Server{server: grpcServer, address: fmt.Sprintf(":%d", cfg.GRPCPort)}
+	return &Server{server: grpcServer, address: cfg.ListenAddress(cfg.GRPCPort)}
 }
 
 func (s *Server) Start() error {

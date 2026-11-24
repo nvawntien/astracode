@@ -1,10 +1,12 @@
 package database
 
 import (
+	"context"
 	"fmt"
-	"go-judge-system/pkg/config"
 	"time"
 
+	"go-judge-system/pkg/config"
+	"go-judge-system/pkg/schema"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -18,6 +20,7 @@ func ConnectDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 logger.Default.LogMode(logger.Silent),
 		SkipDefaultTransaction: true,
+		DisableAutomaticPing:   true,
 	})
 
 	if err != nil {
@@ -33,9 +36,30 @@ func ConnectDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)
 
-	if err := sqlDB.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	return db, nil
+}
+
+func ConnectServiceDatabase(cfg config.DatabaseConfig, owner string) (*gorm.DB, error) {
+	db, err := ConnectDatabase(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect to the %s database using runtime credentials", owner)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := schema.VerifyStartup(ctx, sqlDB, owner); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 	return db, nil
 }

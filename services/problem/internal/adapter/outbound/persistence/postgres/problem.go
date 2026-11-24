@@ -190,7 +190,6 @@ func (r *problemRepository) WithLockedProblem(ctx context.Context, id int64, mut
 type submissionProblemRepository struct{ db *gorm.DB }
 
 func NewProblemRepository(db *gorm.DB) outbound.ProblemRepository {
-	_ = db.AutoMigrate(&ProblemDAO{})
 	return &problemRepository{db: db}
 }
 

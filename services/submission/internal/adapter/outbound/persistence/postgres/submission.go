@@ -39,7 +39,6 @@ type submissionRepository struct {
 }
 
 func NewSubmissionRepository(db *gorm.DB) outbound.SubmissionRepository {
-	db.AutoMigrate(&SubmissionDAO{})
 	return &submissionRepository{db: db}
 }
 

@@ -2,38 +2,102 @@
 
 ## Prerequisites and configuration
 
-Use Go 1.25.8 for Go checks and local JWK generation, Docker Engine/Compose, and Node.js 22.12+ in the Node 22 series with npm for `website/`. Runtime configs live in `services/*/config/config.yaml` and `workers/judge/config/config.yaml`; Compose reads `environment/postgres.env`, `environment/redis.env`, and `environment/service.env`. Do not commit real secrets. Viper maps dotted config paths to uppercase underscore environment names, such as `DATABASE_PASSWORD` and `JWT_ACCESS_SECRET`.
+Use Go 1.25.8 for application builds, checks and local JWK generation. The
+migration runner builds in an isolated module using Go 1.26.11, Goose v3.30.0
+and a verified Linux amd64 or arm64 checksum. Use Docker Engine with Compose
+2.24.4+, Bash, jq, OpenSSL, and flock. The frontend uses Node.js 22.12+ in the
+Node 22 series and npm.
+
+Runtime configuration lives under `services/*/config/` and
+`workers/judge/config/`. Local Compose uses the ignored
+`environment/postgres.env`, `environment/redis.env` and
+`environment/service.env` files. Viper maps dotted config paths to uppercase
+underscore names such as `JWT_ACCESS_SECRET`.
 
 ## Run the full stack
 
-The quick start copies missing local env files from their templates and uses
-`JWT_ACCESS_SECRET` from `environment/service.env` to create or verify the
-ignored `envoy/symmetric.json`. A mismatch stops startup and leaves the key
-file intact. [Local stack quick start](../../README.md#start-the-local-judge-stack)
-
-On startup, the `envoy-jwk` service copies that host file into a named volume
-for Envoy and must finish successfully before Envoy starts. If you change the
-local Auth access secret, regenerate the key and activate it explicitly.
-[Envoy key setup and activation](../../envoy/README.md#configuration-and-secrets)
-
-Check containers with `docker compose ps` and stop the stack with
-`docker compose down`.
-
-The worker is profile-gated; omit `--profile worker` to start the API/infrastructure without it. Envoy exposes the gateway at `http://localhost:8080`; MailHog and Kafka UI are dev-profile services. Compose creates databases and Kafka topics automatically through the mounted bootstrap assets.
-
-The checked-in worker profile sets `WORKER_POOL_SIZE=1` and a 512 MiB container memory limit. `WORKER_POOL_SIZE` is the consumer-wide cap for official jobs, not a per-Kafka-claim capacity; keep those settings together until a new workload measurement supports a change.
-
-## Run a Go component locally
-
-Each runtime is a separate Go module but `go.work` links them. From its module directory:
+Prepare the three local env files and generate or verify the ignored Envoy
+JWK using the root quick start. Use a named development project on an explicit
+local Docker context.
 
 ```bash
-go run ./cmd/server
-go test ./...
-go vet ./...
+bash scripts/local-stack.sh default astracode-dev-local up
+docker --context default compose -p astracode-dev-local ps
 ```
 
-The worker accepts `-config` (default `/app/config`), so local usage needs a config directory reachable by that flag. The other Go mains currently load `/app/config` unconditionally; use Docker/Compose or supply that expected path in a local environment. This limitation is derived from their `main.go` files.
+The launcher pairs the base file with `docker-compose.local.yml`. It verifies
+the local Docker engine, project and PostgreSQL volume, enrolls an empty
+instance, and waits for healthy PostgreSQL. The one-shot migrator connects
+with distinct migration roles. Auth, Problem, and Submission start only
+after verification succeeds for all three owners with a fresh receipt for
+the current run. Each service also checks its live schema read-only.
+
+The launcher stores enrollment, separate role credentials and the migration
+journal in an owner-only directory under
+`${XDG_STATE_HOME:-$HOME/.local/state}/astracode/migrations`. Compose and direct
+Go share that state for the same context and project. The three services load
+their own runtime role credentials. Keep the state directory with the
+enrolled database and out of source control.
+
+Envoy is available at `http://localhost:8080`. The local launcher also enables
+MailHog, Kafka UI, and the Worker. Envoy waits for JWK provisioning. Follow
+the key replacement and activation procedure if the Auth access secret
+changes. [Quick start](../../README.md#start-the-local-judge-stack) ·
+[Envoy configuration](../../envoy/README.md#configuration-and-secrets)
+
+```bash
+docker --context default compose -p astracode-dev-local down --remove-orphans
+```
+
+That command preserves named data volumes. Use a fresh `astracode-dev-*`
+project and distinct published ports for independent rehearsals. The local
+overlay gives each project its own PostgreSQL, Kafka, Redis, MinIO, and Worker
+cache state. Set the `ASTRA_DEV_*_PORT` overrides in the local Compose file's
+interpolation inputs when running parallel projects. Reset is a separate
+maintainer-approved operation scoped to an exact context, project, and
+disposable volume or database. The launcher rejects unknown volumes and
+requires a fresh project when enrollment does not match.
+[Schema policy](../architecture/adr/0006-schema-migration-policy.md)
+
+## Run the services directly with Go
+
+```bash
+bash scripts/local-stack.sh default astracode-dev-local go
+```
+
+This starts the local database and shared dependencies, verifies all three
+migrations, and then builds and runs Auth, Problem, and Submission with
+Go 1.25.8. The HTTP and gRPC listeners bind to loopback. Stop the foreground
+command to stop those processes. Use the full Compose stack for gateway and
+official judging integration. For simultaneous local setups, use the
+`ASTRA_DEV_AUTH_HTTP_PORT`, `ASTRA_DEV_PROBLEM_HTTP_PORT`,
+`ASTRA_DEV_SUBMISSION_HTTP_PORT`, `ASTRA_DEV_AUTH_GRPC_PORT`, and
+`ASTRA_DEV_PROBLEM_GRPC_PORT` overrides.
+
+Seed curated Problem tags explicitly when needed. Running the same command
+again keeps existing rows.
+
+```bash
+bash scripts/local-stack.sh default astracode-dev-local seed-tags
+```
+
+## Migration review and recovery
+
+Preview the digest for local SQL or catalog changes with the `plan` command.
+Review the changes, then pass the exact digest to the launcher as
+`ASTRACODE_APPROVE_DIRTY_BUNDLE`. Changes to migration inputs invalidate that
+approval and previous receipts even if the Git commit stays the same.
+Fixtures require committed migrations and catalogs.
+
+When one database fails, the launcher reports verified, refused, uncertain,
+and unattempted targets. It preserves earlier commits and does not activate
+services for that run. For an uncertain write, keep the exact source,
+migrator pin, journal, and enrollment. After checking the failure, retry
+the same approved bundle with `ASTRACODE_RECONCILE_MIGRATIONS=true`. The runner
+reacquires the lock and reconciles the ledger and catalog against the
+recorded intent before proceeding. An unexpected state requires a reviewed
+forward repair or a tested restore. Keep the production release workflow
+under the protected promotion hold. [Release and recovery controls](../DEPLOYMENT.md#m1-02-protected-promotion-hold)
 
 ## Build, test and quality checks
 
@@ -51,34 +115,21 @@ website lint warning-budget and tooling-format checks, gateway client contract
 test, Envoy suite, production Compose assertions, deployment-script checks,
 PostgreSQL integration suites, or container image builds.
 
-Three PostgreSQL integration suites skip unless a port variable points at a
-disposable PostgreSQL on `127.0.0.1` with the fixture role and a database that
-has none of the suite's tables: `TestProblemMutationPostgresConcurrency` and
-`TestTestcaseMutationPostgresConcurrency` (`services/problem`,
-`ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT`, role and database `problem_fixture` /
-`problem_mutation_test`) and `TestGetCurrentDetailPostgresSnapshots`
-(`services/submission`, `ASTRACODE_DETAIL_TEST_PGPORT`, `detail_fixture` /
-`submission_detail_test`). `scripts/verify.sh` does not start a database, so
-run them by hand and recreate the database before each suite:
+Run the PostgreSQL suites from a checkout with committed migration and
+catalog inputs.
 
 ```bash
-docker run -d --name astracode-pg-fixture -p 127.0.0.1:55432:5432 \
-  -e POSTGRES_PASSWORD=fixture-admin postgres:15.6-alpine
-docker exec astracode-pg-fixture psql -U postgres \
-  -c "CREATE ROLE problem_fixture LOGIN PASSWORD 'problem_fixture'" \
-  -c "CREATE ROLE detail_fixture LOGIN PASSWORD 'detail_fixture'"
-# Before each suite (use submission_detail_test / detail_fixture for the third):
-docker exec astracode-pg-fixture psql -U postgres \
-  -c "DROP DATABASE IF EXISTS problem_mutation_test WITH (FORCE)" \
-  -c "CREATE DATABASE problem_mutation_test OWNER problem_fixture"
-(cd services/problem && ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT=55432 \
-  go test ./internal/adapter/outbound/persistence/postgres \
-  -run '^TestProblemMutationPostgresConcurrency$' -count=1 -v)
-docker rm -f astracode-pg-fixture
+bash scripts/test-postgres-integration.sh
 ```
 
-CI's `postgres-integration` job does the same with a PostgreSQL 15.6 service
-container and fails when a suite is skipped or does not pass.
+The script creates a fresh PostgreSQL 15.6 container for each suite on a
+disposable loopback port, verifies the empty target at enrollment, and applies
+the pinned migrations. The suites verify the fixture identity, schema and
+empty application data before writing with fixed runtime roles. The job
+requires a pass without any skipped suite for
+`TestProblemMutationPostgresConcurrency`,
+`TestTestcaseMutationPostgresConcurrency`, and
+`TestGetCurrentDetailPostgresSnapshots`.
 
 GitHub Actions workflows in `.github/workflows/`:
 

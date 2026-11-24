@@ -1,6 +1,9 @@
 package config
 
 import (
+	"net"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +69,11 @@ type ServerConfig struct {
 	Port     int    `mapstructure:"port"`
 	GRPCPort int    `mapstructure:"grpc_port"`
 	Mode     string `mapstructure:"mode"`
+	bindHost string
+}
+
+func (s ServerConfig) ListenAddress(port int) string {
+	return net.JoinHostPort(s.bindHost, strconv.Itoa(port))
 }
 
 type DatabaseConfig struct {
@@ -209,4 +217,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// LoadServerConfig keeps host-side development listeners on loopback.
+func LoadServerConfig() (*Config, error) {
+	local := os.Getenv("ASTRACODE_LOCAL_CONFIG")
+	if local == "" {
+		return LoadConfig("/app/config")
+	}
+	cfg, err := LoadConfig(local)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Server.bindHost = "127.0.0.1"
+	return cfg, nil
 }

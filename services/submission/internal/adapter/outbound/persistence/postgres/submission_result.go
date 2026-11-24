@@ -33,7 +33,6 @@ type submissionResultRepository struct {
 }
 
 func NewSubmissionResultRepository(db *gorm.DB) outbound.SubmissionResultRepository {
-	db.AutoMigrate(&SubmissionResultDAO{})
 	return &submissionResultRepository{db: db}
 }
 

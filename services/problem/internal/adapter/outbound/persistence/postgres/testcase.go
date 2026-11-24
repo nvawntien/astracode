@@ -32,7 +32,6 @@ type testCaseRepository struct {
 }
 
 func NewTestCaseRepository(db *gorm.DB) outbound.TestCaseRepository {
-	db.AutoMigrate(&TestCaseDAO{})
 	return &testCaseRepository{db: db}
 }
 

@@ -66,14 +66,17 @@ graph TD
 
 ### Quick Start (Docker Compose)
 
-1. Configure the environment files under the project-level `environment/` directory.
-2. Start the service:
-   ```bash
-   docker compose up -d problem-service
-   ```
-3. Verify the service from inside the Docker network or through the gateway:
-   - Public API: `http://localhost:8080/api/v1/problems`
-   - Health check: use `docker compose exec problem-service wget -qO- http://localhost:8082/health`
+Prepare the local env files and Envoy JWK, then start the stack through the
+guarded launcher.
+
+```bash
+bash scripts/local-stack.sh default astracode-dev-local up
+```
+
+Problem verifies its versioned `problem_db` schema with runtime credentials before
+starting. The public catalog is at `http://localhost:8080/api/v1/problems`.
+[Local startup and direct Go](../../docs/codebase/DEVELOPMENT.md)
+
 
 ### Local Access Note
 
@@ -137,7 +140,7 @@ The service uses a hybrid configuration model:
 
 1. `config/config.yaml` stores non-sensitive settings such as server mode, port, logger configuration, and database host/pool parameters.
 2. Environment variables override secret fields such as `database.password`.
-3. The application loads configuration from `/app/config` at runtime, so Docker Compose is the supported execution path without additional path remapping.
+3. Containers load `/app/config`. The guarded direct Go launcher supplies the local config directory and binds listeners to loopback.
 
 Current default runtime profile:
 

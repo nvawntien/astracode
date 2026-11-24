@@ -30,7 +30,6 @@ type outboxRepository struct {
 }
 
 func NewOutboxRepository(db *gorm.DB) outbound.OutboxRepository {
-	db.AutoMigrate(&OutboxMessageDAO{})
 	return &outboxRepository{db: db}
 }
 

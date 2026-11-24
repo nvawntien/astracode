@@ -36,8 +36,6 @@ type submissionAttemptRepository struct {
 }
 
 func NewSubmissionAttemptRepository(db *gorm.DB) outbound.SubmissionAttemptRepository {
-	db.AutoMigrate(&SubmissionAttemptDAO{})
-	db.Migrator().AlterColumn(&SubmissionAttemptDAO{}, "TriggeredByUserID")
 	return &submissionAttemptRepository{db: db}
 }
 
