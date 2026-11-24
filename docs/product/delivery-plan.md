@@ -66,11 +66,12 @@ Premium stays early (PRD D-17): every content feature from M1-07 onward enforces
 | M1-04 | `add-premium-entitlement` (minimal) — entitlement owned by Auth, 30-day expiry, admin grant/revoke with audit, mock checkout, entitlement propagated through the gateway as decided in ADR-0007 (contract change marked NON-BREAKING), `TrackAccess` check, catalog teasers, access-matrix test with a locked-track fixture | Feature | F-16, NFR-S03, S11 | membership, identity-session, problem-catalog | M1-03, M0-12 | TBD |
 | M1-05 | ADR-0008 Feature-flag mechanism | ADR | NFR-D08 | — | — | TBD |
 | M1-06 | `add-notification-event-contract` — **contracts first**: event envelope and event types for all producers | Feature | F-21 | notification (contract only) | M0-10 | TBD |
-| M1-07 | `add-community-submission-lifecycle` — eligibility, auto pre-check, review queue, claim, decisions | Feature | F-03 | content-moderation | M1-01, M1-04, M1-06 | TBD |
+| M1-07 | `add-community-submission-lifecycle` — eligibility, auto pre-check, review queue, claim, decisions | Feature | F-03 | content-moderation | M1-01, M1-04, M1-06, M1-13 | TBD |
 | M1-08 | `add-quizzes` — including quiz teasers and access-matrix rows | Feature | F-06 | quiz, content-moderation | M1-07 | TBD |
 | M1-10 | `add-notifications-core` — in-app inbox, unread count, moderation outcomes, moderator digest, email channel (the contest reminder event is produced by M2-01) | Feature | F-21, NFR-R04 | notification, realtime-updates | M1-06, M1-11 | TBD |
 | M1-11 | ADR-0009 Email delivery — reuse the existing Auth SMTP adapter or adopt a provider | ADR | F-21 | — | — | TBD |
 | M1-12 | `seed-beyond-leetcode-pilot` — moderator-authored pilot content: ~5 problems, then ~10 quizzes | Content | F-16 | — | M1-04 (quizzes: M1-08) | TBD |
+| M1-13 | `fix-outbox-relay-delivery` — shared outbox relay in `pkg/` (ADR-0007): row claiming, ordered publishing, time-based backoff, visible failed state with metric and alert; fixes head-of-line blocking and message loss on broker outage | Enabler | NFR-R01, A03 | submission | M0-12 | TBD |
 
 ## M2 — Competition and learning
 
@@ -82,7 +83,7 @@ Premium stays early (PRD D-17): every content feature from M1-07 onward enforces
 | M2-04 | `add-learning-roadmaps` (DSA track first) — progress, next-node recommendation, "Continue learning" block on the home page, roadmap teasers and access-matrix rows | Feature | F-15 | learning-roadmap | M1-03, M1-04, M1-08 | TBD |
 | M2-05 | DSA readings: first set of node readings (also the corpus for the AI assistant) | Content | F-15, F-19 | — | M2-04 | TBD |
 | M2-06 | `scale-judge-workers` — scaling by queue backlog; custom-run capacity isolated or limited so runs cannot starve contest submissions | Enabler | NFR-C02, C03, C06 | judging, code-run | M0-13, M0-16 | TBD |
-| M2-07 | Contest load test + 10× analysis (evidence) | Enabler | NFR-C01, C05, P01–P04, R01 | — | M2-01, M2-06 | TBD |
+| M2-07 | Contest load test + 10× analysis (evidence) | Enabler | NFR-C01, C05, P01–P04, R01 | — | M2-01, M2-06, M1-13 | TBD |
 | M2-08 | `add-backups-and-dr` — daily backups to the DR subscription; restore drill | Enabler | NFR-R07, R08 | — | M0-13 | TBD |
 | M2-09 | ADR-0010 LLM provider and vector storage (AI preparation) | ADR | F-19 | — | — | TBD |
 | M2-10 | `ai.md` v1 — corpus, retrieval, guardrails, evaluation design and evaluation set (AI preparation) | Enabler | F-19 | — | M2-05, M2-09 | TBD |
