@@ -44,7 +44,7 @@ func TestGetCurrentDetailPostgresSnapshots(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	guardCtx, guardCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer guardCancel()
-	if err := schema.VerifyFixture(guardCtx, sqlDB, "submission", os.Getenv("ASTRACODE_TEST_FIXTURE_RECEIPT")); err != nil {
+	if err := schema.VerifyFixture(guardCtx, sqlDB, "submission"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

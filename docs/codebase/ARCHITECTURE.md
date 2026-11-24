@@ -14,7 +14,7 @@ All four Go runtime components follow the same directional dependency pattern: i
 Auth, Problem, and Submission verify their owning PostgreSQL schema at the
 composition root before constructing components that serve traffic or run
 background work. A dedicated Goose runner manages SQL versions using a
-separate role and history for each database. Judge Worker continues to access
+dedicated database login and history per service. Judge Worker continues to access
 Problem metadata through gRPC. [Data ownership](DATA.md)
 
 ## Communication graph

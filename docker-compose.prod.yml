@@ -54,7 +54,12 @@ services:
       - envoy_jwk:/keys
 
   postgres:
+    environment: !reset {}
     ports: !reset []
+
+  # The deployment must migrate its databases before activating applications.
+  migrate:
+    profiles: [ "local-migrations" ]
 
   redis:
     ports: !reset []
@@ -81,16 +86,42 @@ services:
     image: ${ASTRACODE_IMAGE_ROOT:?Set ASTRACODE_IMAGE_ROOT}/auth-service:${ASTRACODE_IMAGE_TAG:?Set ASTRACODE_IMAGE_TAG}
     pull_policy: always
     build: !reset null
+    environment: !reset {}
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   problem-service:
     image: ${ASTRACODE_IMAGE_ROOT:?Set ASTRACODE_IMAGE_ROOT}/problem-service:${ASTRACODE_IMAGE_TAG:?Set ASTRACODE_IMAGE_TAG}
     pull_policy: always
     build: !reset null
+    environment: !reset {}
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   submission-service:
     image: ${ASTRACODE_IMAGE_ROOT:?Set ASTRACODE_IMAGE_ROOT}/submission-service:${ASTRACODE_IMAGE_TAG:?Set ASTRACODE_IMAGE_TAG}
     pull_policy: always
     build: !reset null
+    environment: !reset {}
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
 
   judge-worker:
     image: ${ASTRACODE_IMAGE_ROOT:?Set ASTRACODE_IMAGE_ROOT}/judge-worker:${ASTRACODE_IMAGE_TAG:?Set ASTRACODE_IMAGE_TAG}

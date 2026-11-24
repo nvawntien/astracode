@@ -2,44 +2,26 @@ package schema
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
-	"os"
 )
 
-// VerifyStartup checks the schema expected by this build before starting work.
-// It uses the supplied runtime connection and never initializes the ledger.
-func VerifyStartup(ctx context.Context, db beginner, owner string) error {
-	const expectedVersion = 1
-	expected, err := Expected(owner, expectedVersion)
-	if err != nil {
-		return fmt.Errorf("%s has no expected database schema for this build", owner)
-	}
-	actual, err := Read(ctx, db)
-	if err != nil {
-		return fmt.Errorf("%s database schema cannot be inspected with runtime credentials", owner)
-	}
-	if actual.Database != owner+"_db" || !actual.HasHistory ||
-		actual.Version != expectedVersion || actual.CatalogSHA256 != expected {
-		return fmt.Errorf("%s database schema is incompatible with version %d; run the guarded migrations", owner, expectedVersion)
-	}
-	return verifyLocalReceipt(owner, actual)
-}
+const (
+	AuthVersion       = 1
+	ProblemVersion    = 1
+	SubmissionVersion = 1
+)
 
-func verifyLocalReceipt(owner string, actual State) error {
-	run := os.Getenv("ASTRACODE_MIGRATION_RUN")
-	bundle := os.Getenv("ASTRACODE_MIGRATION_BUNDLE")
-	path := os.Getenv("ASTRACODE_MIGRATION_RECEIPT")
-	if run == "" && bundle == "" && path == "" {
-		return nil
+// VerifyVersion reads the latest Goose ledger row without creating a ledger.
+func VerifyVersion(ctx context.Context, db *sql.DB, database string, expected int) error {
+	var actualDatabase string
+	var version int
+	var applied bool
+	err := db.QueryRowContext(ctx, `
+SELECT current_database(), version_id, is_applied
+FROM public.goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&actualDatabase, &version, &applied)
+	if err != nil || actualDatabase != database || version != expected || !applied {
+		return fmt.Errorf("expected schema version %d in %s; apply that service's migrations before startup", expected, database)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read local migration receipt for %s", owner)
-	}
-	var receipt Receipt
-	if err := json.Unmarshal(data, &receipt); err != nil {
-		return fmt.Errorf("decode local migration receipt for %s", owner)
-	}
-	return receipt.Verify(run, bundle, owner, actual.DatabaseOID, actual.Version)
+	return nil
 }

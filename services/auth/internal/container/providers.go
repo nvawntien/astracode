@@ -8,6 +8,7 @@ import (
 	"go-judge-system/pkg/logger"
 	"go-judge-system/pkg/middleware"
 	minioclient "go-judge-system/pkg/minio"
+	"go-judge-system/pkg/schema"
 	authgrpc "go-judge-system/services/auth/internal/adapter/inbound/grpc"
 	grpchandler "go-judge-system/services/auth/internal/adapter/inbound/grpc/handler"
 	"go-judge-system/services/auth/internal/adapter/inbound/http"
@@ -31,7 +32,7 @@ import (
 )
 
 func ProvideDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
-	return database.ConnectServiceDatabase(cfg, "auth")
+	return database.ConnectServiceDatabase(cfg, "auth", schema.AuthVersion)
 }
 
 var InfrastructureProviderSet = wire.NewSet(

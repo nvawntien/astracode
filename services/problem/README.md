@@ -67,10 +67,10 @@ graph TD
 ### Quick Start (Docker Compose)
 
 Prepare the local env files and Envoy JWK, then start the stack through the
-guarded launcher.
+standard Compose command.
 
 ```bash
-bash scripts/local-stack.sh default astracode-dev-local up
+docker compose --profile dev --profile worker up -d --build
 ```
 
 Problem verifies its versioned `problem_db` schema with runtime credentials before
@@ -140,7 +140,7 @@ The service uses a hybrid configuration model:
 
 1. `config/config.yaml` stores non-sensitive settings such as server mode, port, logger configuration, and database host/pool parameters.
 2. Environment variables override secret fields such as `database.password`.
-3. Containers load `/app/config`. The guarded direct Go launcher supplies the local config directory and binds listeners to loopback.
+3. Containers load `/app/config`. Set `ASTRACODE_LOCAL_CONFIG` to the service config directory for direct Go startup on loopback after running migrations.
 
 Current default runtime profile:
 

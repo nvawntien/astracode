@@ -11,13 +11,11 @@ docker_cmd=(docker --context default)
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/astracode-postgres.XXXXXXXX")
 fixture=
 trap '[[ -z "$fixture" ]] || "${docker_cmd[@]}" stop "$fixture" >/dev/null' EXIT
-pin=$(bash tools/migrations/build.sh "$work/migrator")
-plan=$("$work/migrator" stage --tool-sha256 "$pin" --snapshot "$work/bundle.json")
-bundle=$(jq -er '. | select(.dirty == false).digest' <<<"$plan") ||
-    { echo "PostgreSQL fixture tests require committed migration and catalog inputs." >&2; exit 1; }
+image=astracode-migrations:integration
+"${docker_cmd[@]}" build -f infra/postgres/migrations.Dockerfile -t "$image" .
 
 run_suite() {
-    local suite=$1 owner database password port variable state instance
+    local suite=$1 owner database password port variable state
     case "$suite" in
         TestProblemMutationPostgresConcurrency|TestTestcaseMutationPostgresConcurrency)
             owner=problem database=problem_mutation_test password=problem_fixture
@@ -35,7 +33,6 @@ run_suite() {
     fixture=$("${docker_cmd[@]}" run -d --rm --publish 127.0.0.1::5432 \
         --tmpfs /var/lib/postgresql/data:rw,nosuid,nodev \
         --label astracode.disposable.postgres-suite="$suite" -e POSTGRES_PASSWORD postgres:15.6-alpine)
-    unset POSTGRES_PASSWORD
     local ready=false
     for _ in {1..60}; do
         if "${docker_cmd[@]}" exec "$fixture" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then
@@ -49,20 +46,22 @@ run_suite() {
     [[ "$port" =~ ^127\.0\.0\.1:([0-9]+)$ ]] || { echo "Expected one loopback PostgreSQL port." >&2; return 1; }
     port=${BASH_REMATCH[1]}
     "${docker_cmd[@]}" exec "$fixture" createdb -U postgres "$database"
-    "${docker_cmd[@]}" cp "$work/migrator" "$fixture:/tmp/astracode-migrate"
-    instance=$(cat /proc/sys/kernel/random/uuid)
-    local migration_password
-    migration_password=$(openssl rand -hex 32)
-    printf '{"migrator":"%s","runtime":"%s"}\n' "$migration_password" "$password" |
-        "${docker_cmd[@]}" exec -i "$fixture" /tmp/astracode-migrate bootstrap \
-            --environment fixture --owner "$owner" --instance "$instance" |
-        jq -s . > "$state/enrollment.json"
-    printf '{"%s":"%s"}\n' "$owner" "$migration_password" |
-        "$work/migrator" apply --tool-sha256 "$pin" --bundle "$bundle" --snapshot "$work/bundle.json" \
-            --port "$port" --state-dir "$state" --enrollment "$state/enrollment.json" --receipt "$state/receipt.json" |
+    PGPASSWORD="$POSTGRES_PASSWORD" "${docker_cmd[@]}" run --rm --network "container:$fixture" -e PGPASSWORD \
+        --entrypoint goose "$image" -dir "/migrations/$owner" postgres \
+        "host=127.0.0.1 user=postgres dbname=$database sslmode=disable" up 2>&1 |
         tee "$state/migration.log"
+    "${docker_cmd[@]}" exec -i "$fixture" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" \
+        -v role="$password" <<'SQL'
+CREATE ROLE :"role" LOGIN PASSWORD :'role';
+COMMENT ON DATABASE :"DBNAME" IS 'AstraCode disposable integration fixture';
+REVOKE ALL ON DATABASE :"DBNAME" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"DBNAME" TO :"role";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO :"role";
+REVOKE INSERT, UPDATE, DELETE ON public.goose_db_version FROM :"role";
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO :"role";
+SQL
     (
-        export "$variable=$port" ASTRACODE_TEST_FIXTURE_RECEIPT="$state/receipt.json"
+        export "$variable=$port"
         cd "services/$owner"
         go test ./internal/adapter/outbound/persistence/postgres -run "^${suite}\$" -count=1 -v
     ) | tee "$state/test.log"

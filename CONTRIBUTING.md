@@ -104,14 +104,14 @@ request when generated artifacts must change.
 ## Database and schema changes
 
 Each service owns its PostgreSQL database. Add reviewed SQL to the owning
-service's numbered migration sequence and include the expected catalog at
-that version. Preserve the names and bytes of released migrations. Describe
+service's numbered migration sequence and update that service's expected
+version. Preserve the names and bytes of released migrations. Describe
 data impact, compatibility in both directions, deployment ordering, and
 rollback limits. Use service APIs and events for cross-service data access.
-[Schema policy](docs/architecture/adr/0006-schema-migration-policy.md)
+[Local migration policy](docs/architecture/adr/0007-local-goose-migrations.md)
 
-Use the guarded launcher for local activation. Run
-`bash scripts/test-postgres-integration.sh` from a committed checkout to verify
+Start local services with `docker compose --profile dev --profile worker up -d
+--build`. Run `bash scripts/test-postgres-integration.sh` to verify
 the three PostgreSQL suites against fresh migrated fixtures.
 [Development and verification](docs/codebase/DEVELOPMENT.md)
 

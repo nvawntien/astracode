@@ -8,6 +8,7 @@ import (
 	"go-judge-system/pkg/logger"
 	"go-judge-system/pkg/middleware"
 	"go-judge-system/pkg/minio"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/problem/internal/adapter/inbound/grpc"
 	grpchandler "go-judge-system/services/problem/internal/adapter/inbound/grpc/handler"
 	grpcproblemhandler "go-judge-system/services/problem/internal/adapter/inbound/grpc/handler/problem"
@@ -35,7 +36,7 @@ import (
 )
 
 func ProvideDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
-	return database.ConnectServiceDatabase(cfg, "problem")
+	return database.ConnectServiceDatabase(cfg, "problem", schema.ProblemVersion)
 }
 
 var InfrastructureProviderSet = wire.NewSet(

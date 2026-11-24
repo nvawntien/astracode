@@ -16,6 +16,7 @@ import (
 	authv1 "go-judge-system/pkg/pb/auth/v1"
 	judgev1 "go-judge-system/pkg/pb/judge/v1"
 	problemv1 "go-judge-system/pkg/pb/problem/v1"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/submission/internal/adapter/inbound/http"
 	"go-judge-system/services/submission/internal/adapter/inbound/http/handler"
 	adminhandler "go-judge-system/services/submission/internal/adapter/inbound/http/handler/admin"
@@ -219,7 +220,7 @@ func ProvideAdminHandler(
 }
 
 func ProvideDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
-	return database.ConnectServiceDatabase(cfg, "submission")
+	return database.ConnectServiceDatabase(cfg, "submission", schema.SubmissionVersion)
 }
 
 var InfrastructureProviderSet = wire.NewSet(

@@ -170,7 +170,7 @@ use the Contributions navigation workflow.
 ### Requirements
 
 - Git
-- Linux amd64 or arm64, Docker Engine with Docker Compose 2.24.4+, Bash, jq, and OpenSSL
+- Docker Engine with Docker Compose 2.24.4+
 - Node.js 22.12+ in the Node 22 series and npm for the Next.js frontend
 - Go 1.25.8 for local JWK generation and Go checks
 
@@ -195,14 +195,14 @@ cd astracode
     JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
   )
 
-  bash scripts/local-stack.sh default astracode-dev-local up
+  docker compose --profile dev --profile worker up -d --build
 )
-docker --context default compose -p astracode-dev-local ps
+docker compose ps
 ```
 
-The launcher waits for healthy PostgreSQL and verifies versioned migrations for
-Auth, Problem, and Submission before starting the stack. It starts the Worker,
-MailHog, and Kafka UI. Start the Next.js app separately. See the development
+Compose waits for healthy PostgreSQL and applies the Goose migrations before
+starting Auth, Problem, and Submission. The `worker` profile starts the judge
+worker, and `dev` enables MailHog and Kafka UI. Start the Next.js app separately. See the development
 guide for direct Go startup, explicit tag seeding, and recovery. [Development workflow](docs/codebase/DEVELOPMENT.md)
 
 If JWK validation fails, check the local Auth access secret and follow the
@@ -232,7 +232,7 @@ your environment before opening the browser app.
 Stop the local stack with:
 
 ```bash
-docker --context default compose -p astracode-dev-local down --remove-orphans
+docker compose down
 ```
 
 ## Development and validation

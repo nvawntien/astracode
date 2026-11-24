@@ -46,7 +46,7 @@ func ConnectDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
-func ConnectServiceDatabase(cfg config.DatabaseConfig, owner string) (*gorm.DB, error) {
+func ConnectServiceDatabase(cfg config.DatabaseConfig, owner string, version int) (*gorm.DB, error) {
 	db, err := ConnectDatabase(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to the %s database using runtime credentials", owner)
@@ -57,7 +57,7 @@ func ConnectServiceDatabase(cfg config.DatabaseConfig, owner string) (*gorm.DB, 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := schema.VerifyStartup(ctx, sqlDB, owner); err != nil {
+	if err := schema.VerifyVersion(ctx, sqlDB, owner+"_db", version); err != nil {
 		sqlDB.Close()
 		return nil, err
 	}

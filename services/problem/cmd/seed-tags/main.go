@@ -9,6 +9,7 @@ import (
 
 	"go-judge-system/pkg/config"
 	"go-judge-system/pkg/database"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/problem/internal/adapter/outbound/persistence/postgres"
 	seedtags "go-judge-system/services/problem/internal/seed/tags"
 )
@@ -23,7 +24,7 @@ func main() {
 	}
 
 	fmt.Printf("Target database: %s:%d/%s\n", cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName)
-	db, err := database.ConnectServiceDatabase(cfg.Database, "problem")
+	db, err := database.ConnectServiceDatabase(cfg.Database, "problem", schema.ProblemVersion)
 	if err != nil {
 		log.Fatalf("connect database failed: %v", err)
 	}

@@ -20,8 +20,7 @@ along with the infrastructure required to deliver judge jobs reliably.
 
 ## Local startup
 
-Use the guarded local launcher to migrate all three service databases before
-activation. Submission verifies `submission_db` with runtime credentials
+Local Compose migrates all three service databases before activation. Submission verifies `submission_db` with runtime credentials
 before serving HTTP or starting its outbox relay and Kafka consumer.
 [Compose and direct Go](../../docs/codebase/DEVELOPMENT.md)
 

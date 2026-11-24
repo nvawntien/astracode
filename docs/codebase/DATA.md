@@ -7,17 +7,14 @@ Compose starts one PostgreSQL server but initialization creates three isolated d
 Auth, Problem, and Submission each maintain a PostgreSQL SQL sequence in their
 service's `migrations/` directory, starting with `00001_initial_schema.sql`.
 Judge Worker has no PostgreSQL schema. Goose records an independent history
-in each owning database. The guarded runner compares that history, applied
-file checksums, and the application catalog with the approved migration prefix.
-The initial migrations were verified against the legacy GORM-generated
-catalogs on PostgreSQL 15.6. [Schema policy](../architecture/adr/0006-schema-migration-policy.md)
+in each owning database. The initial migrations were compared against the
+legacy GORM-generated schema on PostgreSQL 15.6.
+[Migration policy](../architecture/adr/0007-local-goose-migrations.md)
 
-GORM handles application queries and transactions. Each application verifies
-its required schema read-only before starting business work. In local
-environments, independently enrolled per-service migration roles own the
-schema and ledger. Runtime roles can read the ledger and perform their
-application operations with DML and sequence privileges. Local launch and
-recovery use a per-target journal outside the checkout.
+GORM handles application queries and transactions. Each application reads its
+own Goose history at startup and requires its expected version. Local Compose
+uses a separate login and database owner per service. The restricted test
+roles can read the fixture ledger and write application rows.
 [Development workflow](DEVELOPMENT.md)
 
 | Owner | Tables/models | Notable indexes/relationships | Evidence |

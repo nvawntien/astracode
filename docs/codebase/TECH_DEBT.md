@@ -4,7 +4,7 @@
 
 | Area | Finding | Evidence / impact |
 | --- | --- | --- |
-| Managed schema rollout | Local development and PostgreSQL CI fixtures use the guarded Goose runner. Protected release orchestration, managed target enrollment, and compatible rollback still require a separate implementation and rehearsal. | [ADR-0006](../architecture/adr/0006-schema-migration-policy.md) and the [M1-02 hold](../DEPLOYMENT.md#m1-02-protected-promotion-hold). |
+| Managed schema rollout | Local development and PostgreSQL CI fixtures use the Goose CLI. Managed rollout, backup, and compatibility planning belong to the infrastructure implementation. | [ADR-0007](../architecture/adr/0007-local-goose-migrations.md) and the [deployment prerequisite](../DEPLOYMENT.md#database-migrations-before-activation). |
 | Worker capacity scaling | Compose intentionally limits each worker to one concurrent official job and 512 MiB after executor memory-pressure remediation. | `docker-compose.yml`, `judge_job_consumer.go`; any throughput increase needs a fresh memory/concurrency measurement rather than raising `WORKER_POOL_SIZE` independently. |
 | SSE scale boundary | Event delivery uses an in-memory `EventHub`; no shared pub/sub adapter is present. | `services/submission/internal/adapter/outbound/stream/event_hub.go`; multi-replica client delivery is not guaranteed. |
 | DLT recovery | Worker produces a DLT topic but no DLT consumer/replay tool was found. | `infra/kafka/kafka-init.sh`, `dlt_publisher.go`. Failed jobs need manual/operator recovery. |
@@ -30,4 +30,4 @@
 
 ## Testing gaps observed
 
-Unit tests cover many use cases and adapters, including submission result application, Kafka consumers, gRPC clients and testcase loading. `tools/migrations` contains the PostgreSQL migration, recovery, and schema checks. Checked-in coverage gaps include an end-to-end Compose test, DLT replay, multi-replica SSE, and Kubernetes deployment.
+Unit tests cover many use cases and adapters, including submission result application, Kafka consumers, gRPC clients and testcase loading. `scripts/test-postgres-integration.sh` applies migrations to fresh fixtures before the PostgreSQL suites. Checked-in coverage gaps include an end-to-end Compose test, DLT replay, multi-replica SSE, and Kubernetes deployment.

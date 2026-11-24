@@ -12,37 +12,18 @@ GitHub Actions runner
 This document describes the production deployment contract. It does not claim
 zero downtime or replace host/sandbox security review.
 
-## M1-02 protected promotion hold
+## Database migrations before activation
 
-Keep the M1-02 cutover and its descendants on the feature branch until the
-maintainer and Infra owner demonstrate the temporary freeze. Keep protected
-promotion frozen until the ADR-0006 managed migration gate and a compatible
-DDL-free application rollback have been implemented and rehearsed. The
-current protected bundle has no migration runner.
-[Schema policy](architecture/adr/0006-schema-migration-policy.md)
+The first and subsequent deployments must successfully execute the reviewed
+Goose migrations for Auth, Problem and Submission before activating the
+applications. Run one sequence per owning database with deployment-provided
+credentials. Verify all three outcomes before starting the applications.
+Each service also checks its expected version read-only at startup.
 
-- The repository maintainer restricts `main` updates and creation, updates,
-  and deletion of `v*.*.*` tags with empty bypass lists. Disable
-  `release-images.yml` and `deploy-production.yml`, verify queued or in-flight
-  runs can no longer mutate protected state, and suspend alternate writers to
-  protected GHCR packages. Retain effective ruleset/workflow status and the
-  writer inventory.
-- The Infra owner withholds protected job deployment credentials and suspends
-  manual SSH and Docker or sudo release access on the App and Judge nodes.
-  Cover any enabled protected staging routes and retain redacted evidence.
-  Running services and registry pulls continue during the hold.
-- Rehearse refusal for the cutover and a descendant in an isolated equivalent.
-  Cover semantic-tag publication, manual dispatch by SHA, dispatch on an old
-  workflow ref, and manual activation or rollback on either node. Refusal must
-  precede publication, Worker suspension, or host mutation.
-
-Before lifting the freeze, serialize the managed release across all owning
-databases and entry points. Verify target identity, least-privilege roles,
-artifact provenance, ledger and schema, backup recovery point, and compatible
-schema ranges. Rehearse forward migration, verification of all three databases
-before activation, and a compatible DDL-free image rollback that leaves the
-database versions in place. A pre-Goose managed database needs a separately
-reviewed data-preserving adoption and recovery plan before routine releases.
+The local Compose migration job uses local credentials and is excluded from
+the protected Compose graph. Managed rollout, backup, release compatibility
+and deployment orchestration belong to the infrastructure implementation
+before first deployment. [ADR-0007](architecture/adr/0007-local-goose-migrations.md)
 
 ## Release policy
 
@@ -539,8 +520,7 @@ offset commit can produce duplicate DLT records with the same origin offset.
 After managed migration adoption, use a previously verified DDL-free rollback
 release compatible with the resulting schema. Routine rollback may only
 restore compatible application images and configuration. Keep the database
-versions in place and exclude legacy startup-DDL images. Apply the
-[M1-02 hold](#m1-02-protected-promotion-hold) to these entry points.
+versions in place and verify schema compatibility before activation.
 
 The workflow suspends Judge and verifies the group is empty before restoring
 App. An App activation failure uses the bundle transaction's own restoration.

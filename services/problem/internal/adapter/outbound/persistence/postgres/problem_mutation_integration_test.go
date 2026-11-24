@@ -44,7 +44,7 @@ func mutationFixture(t *testing.T) (*gorm.DB, outbound.ProblemRepository, outbou
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	requireMutation(t, schema.VerifyFixture(ctx, sqlDB, "problem", os.Getenv("ASTRACODE_TEST_FIXTURE_RECEIPT")))
+	requireMutation(t, schema.VerifyFixture(ctx, sqlDB, "problem"))
 	return db, postgres.NewProblemRepository(db), postgres.NewTagRepository(db)
 }
 
