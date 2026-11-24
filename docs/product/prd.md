@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | PRD |
-| Version | 0.6 (draft for team review) |
+| Version | 0.7 (draft for team review) |
 | Status | Draft |
 | Owner | Orchestrator (product owner) |
 | Location | `docs/product/prd.md` |
@@ -516,7 +516,7 @@ spec is the source of truth.**
 
 | Capability | Agreed rule |
 |---|---|
-| content-moderation | Lifecycle: Draft → auto pre-check → Pending → In review (claimed) → Approved/Published, Changes requested (back to Draft) or Rejected (final, with reason); moderator may Hide published items. Moderators may override tags, difficulty and rubric. Published items change only through a new review. |
+| content-moderation | Lifecycle: Draft → auto pre-check → Pending → In review (claimed) → Approved/Published, Changes requested (back to Draft) or Rejected (final, with a reason category — broken, quality, duplicate, policy or other — plus a free-text reason; "broken" rejections count toward the pre-check effectiveness KPI); moderator may Hide published items. Moderators may override tags, difficulty and rubric. Published items change only through a new review. |
 | content-moderation | Eligibility to submit: verified email + ≥5 accepted problems; max 3 pending items per user. Submission allowed only to tracks the user can access. Template-mode problems, roadmaps and readings: moderators/admins only. |
 | content-moderation | Coding problem submission requires statement, examples, constraints, tags, proposed difficulty, testcase ZIP and reference solution; auto pre-check runs the reference solution against all testcases in the sandbox. Design problem submission requires prompt, reference answer and proposed rubric. |
 | content-moderation | Lapsed premium: author keeps published content and drafts; cannot submit to premium tracks until renewed. |
@@ -527,10 +527,11 @@ spec is the source of truth.**
 | gamification | XP: problems Easy/Medium/Hard = 10/20/40; quizzes = 2/5/10; first success only; contest solves award normal problem XP. XP drives a displayed level only. |
 | gamification | Streak = consecutive UTC days with ≥1 accepted problem, correct quiz or contest participation. Heatmap day count = problems submitted + quizzes answered + contests joined. |
 | contest | Weekly, fixed start, 90 minutes, 4 problems (easy → hard), scheduled by moderators/admins. Problems only. Registration required; late join allowed. Ranking: solved ↓, then penalty ↑ (sum of solve times + 5 min per wrong attempt before acceptance). Live leaderboard, no freeze. Afterwards problems become public practice, so contest problems come from the free DSA track only. |
+| contest | Visibility: contest problems are hidden until the contest starts; from the start anyone can read the statements, but only registered participants' submissions count (late registration allowed). Afterwards they are normal practice problems. |
 | contest | Tab-switch deterrent: rule shown before start; warning on 1st and 2nd switch; from the 3rd switch the participant may finish but is unrated and flagged for moderator review. |
 | rating | Codeforces-style Elo based on expected vs actual rank; initial 1500; only participants with ≥1 submission are rated; contest authors/schedulers and flagged participants are not rated. |
 | social-follow | One-way follow without approval; follower and following lists on profile; no activity feed. |
-| notification | Channels: in-app for all events; email additionally for contest reminders and premium expiry. "New post" notifications go only to followers of the author. Moderator review notifications are digests of counts. Premium expiry notice 3 days before. |
+| notification | Channels: in-app for all events; email additionally for contest reminders and premium expiry. "New post" notifications go only to followers of the author. Moderator review notifications are digests of counts, sent once a day at 09:00 (Asia/Ho_Chi_Minh) only when items are waiting. Contest reminder 30 minutes before the start. Premium expiry notice 3 days before. |
 | discussion | Posts require moderator approval; comments are flat with one reply level, not pre-moderated, rate-limited, reportable and removable by moderators; editing an approved post is not allowed (delete and repost). Premium tags: only premium users read full posts and post; others see title and teaser. |
 | learning-roadmap | Roadmap = DAG of nodes (multiple prerequisites allowed); one level only (no sub-roadmaps). Node blocks: Reading, Practice (many-to-many), Resources (external links only). Node complete = reading marked done + 100% of practice items solved. Each roadmap recommends the next node. Authored by moderators/admins. |
 | judging | Template mode: C++ first; moderator/admin-authored only; banned-include check; concurrency problems run repeated stress tests and are best-effort. |
@@ -559,6 +560,7 @@ spec is the source of truth.**
 | D-16 | AI assistant (F-19) moved from Must to Should with a minimal scope; it is the first Should, and its preparation (provider ADR, `ai.md`, evaluation set) stays in M2 | 2026-11-24 |
 | D-17 | Premium (F-16) stays Must and early (M1), so that every content feature enforces track access from its first version; launch premium content is a moderator-authored Beyond LeetCode pilot; the full F-17 stays Could | 2026-11-24 |
 | D-18 | Roadmaps (F-15) add a "Continue learning" block on the home page; contest problems come from the free DSA track only; roadmaps stay Must because they close the learning loop (G-1), not only because they feed the AI | 2026-11-24 |
+| D-19 | Agreed while preparing ADR-0007: contest problems hidden until start, then readable by anyone with only registered participants' submissions counting; rejection reason categories; moderator digest daily at 09:00 (Asia/Ho_Chi_Minh); contest reminder 30 minutes before start | 2026-11-24 |
 
 ## Appendix C — Hand-off to other documents (temporary)
 
