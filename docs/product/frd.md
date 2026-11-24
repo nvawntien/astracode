@@ -62,26 +62,26 @@ here afterwards. **Owner (team)** is filled when capability owners are assigned.
 |---|---|---|---|---|---|
 | identity-session | Accounts, sessions, roles, suspension | auth-service | `openspec/specs/identity-session/spec.md` | Exists → Modified (Contributor removal, roles) | TBD |
 | user-profile | Public profile, user search, avatar | auth-service | `…/user-profile/spec.md` | Exists → Modified | TBD |
-| membership | Premium entitlement, expiry, track access checks | TBD (ADR) | `…/membership/spec.md` | Planned | TBD |
+| membership | Premium entitlement, expiry, track access checks | auth-service (ADR-0007) | `…/membership/spec.md` | Planned | TBD |
 | problem-catalog | Problems by track, tags, difficulty, statements, visibility | problem-service | `…/problem-catalog/spec.md` | Exists → Modified (tracks) | TBD |
-| content-moderation | Submission lifecycle, eligibility, auto pre-check, review queue, claim, decisions, for problems, quizzes, posts and design problems | TBD (ADR; today partly problem-service) | `…/content-moderation/spec.md` | Exists (partial) → Modified | TBD |
+| content-moderation | Submission lifecycle, eligibility, auto pre-check, review queue, claim, decisions, for problems, quizzes, posts and design problems | problem-service (ADR-0007) | `…/content-moderation/spec.md` | Exists (partial) → Modified | TBD |
 | code-run | Custom test runs from the editor | judge-worker | `…/code-run/spec.md` | Exists | TBD |
 | submission | Official submissions, attempts, history, rejudge | submission-service | `…/submission/spec.md` | Exists | TBD |
 | judging | Sandbox execution, verdicts, standard and template modes | judge-worker | `…/judging/spec.md` | Exists → Modified (template mode, Could) | TBD |
 | realtime-updates | Push live updates to the browser (verdicts, leaderboards, notifications) | submission-service (today) | `…/realtime-updates/spec.md` | Exists → Modified | TBD |
-| quiz | Quiz catalog, answering, explanations | TBD (ADR) | `…/quiz/spec.md` | Planned | TBD |
-| problem-leaderboard | Per-problem, per-language ranking and percentiles | TBD (ADR) | `…/problem-leaderboard/spec.md` | Planned | TBD |
-| contest | Scheduling, registration, contest window, ranking, tab-switch deterrent | TBD (ADR) | `…/contest/spec.md` | Planned | TBD |
-| rating | ELO computation and rating history | TBD (ADR) | `…/rating/spec.md` | Planned | TBD |
-| gamification | XP, levels, streaks | TBD (ADR) | `…/gamification/spec.md` | Planned | TBD |
+| quiz | Quiz catalog, answering, explanations | problem-service (ADR-0007) | `…/quiz/spec.md` | Planned | TBD |
+| problem-leaderboard | Per-problem, per-language ranking and percentiles | submission-service (ADR-0007, reserved) | `…/problem-leaderboard/spec.md` | Planned | TBD |
+| contest | Scheduling, registration, contest window, ranking, tab-switch deterrent | contest-service, new (ADR-0007) | `…/contest/spec.md` | Planned | TBD |
+| rating | ELO computation and rating history | contest-service, new (ADR-0007) | `…/rating/spec.md` | Planned | TBD |
+| gamification | XP, levels, streaks | learning-service (ADR-0007, reserved) | `…/gamification/spec.md` | Planned | TBD |
 | statistics | Solved/attempted totals, distributions, tag histogram, difficulty counts, activity heatmap | submission-service | `…/statistics/spec.md` | Exists → Modified | TBD |
-| social-follow | Follow relationships, follower/following lists | TBD (ADR) | `…/social-follow/spec.md` | Planned | TBD |
-| discussion | Posts, tags (incl. premium tags), likes, comments, reports | TBD (ADR) | `…/discussion/spec.md` | Planned | TBD |
-| notification | Event-to-notification rules, in-app inbox, email, mute settings | TBD (ADR) | `…/notification/spec.md` | Planned | TBD |
-| learning-roadmap | Roadmaps per track, nodes, prerequisites, node content, progress, next-node recommendation | TBD (ADR) | `…/learning-roadmap/spec.md` | Planned | TBD |
+| social-follow | Follow relationships, follower/following lists | auth-service (ADR-0007, reserved) | `…/social-follow/spec.md` | Planned | TBD |
+| discussion | Posts, tags (incl. premium tags), likes, comments, reports | discussion-service, new (ADR-0007, reserved; moderation reuse per FRD-2) | `…/discussion/spec.md` | Planned | TBD |
+| notification | Event-to-notification rules, in-app inbox, email, mute settings | notification-service, new (ADR-0007) | `…/notification/spec.md` | Planned | TBD |
+| learning-roadmap | Roadmaps per track, nodes, prerequisites, node content, progress, next-node recommendation | learning-service, new (ADR-0007) | `…/learning-roadmap/spec.md` | Planned | TBD |
 | system-design-review | Whiteboard submissions, moderator grading | TBD (ADR) | `…/system-design-review/spec.md` | Planned (Could) | TBD |
-| ai-assistant | Question answering with links to AstraCode content, abstention, guardrails | TBD (ADR) | `…/ai-assistant/spec.md` | Planned | TBD |
-| kpi-analytics | KPI computation and admin dashboard | TBD (ADR) | `…/kpi-analytics/spec.md` | Planned | TBD |
+| ai-assistant | Question answering with links to AstraCode content, abstention, guardrails | ai-service, new (ADR-0007, reserved) | `…/ai-assistant/spec.md` | Planned | TBD |
+| kpi-analytics | KPI computation and admin dashboard | analytics-service, new (ADR-0007) | `…/kpi-analytics/spec.md` | Planned | TBD |
 
 ---
 
@@ -339,6 +339,6 @@ Postconditions: node and roadmap progress reflect the user's activity.
 
 | # | Point | Resolved by |
 |---|---|---|
-| FRD-1 | Owning service of each new capability (new services vs extending existing ones) | Data-ownership / service-boundary ADR (P2) |
+| FRD-1 | ~~Owning service of each new capability (new services vs extending existing ones)~~ Closed | ADR-0007 (§2.2 records the owners) |
 | FRD-2 | Whether `content-moderation` stays one capability for all content types or splits per content type | First content-moderation change |
 | FRD-3 | Capability owners (team members) | Team assignment |
