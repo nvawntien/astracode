@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | PRD |
-| Version | 0.5 (draft for team review) |
+| Version | 0.6 (draft for team review) |
 | Status | Draft |
 | Owner | Orchestrator (product owner) |
 | Location | `docs/product/prd.md` |
@@ -114,7 +114,7 @@ same scenario.
 | Pre-check effectiveness | Broken submissions stopped by the auto pre-check ÷ all broken submissions | ≥ 30% | G-2 |
 | Premium conversion | Monthly active users converting to premium (simulated) | ≥ 3% | G-5 |
 | Roadmap progress | New users completing ≥1 node in their first week | ≥ 30% | G-1 |
-| AI assistant usefulness | Answers rated helpful; answers whose link is clicked; abstention rate | ≥ 70%; ≥ 40%; 5–20% | G-4 |
+| AI assistant usefulness (once F-19 is delivered) | Answers rated helpful; abstention rate | ≥ 70%; 5–20% | G-4 |
 
 ### 2.5 Users, roles and entitlements
 
@@ -183,21 +183,24 @@ quality requirements in `nfr.md`.
 | F-10 | ELO rating | M4 Contests | Must | New |
 | F-22 | Contest tab-switch deterrent | M4 Contests | Could | New |
 | F-11 | Extended profile and statistics | M5 Profile & social | Should | Modified |
-| F-12 | Follow users | M5 Profile & social | Must | New |
+| F-12 | Follow users | M5 Profile & social | Should | New |
 | F-21 | Notifications | M5 Profile & social | Must (core events) | New |
-| F-13 | Discussion: blog posts | M6 Discussion | Must | New |
+| F-13 | Discussion: blog posts | M6 Discussion | Should | New |
 | F-14 | Premium discussion tags | M6 Discussion | Should | New |
 | F-15 | Learning roadmaps | M7 Roadmaps | Must (DSA track first) | New |
-| F-16 | Premium membership (simulated) | M8 Premium | Must (minimal) | New |
+| F-16 | Premium membership (simulated) | M8 Premium | Must (minimal, with Beyond LeetCode pilot content) | New |
 | F-17 | Beyond LeetCode track | M8 Premium | Could | New |
 | F-18 | System Design track | M8 Premium | Could | New |
-| F-19 | AI navigation and learning assistant | M9 Platform intelligence | Must | New |
+| F-19 | AI navigation and learning assistant | M9 Platform intelligence | Should (minimal; first Should) | New |
 | F-20 | Admin business KPI dashboard | M9 Platform intelligence | Must (minimal) | New |
 
 **Core scope rationale:** each Must feature exercises at least one graded concern — business/workload (contests,
-KPIs), data and event-driven integration (moderation, quizzes, contests, notifications), security (moderation of
-untrusted content, premium entitlement), load and reliability (contests) and AI (assistant, grounded on roadmap
-readings).
+KPIs), data and event-driven integration (moderation, quizzes, contests, notifications, roadmap progress), security
+(moderation of untrusted content, premium entitlement) and load and reliability (contests). The Must set closes the
+learning loop of G-1 for free users and protects premium content from the start (D-15, D-17).
+
+The AI assistant (F-19) is the **first Should**: its preparation (provider decision, `ai.md`, evaluation set) runs
+alongside the Musts, and its implementation starts once the Musts are demoable (D-16).
 
 ---
 
@@ -314,7 +317,7 @@ Acceptance (outcome):
 - Tag histogram is sorted from most to least solved.
 - Profiles are public.
 
-#### F-12 Follow users — *Must · New*
+#### F-12 Follow users — *Should · New*
 - *As a user, I want to follow other users and see my followers and who I follow.*
 
 Acceptance (outcome):
@@ -327,9 +330,9 @@ Acceptance (outcome):
 
 | Event | Recipient | Channel | Priority |
 |---|---|---|---|
-| Problem/quiz/post approved, changes requested or rejected (with reason/comment) | Author | In-app | Must |
-| Someone liked or commented on your post | Author | In-app | Must |
-| Someone followed you | Followed user | In-app | Must |
+| Problem/quiz approved, changes requested or rejected (with reason/comment) | Author | In-app | Must |
+| Post approved, changes requested or rejected; someone liked or commented on your post | Author | In-app | Should (with F-13) |
+| Someone followed you | Followed user | In-app | Should (with F-12) |
 | Registered contest starts soon | Registrant | In-app + email | Must |
 | Content waiting for review | Moderators | In-app digest (counts) | Must |
 | New post by someone you follow | Followers of the author | In-app | Should |
@@ -344,7 +347,7 @@ Acceptance (outcome):
 
 ### M6 — Discussion
 
-#### F-13 Discussion: blog posts — *Must · New*
+#### F-13 Discussion: blog posts — *Should · New*
 - *As a user, I want to publish knowledge-sharing posts with tags, and like and comment on others' posts.*
 - *As a moderator, I want to approve posts before they are public and remove reported comments.*
 
@@ -363,20 +366,24 @@ Acceptance (outcome):
 ### M7 — Learning roadmaps
 
 #### F-15 Learning roadmaps — *Must (DSA track first) · New*
-Must because roadmap readings are the main content the AI assistant (F-19) answers from. Roadmaps for the premium
-tracks follow F-17/F-18.
+Must because roadmaps close the learning loop of G-1 (learn → practise → track progress). Their readings are also
+the main content the AI assistant (F-19) answers from. A pilot roadmap for the Beyond LeetCode track is authored with
+the premium pilot content (F-16); full premium-track roadmaps follow F-17/F-18.
 Each track has one or more roadmaps (e.g. DSA: basics of programming → stack → queue → hash map → linked list …;
 Beyond LeetCode: separate OS, Networking, Computer Architecture and Low-Level Design roadmaps).
 
 - *As a user, I want a visual roadmap of sub-topics with prerequisites, so that I know what to learn next.*
 - *As a user, I want each node to give me a reading, practice items and external resources.*
 - *As a user, I want to track my progress and continue where I left off.*
+- *As a signed-in user, I want my home page to show where to continue learning.*
 
 Acceptance (outcome):
 - A roadmap is a graph of nodes with prerequisite links (a node may have several prerequisites).
 - Each node has Reading, Practice and Resources blocks; a practice item can belong to several nodes.
 - A node is completed when its reading is marked done and **all** its practice items are solved; roadmap progress shows completed nodes.
 - Each roadmap recommends the next node for the user.
+- Signed-in users see a "Continue learning" block on their home page: the roadmap they are following, its
+  completion percentage and the recommended next node.
 - Roadmaps and readings are authored by moderators/admins; premium-track roadmaps are visible but locked for free users.
 - The AI assistant (F-19) uses readings to answer questions.
 
@@ -385,7 +392,10 @@ Acceptance (outcome):
 ### M8 — Premium
 
 #### F-16 Premium membership (simulated) — *Must (minimal) · New*
-Minimal scope: the entitlement itself; premium tracks are F-17/F-18.
+Minimal scope: the entitlement itself, plus a small **Beyond LeetCode pilot**: moderator-authored problems,
+quizzes and one roadmap in the Beyond LeetCode track, built with the same features as the DSA track. The full
+premium tracks are F-17/F-18. Premium is delivered early (M1) so that every content feature enforces track access
+from its first version (D-17).
 
 - *As a user, I want to upgrade to premium so that I can access premium tracks and discussion.*
 - *As an admin, I want to grant or revoke premium.*
@@ -393,8 +403,11 @@ Minimal scope: the entitlement itself; premium tracks are F-17/F-18.
 Acceptance (outcome):
 - Premium is granted without real payment (admin grant or mock checkout) for a fixed duration and expires automatically.
 - Premium content is never accessible to users without an active entitlement.
+- The Beyond LeetCode pilot content is locked (visible as teasers) for free users and unlocked for premium users.
 
 #### F-17 Beyond LeetCode track — *Could · New*
+The pilot content of this track is part of F-16 (Must); this feature is the full track.
+
 - *As a premium user, I want coding problems, quizzes and one roadmap per topic (OS, networking, computer architecture, low-level design), including interview questions tagged by company.*
 
 Acceptance (outcome):
@@ -416,15 +429,19 @@ Acceptance (outcome):
 
 ### M9 — Platform intelligence
 
-#### F-19 AI navigation and learning assistant — *Must · New*
+#### F-19 AI navigation and learning assistant — *Should (minimal; first Should) · New*
 An assistant for signed-in users that answers short questions and points them to the right AstraCode page.
+
+Minimal scope: single-turn questions; corpus of approved readings and approved problem/quiz statements (no
+solutions); answers in English, with Vietnamese questions handled best-effort; helpful/not-helpful rating. Out of
+scope: multi-turn conversation, streaming answers, site pages in the corpus, link-click tracking.
 
 - *As a new user, I want to ask "where do I start?" and get a short answer with a link to the right page (e.g. the first node of the DSA roadmap).*
 - *As a learner, I want to ask "what is a hash map?" and get a brief explanation with a link to the hash map reading and related problems.*
 - *As a user, I want the assistant to say when it does not know rather than invent an answer.*
 
 Acceptance (outcome):
-- Available to signed-in users only, in English and Vietnamese.
+- Available to signed-in users only; answers in English.
 - Answers are short, grounded in AstraCode's own content, and include at least one link to AstraCode content when relevant content exists; otherwise the assistant says it does not know.
 - Never reveals solutions, and refuses questions about problems of a running contest.
 - Never exposes premium content to users without the entitlement.
@@ -449,16 +466,16 @@ feature flags) is described in `delivery-plan.md` and `docs/architecture/deploym
 | Milestone | Product content | Course parts exercised |
 |---|---|---|
 | M0 Foundation | Product documents and baseline specs; existing platform running on Azure | P1, P2, P3 |
-| M1 Community core | F-03 (incl. Contributor removal), F-06, F-12, F-16 minimal, F-21 core events | P2, P3 |
-| M2 Competition and learning | F-09, F-10, F-15 (DSA track, with its readings) | P2, P4 |
-| M3 Discussion and AI | F-13, F-19, F-20 | P3, P4, P5 |
-| M4 Extensions | Should features (F-04, F-07, F-11, F-14), then Could features as capacity allows | P2 |
+| M1 Community core and premium | F-03 (incl. Contributor removal), F-06, F-16 minimal with Beyond LeetCode pilot content, F-21 core events | P2, P3 |
+| M2 Competition and learning | F-09, F-10, F-15 (DSA track, with its readings and "Continue learning"); AI preparation (provider decision, `ai.md`, evaluation set) | P2, P4, P5 |
+| M3 KPIs and production readiness | F-20; SLOs, security hardening, drills | P3, P4 |
+| M4 Extensions | F-19 (minimal) first, then the other Should features (F-12, F-13, F-04, F-07, F-11, F-14), then Could features as capacity allows | P2, P5 |
 
 ### 4.2 Definition of release-ready
 
 - All Must features demoable end-to-end on Azure production.
 - Every NFR in `nfr.md` verified or explicitly explained.
-- AI assistant evaluation report published (`docs/evidence/ai-eval/`).
+- AI assistant evaluation report published (`docs/evidence/ai-eval/`) if F-19 is delivered.
 - Load-test results on the contest critical path published (`docs/evidence/load-tests/`).
 
 ---
@@ -477,7 +494,7 @@ Technical risks are tracked in ADRs and `docs/codebase/TECH_DEBT.md`.
 
 | Risk | Impact | Mitigation (owner doc) |
 |---|---|---|
-| Scope is large for a 6-person team | Must features unfinished | Core-first priorities; pilot change first (`delivery-plan.md`) |
+| Scope is large for a 6-person team | Must features unfinished | Core-first priorities; Must set reduced (D-15, D-16); pilot change first (`delivery-plan.md`) |
 | Spam and review-queue flooding | Moderators overwhelmed; low-quality catalog | Eligibility, pending-item limit, automatic pre-check, reporting, suspension (`security.md`) |
 | Premium content reaches free users (through product defects or users copying it into free tracks or comments) | Premium loses value | Entitlement enforcement (`nfr.md`, `security.md`); moderator checklist; reports; content policy |
 | Malicious community content (harmful testcases or solutions) | Platform abuse or outage | Sandboxed execution and limits (`security.md`) |
@@ -509,7 +526,7 @@ spec is the source of truth.**
 | quiz | Single correct answer from 4 options; unlimited retries; XP only for the first correct attempt; explanation shown after answering. |
 | gamification | XP: problems Easy/Medium/Hard = 10/20/40; quizzes = 2/5/10; first success only; contest solves award normal problem XP. XP drives a displayed level only. |
 | gamification | Streak = consecutive UTC days with ≥1 accepted problem, correct quiz or contest participation. Heatmap day count = problems submitted + quizzes answered + contests joined. |
-| contest | Weekly, fixed start, 90 minutes, 4 problems (easy → hard), scheduled by moderators/admins. Problems only. Registration required; late join allowed. Ranking: solved ↓, then penalty ↑ (sum of solve times + 5 min per wrong attempt before acceptance). Live leaderboard, no freeze. Afterwards problems become public practice. |
+| contest | Weekly, fixed start, 90 minutes, 4 problems (easy → hard), scheduled by moderators/admins. Problems only. Registration required; late join allowed. Ranking: solved ↓, then penalty ↑ (sum of solve times + 5 min per wrong attempt before acceptance). Live leaderboard, no freeze. Afterwards problems become public practice, so contest problems come from the free DSA track only. |
 | contest | Tab-switch deterrent: rule shown before start; warning on 1st and 2nd switch; from the 3rd switch the participant may finish but is unrated and flagged for moderator review. |
 | rating | Codeforces-style Elo based on expected vs actual rank; initial 1500; only participants with ≥1 submission are rated; contest authors/schedulers and flagged participants are not rated. |
 | social-follow | One-way follow without approval; follower and following lists on profile; no activity feed. |
@@ -518,7 +535,7 @@ spec is the source of truth.**
 | learning-roadmap | Roadmap = DAG of nodes (multiple prerequisites allowed); one level only (no sub-roadmaps). Node blocks: Reading, Practice (many-to-many), Resources (external links only). Node complete = reading marked done + 100% of practice items solved. Each roadmap recommends the next node. Authored by moderators/admins. |
 | judging | Template mode: C++ first; moderator/admin-authored only; banned-include check; concurrency problems run repeated stress tests and are best-effort. |
 | system-design-review | Predefined components (load balancer, cache, database, queue, CDN, …), arrows and notes; submission = diagram + written explanation; moderator score 0–10 + feedback; XP = difficulty XP × score ÷ 10. |
-| ai-assistant | Signed-in users only; English and Vietnamese; corpus = approved readings, approved problem/quiz statements (no solutions), site pages; no community posts; refuses running-contest problems. |
+| ai-assistant | Signed-in users only; answers in English, Vietnamese questions best-effort; single-turn; corpus = approved readings, approved problem/quiz statements (no solutions); no site pages, no community posts; refuses running-contest problems. |
 
 ## Appendix B — Decision log
 
@@ -538,6 +555,10 @@ spec is the source of truth.**
 | D-12 | Quality guarantees moved to `nfr.md`; flows to `frd.md`; definitions to `glossary.md` | 2026-11-18 |
 | D-13 | Learning roadmaps (DSA track) promoted to Must, because they provide the AI assistant's main content | 2026-11-18 |
 | D-14 | Team works in the original repository (`nvawntien/astracode`) and keeps its develop → main → tag release flow; agents: Claude Code and Codex | 2026-11-18 |
+| D-15 | Follow users (F-12) and Discussion (F-13) moved from Must to Should; their notification events move with them | 2026-11-24 |
+| D-16 | AI assistant (F-19) moved from Must to Should with a minimal scope; it is the first Should, and its preparation (provider ADR, `ai.md`, evaluation set) stays in M2 | 2026-11-24 |
+| D-17 | Premium (F-16) stays Must and early (M1), so that every content feature enforces track access from its first version; launch premium content is a moderator-authored Beyond LeetCode pilot; the full F-17 stays Could | 2026-11-24 |
+| D-18 | Roadmaps (F-15) add a "Continue learning" block on the home page; contest problems come from the free DSA track only; roadmaps stay Must because they close the learning loop (G-1), not only because they feed the AI | 2026-11-24 |
 
 ## Appendix C — Hand-off to other documents (temporary)
 
@@ -547,7 +568,7 @@ contains it.
 | Content | Target document |
 |---|---|
 | Premium entitlement threat model (beyond NFR-S03) | `security.md` |
-| AI corpus composition (approved readings, problem/quiz statements without solutions, site pages; no community posts) | `ai.md` |
+| AI corpus composition (approved readings, problem/quiz statements without solutions; no site pages, no community posts) | `ai.md` |
 | LLM provider choice (Gemini) and vector storage (pgvector) | ADR; `ai.md` |
 | Azure topology: subscription layout, VM-centric vs managed services, DR target subscription | ADRs; `deployment.md`; `finops.md` |
 | Walking skeleton, IaC-provisioned staging, auto-deploy to staging, feature flags, judge-worker scaling | `delivery-plan.md`; `deployment.md`; `reliability-observability.md` |
