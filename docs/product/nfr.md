@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | NFR |
-| Version | 0.1 (draft for team review) |
+| Version | 0.2 (draft for team review) |
 | Status | Draft |
 | Owner | Infra/CI owner, with Orchestrator |
 | Location | `docs/product/nfr.md` |
@@ -16,7 +16,11 @@ Architecture documents and evidence folders referenced here may be planned; see 
 > and ADRs, which reference NFR IDs) and does **not** hold measured results (→ `docs/evidence/`).
 >
 > Targets are **proposals** sized for the launch scenario and the budget; they change only by PR. Priority:
-> **Must** = verified before release-ready · **Should** = verified if time allows, otherwise explained.
+> **Must** = verified before release-ready · **Should** = verified if time allows, otherwise explained ·
+> **Must (with F-19)** = Must once the AI assistant (F-19, a Should feature) is delivered; not verified otherwise.
+>
+> A Must NFR covers the features it lists only once they are delivered: parts that concern Should or Could features
+> (for example posts and follow in NFR-P01/P02) are verified when those features ship.
 
 ---
 
@@ -56,7 +60,7 @@ load profile used for testing is defined in NFR-C01.
 | NFR-P03 | Time from submission to verdict, for problems with time limit ≤ 2 s and ≤ 20 testcases | p95 ≤ 10 s normal load; p95 ≤ 30 s at contest peak (NFR-C01) | k6 contest scenario; trace submit→verdict | Must | F-02, F-09, UC-02, UC-04 |
 | NFR-P04 | Contest leaderboard reflects an accepted submission | ≤ 10 s after verdict (p95) | Contest load test with leaderboard probe | Must | F-09, UC-04 |
 | NFR-P05 | In-app notification appears after the triggering event | ≤ 10 s (p95) | Integration test + metric (event time → delivery time) | Should | F-21 |
-| NFR-P06 | AI assistant returns a complete answer | p95 ≤ 8 s | AI eval run timings; production AI latency metric | Must | F-19, UC-06 |
+| NFR-P06 | AI assistant returns a complete answer | p95 ≤ 8 s | AI eval run timings; production AI latency metric | Must (with F-19) | F-19, UC-06 |
 | NFR-P07 | Main pages load quickly in the browser | Largest Contentful Paint p75 ≤ 2.5 s on desktop | Lighthouse in CI on key pages | Should | — |
 | NFR-P09 | Custom run returns its result, for problems with time limit ≤ 2 s and user input ≤ 64 KB | p95 ≤ 5 s normal load | k6 scenario; trace | Should | F-02, UC-02 |
 | NFR-P08 | Automatic pre-check completes | ≤ 2 min for a coding problem within package limits (NFR-S06) | Integration test with reference packages | Should | F-03, UC-01 |
@@ -83,8 +87,8 @@ load profile used for testing is defined in NFR-C01.
 | NFR-A01 | SLO — core journeys available (site loads, sign-in, catalog, submit) | ≥ 99.5% per 30 days (error budget ≈ 3.6 h/month) | Synthetic probes every minute; SLO dashboard | Must | — |
 | NFR-A02 | SLO — server errors | 5xx ≤ 1% of requests per 30 days | Gateway metrics; SLO dashboard | Must | — |
 | NFR-A03 | SLO — judging completeness | ≥ 99.9% of submissions reach a final verdict or system-error status within 5 min | Metric: submissions without final state after 5 min | Must | F-02, F-09 |
-| NFR-A04 | Graceful degradation: failure of the AI assistant, notifications, KPI analytics or problem leaderboards does not break sign-in, catalog, submit or judging | Core journeys keep working with each optional capability stopped | Fault-injection test (stop each optional component) | Must | F-19, F-20, F-21, F-04 |
-| NFR-A05 | AI unavailability fallback: when the LLM call fails or exceeds the timeout, the assistant shows search results instead | Fallback shown within 15 s of the question | Test with LLM endpoint blocked | Must | F-19, UC-06 |
+| NFR-A04 | Graceful degradation: failure of the AI assistant, notifications, KPI analytics or problem leaderboards does not break sign-in, catalog, submit or judging | Core journeys keep working with each optional capability stopped | Fault-injection test (stop each delivered optional component) | Must | F-19, F-20, F-21, F-04 |
+| NFR-A05 | AI unavailability fallback: when the LLM call fails or exceeds the timeout, the assistant shows search results instead | Fallback shown within 15 s of the question | Test with LLM endpoint blocked | Must (with F-19) | F-19, UC-06 |
 | NFR-A06 | No planned deployment or maintenance during a contest window | 0 deployments during contests | Pipeline check against contest schedule; deployment log | Must | F-09 |
 
 ---
@@ -110,7 +114,7 @@ load profile used for testing is defined in NFR-C01.
 |---|---|---|---|---|---|
 | NFR-S01 | All non-public endpoints require an authenticated session | 100% of non-public routes | Automated route test with anonymous client | Must | F-01 |
 | NFR-S02 | Authorization is enforced server-side: role checks (moderator/admin) and ownership checks on every write; no UI-only checks | 100% of write endpoints | Authorization test suite per role | Must | F-03, F-13 |
-| NFR-S03 | **Premium entitlement is enforced on every read path**: pages and API, search, AI assistant retrieval and answers, notification previews, leaderboards, roadmap content. Users without access receive teasers only | 0 premium content leaks | Access-matrix test (free vs premium user on every path); AI red-team set (NFR-AI04) | Must | F-14, F-16, F-17, F-18, F-19, F-21 |
+| NFR-S03 | **Premium entitlement is enforced on every read path**: pages and API, search, AI assistant retrieval and answers, notification previews, leaderboards, roadmap content. Users without access receive teasers only | 0 premium content leaks | Access-matrix test (free vs premium user on every path), extended by every change that adds a read path; AI red-team set (NFR-AI04) once F-19 is delivered | Must | F-14, F-16, F-17, F-18, F-19, F-21 |
 | NFR-S04 | Submission permissions (eligibility, track access, pending limit) are enforced server-side | 100% of submission endpoints | API tests bypassing the UI | Must | F-03, F-06 |
 | NFR-S05 | All user and community code — submissions, custom runs, reference solutions, pre-checks — runs only in the sandbox with CPU, memory, time, process and output limits, and without network access | 100% of executions | Sandbox configuration review; abuse tests (fork bomb, infinite loop, network call) | Must | F-02, F-03 |
 | NFR-S06 | Uploaded packages are validated: size, file count and format limits | Limits defined and enforced | Upload tests with oversized/malformed packages | Must | F-03 |
@@ -120,7 +124,7 @@ load profile used for testing is defined in NFR-C01.
 | NFR-S10 | Dependencies and container images are scanned; critical vulnerabilities block release | 0 unwaived critical findings at release | CI scan reports | Must | — |
 | NFR-S11 | Moderator and admin actions are audited (actor, action, target, time) | 100% of moderation and admin actions | Audit-log test | Must | F-03, F-16, UC-08 |
 | NFR-S12 | Each service accesses only its own data store with least-privilege credentials | 100% of services | Credential/permission review | Should | — |
-| NFR-S13 | Privacy: no personal data (email, name, account IDs) sent to the LLM provider; no passwords, tokens or personal data in logs | 0 violations | Log and prompt sampling review | Must | F-19 |
+| NFR-S13 | Privacy: no personal data (email, name, account IDs) sent to the LLM provider; no passwords, tokens or personal data in logs | 0 violations | Log and prompt sampling review | Must (prompt part with F-19) | F-19 |
 
 ---
 
@@ -132,15 +136,15 @@ requests, running-contest questions, premium-content probes and prompt-injection
 
 | ID | Requirement | Target | Verification | Priority | Related |
 |---|---|---|---|---|---|
-| NFR-AI01 | Every link in an answer points to an existing page the user can access | 100% | Automatic link validation on eval set and in production | Must | F-19 |
-| NFR-AI02 | Answers are correct and relevant to in-corpus questions | ≥ 80% judged correct and relevant | Eval set scored by LLM judge with human spot-check of ≥ 20% | Must | F-19 |
-| NFR-AI03 | The assistant abstains on out-of-corpus questions | ≥ 90% abstention on the out-of-corpus subset | Eval set | Must | F-19 |
-| NFR-AI04 | Guardrails hold: no solutions, no premium content without entitlement, refusal for running-contest problems | 0 violations on the red-team subset | Eval set | Must | F-19 |
-| NFR-AI05 | Prompt-injection attempts do not change assistant behaviour | 0 policy violations on the injection subset | Eval set | Must | F-19 |
-| NFR-AI06 | At least two configurations (e.g. models, retrieval settings) are compared before choosing one | Comparison report with metrics above | `docs/evidence/ai-eval/` | Must | F-19 |
-| NFR-AI07 | Any change to model, prompt or retrieval is regression-evaluated before release | Eval run attached to the change | Gate 2 checklist | Must | F-19 |
-| NFR-AI08 | Token use per answer is bounded | Average ≤ 3,000 input and ≤ 400 output tokens; per-user limit on questions per day | AI usage metrics | Must | F-19 |
-| NFR-AI09 | Each AI request is observable: model, prompt version, retrieved items, tokens, latency, outcome, user feedback | 100% of requests | Trace/log sampling | Must | F-19, F-20 |
+| NFR-AI01 | Every link in an answer points to an existing page the user can access | 100% | Automatic link validation on eval set and in production | Must (with F-19) | F-19 |
+| NFR-AI02 | Answers are correct and relevant to in-corpus questions | ≥ 80% judged correct and relevant | Eval set scored by LLM judge with human spot-check of ≥ 20% | Must (with F-19) | F-19 |
+| NFR-AI03 | The assistant abstains on out-of-corpus questions | ≥ 90% abstention on the out-of-corpus subset | Eval set | Must (with F-19) | F-19 |
+| NFR-AI04 | Guardrails hold: no solutions, no premium content without entitlement, refusal for running-contest problems | 0 violations on the red-team subset | Eval set | Must (with F-19) | F-19 |
+| NFR-AI05 | Prompt-injection attempts do not change assistant behaviour | 0 policy violations on the injection subset | Eval set | Must (with F-19) | F-19 |
+| NFR-AI06 | At least two configurations (e.g. models, retrieval settings) are compared before choosing one | Comparison report with metrics above | `docs/evidence/ai-eval/` | Must (with F-19) | F-19 |
+| NFR-AI07 | Any change to model, prompt or retrieval is regression-evaluated before release | Eval run attached to the change | Gate 2 checklist | Must (with F-19) | F-19 |
+| NFR-AI08 | Token use per answer is bounded | Average ≤ 3,000 input and ≤ 400 output tokens; per-user limit on questions per day | AI usage metrics | Must (with F-19) | F-19 |
+| NFR-AI09 | Each AI request is observable: model, prompt version, retrieved items, tokens, latency, outcome, user feedback | 100% of requests | Trace/log sampling | Must (with F-19) | F-19, F-20 |
 
 ---
 
@@ -150,7 +154,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 |---|---|---|---|---|---|
 | NFR-O01 | Structured logs with a correlation ID that follows a request across gateway, services, broker and judge worker | 100% of services | Trace one submission end-to-end by ID | Must | — |
 | NFR-O02 | Metrics for the four golden signals (latency, traffic, errors, saturation) per service, plus broker consumer lag and judge throughput | All services | Dashboard review | Must | — |
-| NFR-O03 | Distributed tracing on the submit → verdict path and the AI assistant path | Both paths traced | Trace screenshots in evidence | Must | UC-02, UC-06 |
+| NFR-O03 | Distributed tracing on the submit → verdict path and the AI assistant path (with F-19) | Both paths traced | Trace screenshots in evidence | Must | UC-02, UC-06 |
 | NFR-O04 | Dashboards: SLOs, contest operations, business KPIs (PRD §2.4), cost | 4 dashboards | Evidence screenshots | Must | F-20 |
 | NFR-O05 | Alerts reach the team for: SLO burn, error-rate spikes, judge backlog, disk/memory saturation, budget thresholds | Each alert tested once | Alert test log | Must | — |
 | NFR-O06 | During an incident the team can answer within 5 minutes: is the system healthy, are users affected, which component fails, since when, what changed | Answered in a game-day exercise | Game-day record in evidence | Should | — |
@@ -181,7 +185,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 | NFR-F01 | Spend stays within credits | Each subscription ≤ its ~$100 credit for the semester; burn rate tracked weekly | Azure cost reports; `finops.md` | Must | — |
 | NFR-F02 | Budget alerts on every subscription | Alerts at 50%, 80%, 100% | Alert configuration review | Must | — |
 | NFR-F03 | Non-production compute stops outside working hours | Staging off ≥ 12 h/day | Schedule configuration; cost report | Must | — |
-| NFR-F04 | Unit costs are reported | Cost per 1,000 submissions, per contest, per AI answer, per active user | `finops.md` | Must | F-20 |
+| NFR-F04 | Unit costs are reported | Cost per 1,000 submissions, per contest, per active user; per AI answer once F-19 is delivered | `finops.md` | Must | F-20 |
 | NFR-F05 | Cost at 5× the launch scenario is estimated | Documented estimate with top 3 cost drivers | `finops.md` | Must | — |
 
 ---
@@ -192,7 +196,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 |---|---|---|---|---|---|
 | NFR-U01 | Responsive web interface | Usable from 360 px width | Manual check on key pages | Should | — |
 | NFR-U02 | Supported browsers | Latest two versions of Chrome, Edge, Firefox, Safari | Manual smoke test | Should | — |
-| NFR-U03 | Languages | UI in English; AI assistant answers in English and Vietnamese | Eval set includes both languages | Must | F-19 |
+| NFR-U03 | Languages | UI in English; AI assistant answers in English and handles Vietnamese questions best-effort | Manual check; Vietnamese is not part of the eval set | Must (with F-19) | F-19 |
 
 ---
 

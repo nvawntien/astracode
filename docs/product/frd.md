@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document ID | FRD |
-| Version | 0.1 (draft for team review) |
+| Version | 0.2 (draft for team review) |
 | Status | Draft |
 | Owner | Orchestrator, with capability owners |
 | Location | `docs/product/frd.md` |
@@ -101,17 +101,17 @@ capability (or per tightly coupled group).
 | F-06 Quizzes | Must | quiz | content-moderation | membership, notification |
 | F-07 XP and levels | Should | gamification | user-profile | submission, quiz, contest, system-design-review |
 | F-08 Streaks | Could | — | gamification | statistics |
-| F-09 Weekly contests and live leaderboard | Must | contest | realtime-updates | submission, judging, problem-catalog, notification |
+| F-09 Weekly contests and live leaderboard | Must | contest | realtime-updates | submission, judging, problem-catalog (DSA track only), notification |
 | F-10 ELO rating | Must | rating | user-profile | contest |
 | F-11 Extended profile and statistics | Should | — | statistics, user-profile | quiz, contest, rating, gamification |
-| F-12 Follow users | Must | social-follow | user-profile | notification |
-| F-13 Discussion: blog posts | Must | discussion | content-moderation | notification |
+| F-12 Follow users | Should | social-follow | user-profile | notification |
+| F-13 Discussion: blog posts | Should | discussion | content-moderation | notification |
 | F-14 Premium discussion tags | Should | — | discussion | membership |
 | F-15 Learning roadmaps | Must (DSA first) | learning-roadmap | — | problem-catalog, quiz, membership, submission |
-| F-16 Premium membership | Must (minimal) | membership | identity-session | notification |
+| F-16 Premium membership | Must (minimal, with Beyond LeetCode pilot content) | membership | identity-session | notification; problem-catalog, quiz, learning-roadmap (pilot content) |
 | F-17 Beyond LeetCode track | Could | — | problem-catalog, quiz, learning-roadmap | membership, judging |
 | F-18 System Design track | Could | system-design-review | content-moderation, quiz, learning-roadmap | membership, gamification, notification |
-| F-19 AI navigation and learning assistant | Must | ai-assistant | — | learning-roadmap, problem-catalog, quiz, membership, contest, identity-session |
+| F-19 AI navigation and learning assistant | Should (minimal) | ai-assistant | — | learning-roadmap, problem-catalog, quiz, membership, contest, identity-session |
 | F-20 Admin business KPI dashboard | Must (minimal) | kpi-analytics | — | all capabilities that produce KPI data |
 | F-21 Notifications | Must (core events) | notification | realtime-updates | content-moderation, discussion, social-follow, contest, membership |
 | F-22 Contest tab-switch deterrent | Could | — | contest, rating | notification |
@@ -122,7 +122,7 @@ Capabilities modified or used by many features need a single owner and careful s
 
 | Capability | Touched by | Implication |
 |---|---|---|
-| membership | F-02, F-03, F-06, F-14, F-15, F-16, F-17, F-18, F-19 | Build the minimal entitlement early (M1); every content capability depends on it |
+| membership | F-02, F-03, F-06, F-14, F-15, F-16, F-17, F-18, F-19 | Build the minimal entitlement early (M1, PRD D-17); every content capability enforces track access from its first version |
 | content-moderation | F-03, F-05, F-06, F-13, F-18 | Generic lifecycle first (F-03); other content types plug in later |
 | notification | F-03, F-06, F-09, F-12, F-13, F-16, F-18, F-21, F-22 | Define the event contract early; producers can be built before the consumer |
 | user-profile / statistics | F-07, F-10, F-11, F-12 | Batch profile changes to avoid parallel modifications of the same spec |
@@ -260,7 +260,7 @@ Main flow:
 1. User asks a question (English or Vietnamese). — *ai-assistant*
 2. Assistant retrieves relevant AstraCode content the user is allowed to access. — *ai-assistant, membership, learning-roadmap, problem-catalog, quiz*
 3. Assistant answers briefly with links to the relevant pages. — *ai-assistant*
-4. User optionally rates the answer; the rating and link clicks are recorded for KPIs. — *ai-assistant, kpi-analytics*
+4. User optionally rates the answer; the rating is recorded for KPIs. — *ai-assistant, kpi-analytics*
 
 Alternatives:
 - 2a. No relevant content → assistant says it does not know and suggests search.
@@ -323,7 +323,7 @@ Postconditions: every decision recorded with moderator and time (feeds the revie
 | Related | F-15, F-19 |
 
 Main flow:
-1. User opens a roadmap and sees progress and the recommended next node. — *learning-roadmap*
+1. User opens a roadmap (or the "Continue learning" block on the home page) and sees progress and the recommended next node. — *learning-roadmap*
 2. User reads the node's reading and marks it done. — *learning-roadmap*
 3. User solves the node's practice items (UC-02, UC-03). — *submission, quiz*
 4. When the reading is done and all practice items are solved, the node is marked complete and the next node is recommended. — *learning-roadmap*
