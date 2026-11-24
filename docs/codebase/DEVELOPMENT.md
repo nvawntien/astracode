@@ -18,6 +18,8 @@ make ps
 ```
 
 `make up` runs `docker compose --profile dev --profile worker up -d --build`.
+`make start` uses the same startup path. `make stop` keeps the containers
+and volumes for the next start.
 PostgreSQL must be healthy before the Goose job starts. The job migrates Auth,
 Problem and Submission sequentially, then Compose starts them. Use `--build`
 after migration changes so Compose uses an image containing the current SQL.

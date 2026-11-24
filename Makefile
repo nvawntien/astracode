@@ -1,12 +1,14 @@
 COMPOSE := docker compose --profile dev --profile worker
 
-.PHONY: help up down restart build logs ps migrate seed test test-quick test-db spec-validate
+.PHONY: help up down start stop restart build logs ps migrate seed test test-quick test-db spec-validate
 
 help:
 	@printf '%s\n' \
 	  'make help                        List development commands' \
 	  'make up                          Build and start the development stack' \
 	  'make down                        Stop the stack and keep volumes' \
+	  'make start                       Build and start the stack (alias for up)' \
+	  'make stop                        Stop the stack and keep containers and volumes' \
 	  'make restart                     Recreate the stack through normal startup' \
 	  'make build [SERVICE=...]          Build local images' \
 	  'make logs [SERVICE=...]           Follow container logs' \
@@ -23,6 +25,11 @@ up:
 
 down:
 	$(COMPOSE) down
+
+start: up
+
+stop:
+	$(COMPOSE) stop
 
 restart:
 	$(COMPOSE) down
