@@ -19,6 +19,8 @@ supersedes the earlier assumption of a production cutover.
   Future deployments must successfully migrate before activating applications.
   Managed rollout, backup, release compatibility planning and deployment
   orchestration are outside this change.
+- The maintainer also authorized a small development Makefile and skipping the
+  Docker build steps for documentation-only PRs.
 
 ## Capability and dependencies
 

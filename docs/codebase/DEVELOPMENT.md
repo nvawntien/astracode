@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Use Go 1.25.8, Docker Engine with Compose 2.24.4+, and Node.js 22.12+ in the
+Use Go 1.25.8, Make, Docker Engine with Compose 2.24.4+, and Node.js 22.12+ in the
 Node 22 series for the frontend. The migration image includes the official
 Goose v3.30.0 CLI pinned by OCI digest. Docker builds the migration image
 without a host Go toolchain.
@@ -13,23 +13,27 @@ Prepare the three ignored files under `environment/` and the local Envoy JWK
 using the root quick start. [Quick start](../../README.md#start-the-local-judge-stack)
 
 ```bash
-docker compose --profile dev --profile worker up -d --build
+make up
+make ps
 ```
 
+`make up` runs `docker compose --profile dev --profile worker up -d --build`.
 PostgreSQL must be healthy before the Goose job starts. The job migrates Auth,
 Problem and Submission sequentially, then Compose starts them. Use `--build`
 after migration changes so Compose uses an image containing the current SQL.
-If a migration fails, inspect `docker compose logs migrate`, fix the cause,
+If a migration fails, inspect `make logs SERVICE=migrate`, fix the cause,
 and rerun. Goose skips applied versions and retains earlier committed work.
 Run one migration invocation at a time.
 
 The local database owners are `auth_app`, `problem_app` and
-`submission_app`. You can override their development passwords through
+`submission_app`. Each local role runs its own migrations and application
+queries. Managed deployments need separate migration and runtime privileges.
+You can override the local development passwords through
 `ASTRA_AUTH_DB_PASSWORD`, `ASTRA_PROBLEM_DB_PASSWORD`, and
 `ASTRA_SUBMISSION_DB_PASSWORD` before the first start. The init script runs
 when the PostgreSQL volume is empty. Changed environment values require
 updating the corresponding existing database password. Set
-`ASTRA_DEV_POSTGRES_PORT=55432` on the Compose command if host port 5432 is
+`ASTRA_DEV_POSTGRES_PORT=55432` on the `make up` command if host port 5432 is
 occupied. The stack still connects to `postgres:5432` internally.
 
 ### Start with fresh local data
@@ -41,7 +45,7 @@ and frees the fixed container names and ports. For example, start a new
 project with:
 
 ```bash
-docker compose -p astracode-fresh --profile dev --profile worker up -d --build
+COMPOSE_PROJECT_NAME=astracode-fresh make up
 ```
 
 A reset is optional. Obtain separate approval for the exact disposable
@@ -56,9 +60,10 @@ project when using a different local dataset.
 Apply all migrations explicitly before starting a Go service or seed.
 
 ```bash
-docker compose run --build --rm migrate
+make migrate
 ```
 
+`make migrate` runs `docker compose run --build --rm migrate`.
 For direct execution, set `ASTRACODE_LOCAL_CONFIG` to the service config
 directory, set `DATABASE_HOST=127.0.0.1` and `DATABASE_PORT` to the published
 port, and supply that service's local `DATABASE_USER` and `DATABASE_PASSWORD`.
@@ -67,14 +72,14 @@ other dependencies. From the service directory run `go run ./cmd/server`.
 The server binds to loopback with this configuration. Use Compose for
 gateway and official judging integration.
 
-To seed curated Problem tags, use the Problem database connection settings and
-run `go run ./cmd/seed-tags` from `services/problem`. Repeating the seed
-preserves existing rows.
+Run `make seed` with the local PostgreSQL service running and migrated. It
+uses the published port and local Problem credentials to run the existing
+`go run ./cmd/seed-tags` command. Repeating the seed preserves existing rows.
 
 ## Build, test and quality checks
 
-Run `QUICK=1 scripts/verify.sh` at session start and `scripts/verify.sh` before
-finishing a change. Both modes run Go tests and vet for shared packages and
+Run `make test-quick` at session start and `make test` before finishing a
+change. Both invoke `scripts/verify.sh` and run Go tests and vet for shared packages and
 services, website typechecking, local Compose configuration validation, and
 strict OpenSpec validation when specs or active changes exist. Both modes reuse
 healthy website dependencies and run `npm ci` from the lockfile when the
@@ -90,7 +95,7 @@ PostgreSQL integration suites, or container image builds.
 Run the PostgreSQL suites against the current checkout.
 
 ```bash
-bash scripts/test-postgres-integration.sh
+make test-db
 ```
 
 The script creates a fresh PostgreSQL 15.6 container for each suite on a
@@ -110,6 +115,11 @@ GitHub Actions workflows in `.github/workflows/`:
 | `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
 | `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
+
+Documentation-only PRs skip the Docker build steps and still report all six
+required image checks. CI checks both paths of renames. Code, migration SQL,
+configuration and tooling changes run the image builds, as do indeterminate
+comparisons, pushes to `main`, and release verification calls.
 
 Tests are colocated with source (`*_test.go`) across shared packages, services, and worker adapters/use cases. A safe non-writing discovery/build sequence is:
 

@@ -44,3 +44,14 @@ accepted ADR history. The infrastructure guide requires successful migrations
 before deployment activation. Managed rollout design is future work.
 [ADR-0011](../../../docs/architecture/adr/0011-local-goose-migrations.md) ·
 [NFR-D05](../../../docs/product/nfr.md)
+
+## Developer tooling
+
+A root Makefile wraps the existing Compose and verification commands. Restart
+goes through the same startup and migration prerequisites as `up`. The seed
+reuses the existing Go command and the running local PostgreSQL configuration.
+
+CI compares the PR head to its merge base with the base branch. A
+documentation-only diff skips the Docker build steps while all six named
+image checks still report. All other diffs, indeterminate comparisons, main
+pushes and release verification calls run the existing builds.

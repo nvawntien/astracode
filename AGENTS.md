@@ -10,7 +10,14 @@ Key boundaries:
 * Gateway JWT validation propagates `X-User-*` headers; direct service endpoints must not become an alternate untrusted auth path. Treat the privileged executor sandbox as a security boundary.
 * `envoy/routes.json` must stay aligned with service routers. Proto source is in `proto/`; generated Go is `pkg/pb/`.
 
-Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w <changed-go-files>` from the relevant module; `docker compose config --quiet` validates local Compose. Start the complete local stack with `docker compose --profile dev --profile worker up -d --build`. No root Makefile, migration runner, or checked-in protobuf/Wire generation command exists—do not invent one without first establishing the toolchain. CI lives in `.github/workflows/` (`ci.yml`, `openspec.yml`, `release-images.yml`, `deploy-production.yml`); see `docs/codebase/DEVELOPMENT.md`.
+Use `make help` for common development commands and `make up` for the complete local stack. Go checks are module-scoped. Establish the toolchain before adding protobuf or Wire generation commands. See [development and CI checks](docs/codebase/DEVELOPMENT.md).
+
+Official Goose v3.30.0 runs each owning service's versioned SQL migrations in
+its `migrations/` directory. Add a new SQL version for schema changes and
+update that service's expected schema version. Runtime `AutoMigrate` and
+other schema DDL are prohibited. Compose migrates before service startup.
+Run `make migrate` before starting services directly with Go.
+[ADR-0011](docs/architecture/adr/0011-local-goose-migrations.md)
 
 ## Hard constraints (read first)
 
@@ -43,13 +50,13 @@ Useful checks are module-scoped: `go test ./...`, `go vet ./...`, and `gofmt -w 
     JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
   )
 
-  docker compose --profile dev --profile worker up -d --build
+  make up
 )
 (cd website && { [ -f .env.local ] || cp .env.example .env.local; } && npm ci && npm run dev)
 
 # Verify Go modules, website, Compose config and OpenSpec
-QUICK=1 scripts/verify.sh   # session start: skip race, benchmark, website tests and build
-scripts/verify.sh           # before claiming done
+make test-quick   # session start: skip race, benchmark, website tests and build
+make test         # before claiming done
 ```
 
 If JWK validation fails, check the local Auth access secret and follow the

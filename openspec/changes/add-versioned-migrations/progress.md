@@ -16,8 +16,11 @@ The prior implementation is `be4758d`. Session-start quick verification passed.
 - 3.2: A disposable gateway smoke test passed Auth registration, activation, roles and suspension, Problem uniqueness and logical deletion, immutable testcase replacement, submission, official judging, rejudge and an injected Outbox write failure that rolled back Submission and Attempt writes. Full `scripts/verify.sh` passed.
 - 4.1: Verified the documented Compose startup and explicit `docker compose run --build --rm migrate` workflow. Direct Go tag seeding created 209 tags and preserved all 209 on repeat. No existing developer volume was reset.
 - 4.2: The deployment guide requires successful migrations before app activation. The protected Compose render excludes the local migration job and role defaults. The existing release workflows were left intact.
+- 5.1: Executed the classifier against disposable Git histories covering docs and OpenSpec Markdown, code, mixed multi-commit PRs, SQL, config and tooling, deletions and both sides of renames, executable files, symlinks and unavailable diffs. Verified existing main and release triggers and the six image check names against the effective branch rules on `develop` and `main`.
+- 5.2: `make help` and the requested dry runs passed. On a fresh disposable stack, build, up, ps, logs, migrate and seed worked with an alternate published PostgreSQL port and a non-default local Problem password. Seed created 209 tags and preserved them on repeat. Restart with an invalid SQL migration blocked service activation, and down preserved the PostgreSQL volume.
+- `make test-quick`, `make test` and `make spec-validate` passed in the isolated checkout. `make test-db` passed all three named PostgreSQL suites without skips. Both strict OpenSpec commands and `git diff --check` passed.
+- The local Compose render confirmed independent owning roles and credential wiring. The production render excluded the local values and migration job. The active-reference audit retained ADR-0007 for M0-12 and kept previous decisions in the historical ADR and review records.
 
 ## Pending
 
-Hosted CI and independent Gate 2 review. Managed
-deployment work belongs to the infrastructure implementation under ADR-0011.
+All 10 tasks are complete. Hosted [CI](https://github.com/nvawntien/astracode/actions/runs/45351869092) and [OpenSpec](https://github.com/nvawntien/astracode/actions/runs/45351869034) passed on reviewed commit `7a43ea2`. The tooling commits need their hosted rerun and independent Gate 2 review. Managed deployment belongs to the infrastructure implementation under ADR-0011.

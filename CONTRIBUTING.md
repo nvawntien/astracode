@@ -71,9 +71,9 @@ documentation before changing service boundaries.
 
 ## Local setup and validation
 
-Follow the [README Quick start](README.md#quick-start) for the local stack. Go
-checks are module-scoped; there is no single root-module `go test ./...`
-substitute for all workspace modules.
+Follow the [README Quick start](README.md#quick-start) for the local stack.
+Use `make help` to list local commands and `make test` for the full verifier.
+Go checks are module-scoped.
 
 Run the checks relevant to your change. The full CI-equivalent Go and frontend
 set is:
@@ -110,9 +110,8 @@ data impact, compatibility in both directions, deployment ordering, and
 rollback limits. Use service APIs and events for cross-service data access.
 [Local migration policy](docs/architecture/adr/0011-local-goose-migrations.md)
 
-Start local services with `docker compose --profile dev --profile worker up -d
---build`. Run `bash scripts/test-postgres-integration.sh` to verify
-the three PostgreSQL suites against fresh migrated fixtures.
+Start local services with `make up`. Run `make test-db` to verify the three
+PostgreSQL suites against fresh migrated fixtures.
 [Development and verification](docs/codebase/DEVELOPMENT.md)
 
 ## Pull requests

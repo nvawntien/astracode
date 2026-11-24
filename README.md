@@ -170,6 +170,7 @@ use the Contributions navigation workflow.
 ### Requirements
 
 - Git
+- Make
 - Docker Engine with Docker Compose 2.24.4+
 - Node.js 22.12+ in the Node 22 series and npm for the Next.js frontend
 - Go 1.25.8 for local JWK generation and Go checks
@@ -195,9 +196,9 @@ cd astracode
     JWK_OUTPUT_PATH=envoy/symmetric.json go run envoy/gen_jwk.go
   )
 
-  docker compose --profile dev --profile worker up -d --build
+  make up
 )
-docker compose ps
+make ps
 ```
 
 Compose waits for healthy PostgreSQL and applies the Goose migrations before
@@ -232,7 +233,7 @@ your environment before opening the browser app.
 Stop the local stack with:
 
 ```bash
-docker compose down
+make down
 ```
 
 ## Development and validation
@@ -242,8 +243,8 @@ checks website dependencies against the lockfile, and validates local Compose
 and OpenSpec.
 
 ```bash
-QUICK=1 scripts/verify.sh   # session-start checks
-scripts/verify.sh           # includes race, benchmark, website tests and build
+make test-quick   # session-start checks
+make test         # includes race, benchmark, website tests and build
 ```
 
 See the [development guide](docs/codebase/DEVELOPMENT.md#build-test-and-quality-checks)

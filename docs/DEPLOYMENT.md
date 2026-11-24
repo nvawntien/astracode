@@ -14,16 +14,20 @@ zero downtime or replace host/sandbox security review.
 
 ## Database migrations before activation
 
-The first and subsequent deployments must successfully execute the reviewed
-Goose migrations for Auth, Problem and Submission before activating the
-applications. Run one sequence per owning database with deployment-provided
+AstraCode has yet to deploy to production. The first and subsequent deployments
+must successfully execute the reviewed Goose migrations for Auth, Problem and
+Submission before activating the applications. Run one sequence per owning
+database with deployment-provided
 credentials. Verify all three outcomes before starting the applications.
 Each service also checks its expected version read-only at startup.
 
-The local Compose migration job uses local credentials and is excluded from
-the protected Compose graph. Managed rollout, backup, release compatibility
-and deployment orchestration belong to the infrastructure implementation
-before first deployment. [ADR-0011](architecture/adr/0011-local-goose-migrations.md)
+The existing production Compose configuration does not run migrations before
+activation. It excludes the local migration job and local database credential
+overrides. Future Kubernetes and GitOps tooling must reuse the existing
+Goose CLI and service-owned SQL migrations. Separate managed migration and
+runtime privileges, rollout coordination and backup procedures belong to the
+infrastructure implementation before first deployment.
+[ADR-0011](architecture/adr/0011-local-goose-migrations.md)
 
 ## Release policy
 

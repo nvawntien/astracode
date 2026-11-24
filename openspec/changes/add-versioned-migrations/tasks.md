@@ -17,3 +17,8 @@
 
 - [x] 4.1 Update startup, explicit seeds, fresh local data and narrowly approved reset guidance. Verify the documented Compose startup and migration commands.
 - [x] 4.2 Require successful migration of all owning databases before future deployment activation. Record the prerequisite in the deployment guide, verify it matches the read-only runtime startup gate, and preserve the existing protected workflow and settings.
+
+## 5. Developer tooling
+
+- [x] 5.1 Skip Docker build steps for documentation-only PRs while preserving the six required image checks. Verify PR diff classification, fallback, main and release paths, and the hosted check names.
+- [x] 5.2 Add the local Makefile and update developer guidance. Verify targets, migrations, restart, seeding and integration tests in an isolated stack, then run the full repository verifier and strict OpenSpec checks.
