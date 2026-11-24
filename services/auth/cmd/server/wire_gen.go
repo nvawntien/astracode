@@ -10,7 +10,6 @@ import (
 	auth3 "go-judge-system/pkg/auth"
 	"go-judge-system/pkg/cache"
 	"go-judge-system/pkg/config"
-	"go-judge-system/pkg/database"
 	"go-judge-system/pkg/logger"
 	"go-judge-system/pkg/middleware"
 	"go-judge-system/pkg/minio"
@@ -38,7 +37,7 @@ import (
 
 func InitializeApp(cfg *config.Config) (*container.App, error) {
 	databaseConfig := cfg.Database
-	db, err := database.ConnectDatabase(databaseConfig)
+	db, err := container.ProvideDatabase(databaseConfig)
 	if err != nil {
 		return nil, err
 	}

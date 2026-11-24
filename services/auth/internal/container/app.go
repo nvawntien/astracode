@@ -42,7 +42,7 @@ func (a *App) Run() error {
 	grpcErrCh := make(chan error, 1)
 	go func() {
 		a.Logger.Info("Starting Auth Service HTTP server", zap.String("port", httpPort))
-		httpErrCh <- a.Router.Start(httpPort)
+		httpErrCh <- a.Router.Start(a.Config.Server.ListenAddress(a.Config.Server.Port))
 	}()
 	go func() {
 		a.Logger.Info("Starting Auth Service gRPC server", zap.String("port", grpcPort))

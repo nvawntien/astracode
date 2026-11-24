@@ -4,7 +4,18 @@
 
 Compose starts one PostgreSQL server but initialization creates three isolated databases: `auth_db`, `problem_db`, and `submission_db` (`infra/postgres/init.sql`). Each service config points at its own database. No service code was found directly accessing another service's database; cross-service reads are gRPC calls.
 
-There are no checked-in SQL schema migrations or migration command. Repositories call GORM `AutoMigrate` at construction time. This is a confirmed schema-management design fact, not an assertion that production migration succeeds safely.
+Auth, Problem, and Submission each maintain a PostgreSQL SQL sequence in their
+service's `migrations/` directory, starting with `00001_initial_schema.sql`.
+Judge Worker has no PostgreSQL schema. Goose records an independent history
+in each owning database. The initial migrations were compared against the
+legacy GORM-generated schema on PostgreSQL 15.6.
+[Migration policy](../architecture/adr/0011-local-goose-migrations.md)
+
+GORM handles application queries and transactions. Each application reads its
+own Goose history at startup and requires its expected version. Local Compose
+uses a separate login and database owner per service. The restricted test
+roles can read the fixture ledger and write application rows.
+[Development workflow](DEVELOPMENT.md)
 
 | Owner | Tables/models | Notable indexes/relationships | Evidence |
 | --- | --- | --- | --- |

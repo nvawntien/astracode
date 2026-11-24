@@ -21,6 +21,7 @@ import (
 
 	"go-judge-system/pkg/config"
 	"go-judge-system/pkg/database"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/auth/internal/adapter/outbound/persistence/postgres"
 	"go-judge-system/services/auth/internal/adapter/outbound/security"
 	benchmark "go-judge-system/services/auth/internal/application/usecase/benchmark"
@@ -134,7 +135,7 @@ func openCommandRuntime(configDir string) (commandRuntime, error) {
 	if err != nil {
 		return commandRuntime{}, err
 	}
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "auth", schema.AuthVersion)
 	if err != nil {
 		return commandRuntime{}, errors.New("connect configured Auth database")
 	}

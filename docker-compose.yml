@@ -73,8 +73,12 @@ services:
     restart: unless-stopped
     env_file:
       - ${POSTGRES_ENV_FILE:-./environment/postgres.env}
+    environment: &local-db-passwords
+      ASTRA_AUTH_DB_PASSWORD: ${ASTRA_AUTH_DB_PASSWORD:-local-auth-password}
+      ASTRA_PROBLEM_DB_PASSWORD: ${ASTRA_PROBLEM_DB_PASSWORD:-local-problem-password}
+      ASTRA_SUBMISSION_DB_PASSWORD: ${ASTRA_SUBMISSION_DB_PASSWORD:-local-submission-password}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${ASTRA_DEV_POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - postgres_data:/var/lib/postgresql/data
@@ -83,13 +87,26 @@ services:
     logging: *default-logging
     healthcheck:
       <<: *healthcheck-defaults
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d auth_db" ]
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d auth_db" ]
       interval: 5s
     deploy:
       resources:
         limits:
           cpus: "1.00"
           memory: 512M
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/postgres/migrations.Dockerfile
+    environment: *local-db-passwords
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - judge_internal
+    logging: *default-logging
 
   redis:
     container_name: judge_redis
@@ -261,10 +278,16 @@ services:
       dockerfile: services/auth/Dockerfile
     env_file:
       - ${SERVICE_ENV_FILE:-./environment/service.env}
+    environment:
+      DATABASE_USER: auth_app
+      DATABASE_PASSWORD: ${ASTRA_AUTH_DB_PASSWORD:-local-auth-password}
     restart: unless-stopped
     volumes:
       - ./services/auth/config:/app/config:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+        restart: true
       postgres:
         condition: service_healthy
       redis:
@@ -282,10 +305,16 @@ services:
       dockerfile: services/problem/Dockerfile
     env_file:
       - ${SERVICE_ENV_FILE:-./environment/service.env}
+    environment:
+      DATABASE_USER: problem_app
+      DATABASE_PASSWORD: ${ASTRA_PROBLEM_DB_PASSWORD:-local-problem-password}
     restart: unless-stopped
     volumes:
       - ./services/problem/config:/app/config:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+        restart: true
       postgres:
         condition: service_healthy
       redis:
@@ -303,10 +332,16 @@ services:
       dockerfile: services/submission/Dockerfile
     env_file:
       - ${SERVICE_ENV_FILE:-./environment/service.env}
+    environment:
+      DATABASE_USER: submission_app
+      DATABASE_PASSWORD: ${ASTRA_SUBMISSION_DB_PASSWORD:-local-submission-password}
     restart: unless-stopped
     volumes:
       - ./services/submission/config:/app/config:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+        restart: true
       postgres:
         condition: service_healthy
       redis:

@@ -13,6 +13,7 @@ import (
 	"go-judge-system/pkg/config"
 	"go-judge-system/pkg/database"
 	pkgminio "go-judge-system/pkg/minio"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/problem/internal/adapter/outbound/persistence/postgres"
 	"go-judge-system/services/problem/internal/adapter/outbound/storage/minio"
 	"go-judge-system/services/problem/internal/application/usecase/admin/testcase"
@@ -56,7 +57,7 @@ func run(configPath, quiescedAt string, maxClockSkew time.Duration, applyReviewe
 	if !loopback(cfg.Database.Host) || !loopback(storageHost) {
 		return errors.New("reconciliation requires loopback PostgreSQL and MinIO endpoints")
 	}
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "problem", schema.ProblemVersion)
 	if err != nil {
 		return err
 	}

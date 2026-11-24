@@ -81,9 +81,9 @@ func (r *Router) SetupRoutes() {
 	}
 }
 
-func (r *Router) Start(port string) error {
+func (r *Router) Start(address string) error {
 	r.server = &http.Server{
-		Addr:    ":" + port,
+		Addr:    address,
 		Handler: r.engine,
 	}
 

@@ -12,6 +12,23 @@ GitHub Actions runner
 This document describes the production deployment contract. It does not claim
 zero downtime or replace host/sandbox security review.
 
+## Database migrations before activation
+
+AstraCode has yet to deploy to production. The first and subsequent deployments
+must successfully execute the reviewed Goose migrations for Auth, Problem and
+Submission before activating the applications. Run one sequence per owning
+database with deployment-provided
+credentials. Verify all three outcomes before starting the applications.
+Each service also checks its expected version read-only at startup.
+
+The existing production Compose configuration does not run migrations before
+activation. It excludes the local migration job and local database credential
+overrides. Future Kubernetes and GitOps tooling must reuse the existing
+Goose CLI and service-owned SQL migrations. Separate managed migration and
+runtime privileges, rollout coordination and backup procedures belong to the
+infrastructure implementation before first deployment.
+[ADR-0011](architecture/adr/0011-local-goose-migrations.md)
+
 ## Release policy
 
 Only a published semantic release tag is valid for production:
@@ -503,6 +520,11 @@ the existing DLT representation. A shutdown between DLT acknowledgement and
 offset commit can produce duplicate DLT records with the same origin offset.
 
 ## Rollback
+
+After managed migration adoption, use a previously verified DDL-free rollback
+release compatible with the resulting schema. Routine rollback may only
+restore compatible application images and configuration. Keep the database
+versions in place and verify schema compatibility before activation.
 
 The workflow suspends Judge and verifies the group is empty before restoring
 App. An App activation failure uses the bundle transaction's own restoration.

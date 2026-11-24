@@ -4,7 +4,7 @@
 
 | Area | Finding | Evidence / impact |
 | --- | --- | --- |
-| Schema change management | No versioned SQL migrations or migration command; repositories call `AutoMigrate` at runtime. | `infra/postgres/init.sql`; repository constructors. Production schema rollout/reversibility is not explicit. |
+| Managed schema rollout | Local development and PostgreSQL CI fixtures use the Goose CLI. Managed rollout, backup, and compatibility planning belong to the infrastructure implementation. | [ADR-0011](../architecture/adr/0011-local-goose-migrations.md) and the [deployment prerequisite](../DEPLOYMENT.md#database-migrations-before-activation). |
 | Worker capacity scaling | Compose intentionally limits each worker to one concurrent official job and 512 MiB after executor memory-pressure remediation. | `docker-compose.yml`, `judge_job_consumer.go`; any throughput increase needs a fresh memory/concurrency measurement rather than raising `WORKER_POOL_SIZE` independently. |
 | SSE scale boundary | Event delivery uses an in-memory `EventHub`; no shared pub/sub adapter is present. | `services/submission/internal/adapter/outbound/stream/event_hub.go`; multi-replica client delivery is not guaranteed. |
 | DLT recovery | Worker produces a DLT topic but no DLT consumer/replay tool was found. | `infra/kafka/kafka-init.sh`, `dlt_publisher.go`. Failed jobs need manual/operator recovery. |
@@ -30,4 +30,4 @@
 
 ## Testing gaps observed
 
-Unit tests cover many use cases/adapters, including submission result application, Kafka consumers, gRPC clients and testcase loading. No checked-in end-to-end Compose test, DLT replay test, multi-replica SSE test, schema migration test, or Kubernetes deployment test was found. The absence is based on repository discovery, not a claim that external CI/system tests do not exist.
+Unit tests cover many use cases and adapters, including submission result application, Kafka consumers, gRPC clients and testcase loading. `scripts/test-postgres-integration.sh` applies migrations to fresh fixtures before the PostgreSQL suites. Checked-in coverage gaps include an end-to-end Compose test, DLT replay, multi-replica SSE, and Kubernetes deployment.

@@ -1,44 +1,87 @@
 # Development workflow
 
-## Prerequisites and configuration
+## Prerequisites
 
-Use Go 1.25.8 for Go checks and local JWK generation, Docker Engine/Compose, and Node.js 22.12+ in the Node 22 series with npm for `website/`. Runtime configs live in `services/*/config/config.yaml` and `workers/judge/config/config.yaml`; Compose reads `environment/postgres.env`, `environment/redis.env`, and `environment/service.env`. Do not commit real secrets. Viper maps dotted config paths to uppercase underscore environment names, such as `DATABASE_PASSWORD` and `JWT_ACCESS_SECRET`.
+Use Go 1.25.8, Make, Docker Engine with Compose 2.24.4+, and Node.js 22.12+ in the
+Node 22 series for the frontend. The migration image includes the official
+Goose v3.30.0 CLI pinned by OCI digest. Docker builds the migration image
+without a host Go toolchain.
 
 ## Run the full stack
 
-The quick start copies missing local env files from their templates and uses
-`JWT_ACCESS_SECRET` from `environment/service.env` to create or verify the
-ignored `envoy/symmetric.json`. A mismatch stops startup and leaves the key
-file intact. [Local stack quick start](../../README.md#start-the-local-judge-stack)
-
-On startup, the `envoy-jwk` service copies that host file into a named volume
-for Envoy and must finish successfully before Envoy starts. If you change the
-local Auth access secret, regenerate the key and activate it explicitly.
-[Envoy key setup and activation](../../envoy/README.md#configuration-and-secrets)
-
-Check containers with `docker compose ps` and stop the stack with
-`docker compose down`.
-
-The worker is profile-gated; omit `--profile worker` to start the API/infrastructure without it. Envoy exposes the gateway at `http://localhost:8080`; MailHog and Kafka UI are dev-profile services. Compose creates databases and Kafka topics automatically through the mounted bootstrap assets.
-
-The checked-in worker profile sets `WORKER_POOL_SIZE=1` and a 512 MiB container memory limit. `WORKER_POOL_SIZE` is the consumer-wide cap for official jobs, not a per-Kafka-claim capacity; keep those settings together until a new workload measurement supports a change.
-
-## Run a Go component locally
-
-Each runtime is a separate Go module but `go.work` links them. From its module directory:
+Prepare the three ignored files under `environment/` and the local Envoy JWK
+using the root quick start. [Quick start](../../README.md#start-the-local-judge-stack)
 
 ```bash
-go run ./cmd/server
-go test ./...
-go vet ./...
+make up
+make ps
 ```
 
-The worker accepts `-config` (default `/app/config`), so local usage needs a config directory reachable by that flag. The other Go mains currently load `/app/config` unconditionally; use Docker/Compose or supply that expected path in a local environment. This limitation is derived from their `main.go` files.
+`make up` runs `docker compose --profile dev --profile worker up -d --build`.
+`make start` uses the same startup path. `make stop` keeps the containers
+and volumes for the next start.
+PostgreSQL must be healthy before the Goose job starts. The job migrates Auth,
+Problem and Submission sequentially, then Compose starts them. Use `--build`
+after migration changes so Compose uses an image containing the current SQL.
+If a migration fails, inspect `make logs SERVICE=migrate`, fix the cause,
+and rerun. Goose skips applied versions and retains earlier committed work.
+Run one migration invocation at a time.
+
+The local database owners are `auth_app`, `problem_app` and
+`submission_app`. Each local role runs its own migrations and application
+queries. Managed deployments need separate migration and runtime privileges.
+You can override the local development passwords through
+`ASTRA_AUTH_DB_PASSWORD`, `ASTRA_PROBLEM_DB_PASSWORD`, and
+`ASTRA_SUBMISSION_DB_PASSWORD` before the first start. The init script runs
+when the PostgreSQL volume is empty. Changed environment values require
+updating the corresponding existing database password. Set
+`ASTRA_DEV_POSTGRES_PORT=55432` on the `make up` command if host port 5432 is
+occupied. The stack still connects to `postgres:5432` internally.
+
+### Start with fresh local data
+
+For a volume from a previous setup, keep its data and start a fresh Compose
+project. Stop the old project's containers first with `docker compose down`
+using the old project name and its Compose files. This keeps its named volumes
+and frees the fixed container names and ports. For example, start a new
+project with:
+
+```bash
+COMPOSE_PROJECT_NAME=astracode-fresh make up
+```
+
+A reset is optional. Obtain separate approval for the exact disposable
+PostgreSQL volume, confirm the Docker context and the volume's Compose
+project label, and stop that project. Remove only that specific volume
+with `docker volume rm <approved-postgres-volume>`, then start the project.
+Redis, Kafka, MinIO, and other volumes should stay in place. Prefer a fresh
+project when using a different local dataset.
+
+## Run Go services and seeds directly
+
+Apply all migrations explicitly before starting a Go service or seed.
+
+```bash
+make migrate
+```
+
+`make migrate` runs `docker compose run --build --rm migrate`.
+For direct execution, set `ASTRACODE_LOCAL_CONFIG` to the service config
+directory, set `DATABASE_HOST=127.0.0.1` and `DATABASE_PORT` to the published
+port, and supply that service's local `DATABASE_USER` and `DATABASE_PASSWORD`.
+Use the existing local service environment with loopback endpoints for the
+other dependencies. From the service directory run `go run ./cmd/server`.
+The server binds to loopback with this configuration. Use Compose for
+gateway and official judging integration.
+
+Run `make seed` with the local PostgreSQL service running and migrated. It
+uses the published port and local Problem credentials to run the existing
+`go run ./cmd/seed-tags` command. Repeating the seed preserves existing rows.
 
 ## Build, test and quality checks
 
-Run `QUICK=1 scripts/verify.sh` at session start and `scripts/verify.sh` before
-finishing a change. Both modes run Go tests and vet for shared packages and
+Run `make test-quick` at session start and `make test` before finishing a
+change. Both invoke `scripts/verify.sh` and run Go tests and vet for shared packages and
 services, website typechecking, local Compose configuration validation, and
 strict OpenSpec validation when specs or active changes exist. Both modes reuse
 healthy website dependencies and run `npm ci` from the lockfile when the
@@ -51,34 +94,20 @@ website lint warning-budget and tooling-format checks, gateway client contract
 test, Envoy suite, production Compose assertions, deployment-script checks,
 PostgreSQL integration suites, or container image builds.
 
-Three PostgreSQL integration suites skip unless a port variable points at a
-disposable PostgreSQL on `127.0.0.1` with the fixture role and a database that
-has none of the suite's tables: `TestProblemMutationPostgresConcurrency` and
-`TestTestcaseMutationPostgresConcurrency` (`services/problem`,
-`ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT`, role and database `problem_fixture` /
-`problem_mutation_test`) and `TestGetCurrentDetailPostgresSnapshots`
-(`services/submission`, `ASTRACODE_DETAIL_TEST_PGPORT`, `detail_fixture` /
-`submission_detail_test`). `scripts/verify.sh` does not start a database, so
-run them by hand and recreate the database before each suite:
+Run the PostgreSQL suites against the current checkout.
 
 ```bash
-docker run -d --name astracode-pg-fixture -p 127.0.0.1:55432:5432 \
-  -e POSTGRES_PASSWORD=fixture-admin postgres:15.6-alpine
-docker exec astracode-pg-fixture psql -U postgres \
-  -c "CREATE ROLE problem_fixture LOGIN PASSWORD 'problem_fixture'" \
-  -c "CREATE ROLE detail_fixture LOGIN PASSWORD 'detail_fixture'"
-# Before each suite (use submission_detail_test / detail_fixture for the third):
-docker exec astracode-pg-fixture psql -U postgres \
-  -c "DROP DATABASE IF EXISTS problem_mutation_test WITH (FORCE)" \
-  -c "CREATE DATABASE problem_mutation_test OWNER problem_fixture"
-(cd services/problem && ASTRACODE_PROBLEM_MUTATION_TEST_PGPORT=55432 \
-  go test ./internal/adapter/outbound/persistence/postgres \
-  -run '^TestProblemMutationPostgresConcurrency$' -count=1 -v)
-docker rm -f astracode-pg-fixture
+make test-db
 ```
 
-CI's `postgres-integration` job does the same with a PostgreSQL 15.6 service
-container and fails when a suite is skipped or does not pass.
+The script creates a fresh PostgreSQL 15.6 container for each suite on a
+disposable loopback port and applies the pinned migrations to a fresh test database. The suites
+verify the fixture role, database, schema version and
+empty application data before writing with fixed runtime roles. The job
+requires a pass without any skipped suite for
+`TestProblemMutationPostgresConcurrency`,
+`TestTestcaseMutationPostgresConcurrency`, and
+`TestGetCurrentDetailPostgresSnapshots`.
 
 GitHub Actions workflows in `.github/workflows/`:
 
@@ -88,6 +117,11 @@ GitHub Actions workflows in `.github/workflows/`:
 | `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
 | `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
+
+Documentation-only PRs skip the Docker build steps and still report all six
+required image checks. CI checks both paths of renames. Code, migration SQL,
+configuration and tooling changes run the image builds, as do indeterminate
+comparisons, pushes to `main`, and release verification calls.
 
 Tests are colocated with source (`*_test.go`) across shared packages, services, and worker adapters/use cases. A safe non-writing discovery/build sequence is:
 
@@ -106,4 +140,5 @@ For website development, use `npm run dev` (`next dev -p 3000`), `npm run build`
 
 ## Migrations and operational checks
 
-There is no migration runner. Startup repository constructors call GORM `AutoMigrate`, and `infra/postgres/init.sql` only creates the three databases. Before introducing a migration tool or altering schemas, consult [DATA.md](DATA.md) and preserve service database ownership. Validate gateway configuration with the pinned Envoy image using `python3 envoy/tests/integration.py`; do not assume all service-local routes are gateway-exposed.
+See [DATA.md](DATA.md) for database ownership. Validate gateway
+configuration with `python3 envoy/tests/integration.py`.

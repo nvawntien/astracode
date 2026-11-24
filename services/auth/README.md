@@ -69,15 +69,17 @@ graph TD
 
 ### Quick Start (Docker Compose)
 
-1. Configure the environment files under the project-level `environment/` directory.
-2. Start the service and its dependencies:
-   ```bash
-   docker compose up -d auth-service
-   ```
-3. Verify the service from inside the Docker network or through the gateway:
-   - Public API: `http://localhost:8080/api/v1/auth/...`
-   - Health check: use `docker compose exec auth-service wget -qO- http://localhost:8081/health`
-   - MailHog UI (dev profile): `http://localhost:8025`
+Prepare the local env files and Envoy JWK, then start the stack through the
+standard Compose command.
+
+```bash
+docker compose --profile dev --profile worker up -d --build
+```
+
+Auth verifies its versioned `auth_db` schema with runtime credentials before
+starting. Public API requests go through Envoy at `http://localhost:8080/api/v1/auth/…`.
+[Local startup and direct Go](../../docs/codebase/DEVELOPMENT.md)
+
 
 ---
 
@@ -196,7 +198,7 @@ The service uses a hybrid configuration model:
 
 1. `config/config.yaml` contains non-sensitive runtime configuration such as server settings, logging, database host, Redis host, SMTP host, and JWT TTLs.
 2. Environment variables override secret fields such as `database.password`, `redis.password`, `jwt.access_secret`, and `jwt.refresh_secret`.
-3. The application loads configuration from `/app/config` at runtime, so Docker Compose is the supported execution path without additional path remapping.
+3. Containers load `/app/config`. Set `ASTRACODE_LOCAL_CONFIG` to the service config directory for direct Go startup on loopback after running migrations.
 
 Current default runtime profile:
 

@@ -11,6 +11,12 @@ All four Go runtime components follow the same directional dependency pattern: i
 | Submission | Submission lifecycle and client result delivery | Gin HTTP/SSE, Kafka result consumer | PostgreSQL, Kafka, Auth gRPC, Problem gRPC, Judge gRPC |
 | Judge Worker | Durable judging and synchronous run-code service | Kafka job consumer, gRPC `JudgeService` | Problem gRPC, unary go-judge gRPC executor, Kafka results, local testcase cache |
 
+Auth, Problem, and Submission verify their owning PostgreSQL schema at the
+composition root before constructing components that serve traffic or run
+background work. A dedicated Goose runner manages SQL versions using a
+dedicated database login and history per service. Judge Worker continues to access
+Problem metadata through gRPC. [Data ownership](DATA.md)
+
 ## Communication graph
 
 ```mermaid

@@ -71,9 +71,9 @@ documentation before changing service boundaries.
 
 ## Local setup and validation
 
-Follow the [README Quick start](README.md#quick-start) for the local stack. Go
-checks are module-scoped; there is no single root-module `go test ./...`
-substitute for all workspace modules.
+Follow the [README Quick start](README.md#quick-start) for the local stack.
+Use `make help` to list local commands and `make test` for the full verifier.
+Go checks are module-scoped.
 
 Run the checks relevant to your change. The full CI-equivalent Go and frontend
 set is:
@@ -86,7 +86,7 @@ done
 (cd website && npm ci && npm run typecheck && npm run build)
 ```
 
-Validate the development Compose model without relying on local secret files:
+Validate the shared Compose model with the example environment files.
 
 ```bash
 POSTGRES_ENV_FILE=./environment/postgres.env.example \
@@ -103,11 +103,16 @@ request when generated artifacts must change.
 
 ## Database and schema changes
 
-Each service owns its PostgreSQL database. The current code uses GORM
-`AutoMigrate` at service startup and does not include a versioned migration
-runner. A schema pull request must therefore describe data impact, backward and
-forward compatibility, deployment ordering, and rollback limitations. Do not
-add cross-service table access as a shortcut.
+Each service owns its PostgreSQL database. Add reviewed SQL to the owning
+service's numbered migration sequence and update that service's expected
+version. Preserve the names and bytes of released migrations. Describe
+data impact, compatibility in both directions, deployment ordering, and
+rollback limits. Use service APIs and events for cross-service data access.
+[Local migration policy](docs/architecture/adr/0011-local-goose-migrations.md)
+
+Start local services with `make up`. Run `make test-db` to verify the three
+PostgreSQL suites against fresh migrated fixtures.
+[Development and verification](docs/codebase/DEVELOPMENT.md)
 
 ## Pull requests
 

@@ -9,6 +9,7 @@ import (
 
 	"go-judge-system/pkg/config"
 	"go-judge-system/pkg/database"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/problem/internal/adapter/outbound/persistence/postgres"
 	"go-judge-system/services/problem/internal/application/backfill"
 )
@@ -22,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config failed: %v", err)
 	}
-	db, err := database.ConnectDatabase(cfg.Database)
+	db, err := database.ConnectServiceDatabase(cfg.Database, "problem", schema.ProblemVersion)
 	if err != nil {
 		log.Fatalf("connect database failed: %v", err)
 	}

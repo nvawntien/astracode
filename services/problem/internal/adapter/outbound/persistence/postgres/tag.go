@@ -40,7 +40,6 @@ type tagRepository struct {
 }
 
 func NewTagRepository(db *gorm.DB) outbound.TagRepository {
-	_ = db.AutoMigrate(&TagDAO{}, &ProblemTagDAO{})
 	return &tagRepository{db: db}
 }
 

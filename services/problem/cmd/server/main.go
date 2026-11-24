@@ -12,7 +12,7 @@ var (
 )
 
 func main() {
-	cfg, err := config.LoadConfig("/app/config")
+	cfg, err := config.LoadServerConfig()
 	if err != nil {
 		log.Fatalf("load config failed: %v", err)
 	}

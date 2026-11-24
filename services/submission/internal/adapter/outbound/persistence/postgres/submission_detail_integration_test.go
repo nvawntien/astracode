@@ -13,6 +13,7 @@ import (
 	"go-judge-system/pkg/database"
 	"go-judge-system/pkg/judge"
 	"go-judge-system/pkg/rbac"
+	"go-judge-system/pkg/schema"
 	"go-judge-system/services/submission/internal/application/dto"
 	"go-judge-system/services/submission/internal/application/usecase/result"
 	"go-judge-system/services/submission/internal/application/usecase/user"
@@ -41,10 +42,10 @@ func TestGetCurrentDetailPostgresSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	for _, table := range []string{"submissions", "submission_attempts", "submission_results"} {
-		if db.Migrator().HasTable(table) {
-			t.Fatalf("refusing to write to a non-fresh database (table %s exists)", table)
-		}
+	guardCtx, guardCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer guardCancel()
+	if err := schema.VerifyFixture(guardCtx, sqlDB, "submission"); err != nil {
+		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

@@ -22,7 +22,7 @@ func NewServer(cfg config.ServerConfig, problemServer *ProblemServer) *Server {
 
 	return &Server{
 		server:  grpcServer,
-		address: fmt.Sprintf(":%d", cfg.GRPCPort),
+		address: cfg.ListenAddress(cfg.GRPCPort),
 	}
 }
 
