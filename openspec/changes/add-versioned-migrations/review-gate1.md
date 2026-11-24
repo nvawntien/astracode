@@ -112,3 +112,14 @@ The round 2 specification assessment found no blocking or major defects and defe
 The project owner and repository maintainer **approved Gate 1 by explicit one-time exception** and authorized implementation for M1-02 `add-versioned-migrations` under PR #66. The approved specification is commit `5c5db19aa554372807ca38d016342143857b8fc3`. The maintainer accepted the technical assessment after two review rounds because all previous findings were addressed and strict OpenSpec validation and CI passed.
 
 No independent GitHub approval has been obtained. The approval is the maintainer's exception to reviewer independence for this Gate 1 only. Gate 2, cross-agent implementation review, ADR-0006, NFR-D05 and all implementation acceptance criteria remain mandatory, including the task 1.2 feasibility proof and task 4.2 promotion hold evidence.
+
+### Maintainer-directed scope correction — 2026-11-24
+
+The maintainer confirmed that AstraCode has yet to deploy to production and
+explicitly authorized revising and applying M1-02 in the existing PR #66.
+ADR-0007 supersedes the local execution and protected cutover provisions of
+ADR-0006 while retaining NFR-D05, database ownership and business baselines.
+The previous promotion freeze is replaced by a future deployment prerequisite
+to migrate successfully before application activation. The earlier review
+above records the pre-correction scope. This entry records maintainer
+authorization, with independent implementation review and Gate 2 still required.
