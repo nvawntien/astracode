@@ -105,4 +105,10 @@ At the start of this review, `git status --short` returned no entries and `git r
 
 ## 11. Final Gate 1 verdict
 
-**Specification assessment approved**, subject to independent reviewer confirmation described in §1. No blocking or major specification defects were found. This record does not assert a GitHub approval, an independently completed Gate 1, or implementation authorization. The implementation checklist remains **0/12**. Task 1.2 and task 4.2 evidence remain mandatory.
+The round 2 specification assessment found no blocking or major defects and deferred the Gate 1 decision pending resolution of the reviewer independence limitation in §1. At that assessment, the implementation checklist stood at **0/12**.
+
+### Maintainer exception — 2026-11-24
+
+The project owner and repository maintainer **approved Gate 1 by explicit one-time exception** and authorized implementation for M1-02 `add-versioned-migrations` under PR #66. The approved specification is commit `5c5db19aa554372807ca38d016342143857b8fc3`. The maintainer accepted the technical assessment after two review rounds because all previous findings were addressed and strict OpenSpec validation and CI passed.
+
+No independent GitHub approval has been obtained. The approval is the maintainer's exception to reviewer independence for this Gate 1 only. Gate 2, cross-agent implementation review, ADR-0006, NFR-D05 and all implementation acceptance criteria remain mandatory, including the task 1.2 feasibility proof and task 4.2 promotion hold evidence.
