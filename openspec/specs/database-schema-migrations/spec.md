@@ -1,4 +1,10 @@
-## ADDED Requirements
+# database-schema-migrations Specification
+
+## Purpose
+Define how each service manages its database schema versions and verifies schema
+compatibility before startup while preserving existing data and behavior.
+
+## Requirements
 
 ### Requirement: Service-owned schema versions
 Each PostgreSQL-owning service SHALL maintain its own ordered versioned schema
