@@ -153,6 +153,11 @@ flowchart LR
   Inject secrets at runtime. Keep credentials out of Git, images, Terraform configuration, rendered cloud-init,
   logs and release artifacts. Avoid materializing secrets in Terraform state and protect any sensitive state
   that remains. M0-13 verifies secret retrieval, rotation and access to protected GHCR images.
+- Judge must join using a dedicated agent-only token or a short-lived agent bootstrap token. Configure the
+  chosen mechanism explicitly because k3s defaults to the server token for agent joins. Keep the server token
+  and administrator kubeconfig off Judge. Apply the secret-handling rules above to all k3s credentials and
+  keep them out of Terraform state. M0-13 verifies secure delivery, access permissions, and expiry or
+  rotation as applicable. [k3s token documentation](https://docs.k3s.io/cli/token)
 
 ### Region, VM and disk candidates
 
@@ -222,6 +227,11 @@ reclaiming generations. [k3s local storage](https://docs.k3s.io/add-ons/storage)
   to a compatible application version within NFR-D03. A failed migration stops activation. Any schema recovery
   needs a reviewed forward fix or restore plan, with no automatic destructive down migration.
   [Migration policy](0006-schema-migration-policy.md) · [Goose CLI and schema gate](0011-local-goose-migrations.md)
+- Submission must run as a single active instance until replica-safe outbox delivery and multi-replica realtime
+  behavior are implemented and verified. Use stop-before-start for rollouts and rollbacks. Verify that the
+  previous instance and its outbox relay have terminated before starting the replacement. A rolling update can overlap
+  Pods even with `replicas: 1`. M0-13 may use `Recreate` with an explicit termination check. A controlled
+  interruption is acceptable. [Submission outbox and SSE limitations](../../codebase/TECH_DEBT.md#confirmed-from-codeconfiguration)
 - Keep Terraform plan, review and approved apply separate from application delivery and staging lifecycle
   actions. Prefer GitHub Actions OIDC with scoped Azure identities for infrastructure, lifecycle and delivery.
   Use a controlled private deployment path to the cluster. M0-13 must verify the chosen transport and the
