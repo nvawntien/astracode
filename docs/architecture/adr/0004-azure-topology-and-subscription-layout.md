@@ -2,8 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted |
 | Date | 2026-11-25 |
+| Acceptance | Approved by project-owner direction in the M0-09 documentation finalization request. |
 | Milestone | M0-09 |
 | Requirements | NFR-F01–F03, NFR-D01–D07, NFR-A01–A03/A06, NFR-R01/R02/R07/R08, NFR-S05/S08/S09 |
 | Implementation | M0-13 cloud and delivery baseline, M0-14 observability baseline, M2-08 backup and recovery |
@@ -330,24 +331,17 @@ against NFR-R07 (RPO ≤ 24 h) and NFR-R08 (RTO ≤ 4 h).
 
 ## Validation and acceptance
 
+M0-09 covers the architecture decision, subscription layout, trade-offs and indicative budget sanity check
+recorded above. The [delivery plan](../../product/delivery-plan.md#m0--foundation) assigns measured Azure/k3s
+footprint and initial Azure costs to the M0-13 checkpoint.
+
 | Pending evidence | Where to validate |
 |---|---|
-| Actual region access, eligible SKUs, family/region quotas and successful allocation; OS and pinned k3s compatibility; explicit node egress and scoped identities | M0-13 using temporary S3 experiments and eligibility checks in the target subscriptions |
-| CPU/RAM by component at idle and representative load, incremental k3s overhead, disk utilization and growth, cache/retention limits and burst behavior | Proposed M0-13 sizing checkpoint in S3. One representative local Compose footprint can inform review but cannot substitute for Azure/k3s measurements. |
-| Node placement and mount gates, private ingress and Envoy trust boundary, executor privileges, resource limits and network isolation | M0-13 target-environment validation |
-| Release digests and approvals, schema migration and compatible rollback, staging readiness, concurrent requests, expiry, cancellation and verified deallocation | M0-13 walking skeleton and lifecycle rehearsal |
-| Actual spend, credit runway and budget-alert delivery | Measure after M0-13 provisioning. M0-15 owns FinOps documentation. Review sustained production affordability before continuous M3 operation. |
+| Actual region access, eligible SKUs, family/region quotas and successful allocation; OS and pinned k3s compatibility; explicit node egress and scoped identities | M0-13 using temporary S3 experiments and provisioning checks in the target subscriptions and regions as needed |
+| CPU/RAM by component at idle and representative load, incremental k3s overhead, disk utilization and growth, cache/retention limits and burst behavior | Measure the Azure/k3s footprint in S3 at the M0-13 checkpoint. Confirm VM and disk sizing and resource limits from the measured headroom. Use local Compose measurements only as preliminary context. |
+| Node placement and mount gates, private ingress and Envoy trust boundary, go-judge integration with k3s, executor privileges, resource limits and network isolation | M0-13 target-environment validation |
+| Release digests and approval gates, schema migration and compatible rollback, one-hour staging sessions from readiness, concurrent requests, expiry, cancellation and automatic deallocation | M0-13 walking skeleton and lifecycle rehearsal |
+| Initial Azure costs, actual spend, credit runway and budget-alert delivery | Measure initial costs at the M0-13 checkpoint after provisioning. M0-15 owns FinOps documentation. Before continuous production operation in M3, verify affordability against NFR-F01 using observed costs and a continuous-operation forecast. |
 | Baseline centralized logs, health and metrics | M0-14 |
 | Judge scaling, throughput, latency and submission integrity under representative contest load | M2-06 and M2-07 on appropriately sized Azure/k3s infrastructure |
-| Daily backup, consistent recovery, reserve subscription restore and cutover drills | M2-08, with production readiness and SLO evidence in M3 |
-
-The [delivery plan](../../product/delivery-plan.md#m0--foundation) names a measured stack footprint for M0-09
-and maps it to NFR-F01. This ADR addresses the design review. The footprint and measured affordability evidence
-are pending, and M0-09 remains subject to its existing acceptance criteria. As an amendment for Orchestrator
-review, allow M0-09 acceptance after ADR review and an indicative budget sanity check, put measured Azure/k3s
-footprint and actual initial costs at an M0-13 S3 checkpoint before confirming production sizing, and require
-evidence of continuous-operation affordability before M3. Preserve NFR-F01 throughout.
-
-The [M2 plan](../../product/delivery-plan.md#m2--competition-and-learning) currently places backups in the DR
-subscription. For Orchestrator review, specify S4 as the external backup destination and S5 as the restore
-drill target. This preserves both recovery objectives and the M2-08 dependency on M0-13.
+| Daily external backups to S4, consistent recovery, and restore and cutover drills with S5 as the preferred target | [M2-08](../../product/delivery-plan.md#m2--competition-and-learning) owns procedures and drills under NFR-R07/R08. Production readiness and SLO evidence belong to M3. |

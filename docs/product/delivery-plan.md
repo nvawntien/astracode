@@ -46,11 +46,11 @@ Goal: harness working, current behaviour specified, existing platform running on
 | M0-07 | `baseline-judging` | Baseline | — | judging | M0-01 | TBD |
 | M0-08 | `baseline-realtime-updates` | Baseline | — | realtime-updates | M0-01 | TBD |
 | M0-16 | `baseline-code-run` — custom runs from the editor (direct judge-worker path, outside the submission queue; results not stored as submissions) | Baseline | — | code-run | M0-01 | TBD |
-| M0-09 | ADR-0004 Azure topology and subscription layout (needs measured stack footprint) | ADR | NFR-F01 | — | — | TBD |
+| M0-09 | [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md) — Azure topology and subscription layout with an indicative budget sanity check. Measure the Azure/k3s footprint and initial costs at M0-13. | ADR | NFR-F01 | — | — | TBD |
 | M0-10 | ADR-0005 API and event conventions (error format, event envelope, versioning, compatibility) | ADR | — | — | — | TBD |
 | M0-11 | ADR-0006 Schema migration policy (replace runtime auto-migration) | ADR | NFR-D05 | — | — | TBD |
 | M0-12 | ADR-0007 Service boundaries and data ownership for new capabilities | ADR | FRD-1 | all new | M0-02…M0-08, M0-16 | TBD |
-| M0-13 | `azure-walking-skeleton` — IaC for staging, unchanged release deployed through the pipeline, health checks | Enabler | NFR-D01, D02, D04, D06 | — | M0-09 | TBD |
+| M0-13 | `azure-walking-skeleton` — IaC for staging, unchanged release deployed through the pipeline, health checks. At the checkpoint, measure Azure/k3s footprint and initial costs in S3 Testing, validate sizing and resource limits, and check provisioning in target subscriptions and regions as needed. | Enabler | NFR-D01, D02, D04, D06 | — | M0-09 | TBD |
 | M0-14 | `observability-baseline` — centralized logs, health and basic service metrics on staging | Enabler | NFR-O01, O02 (partial) | — | M0-13 | TBD |
 | M0-15 | Architecture docs v1: `deployment.md`, `finops.md`, `security.md` draft, `workload-capacity.md`, `application.md`, `data.md`, `canvas.md` | Enabler | — | — | M0-09, M0-12 | TBD |
 
@@ -84,7 +84,7 @@ Premium stays early (PRD D-17): every content feature from M1-07 onward enforces
 | M2-05 | DSA readings: first set of node readings (also the corpus for the AI assistant) | Content | F-15, F-19 | — | M2-04 | TBD |
 | M2-06 | `scale-judge-workers` — scaling by queue backlog; custom-run capacity isolated or limited so runs cannot starve contest submissions | Enabler | NFR-C02, C03, C06 | judging, code-run | M0-13, M0-16 | TBD |
 | M2-07 | Contest load test + 10× analysis (evidence) | Enabler | NFR-C01, C05, P01–P04, R01 | — | M2-01, M2-06, M1-13 | TBD |
-| M2-08 | `add-backups-and-dr` — daily backups to the DR subscription; restore drill | Enabler | NFR-R07, R08 | — | M0-13 | TBD |
+| M2-08 | `add-backups-and-dr` — daily external backups to S4 and a restore drill with S5 as the preferred target | Enabler | NFR-R07, R08 | — | M0-13 | TBD |
 | M2-09 | ADR-0010 LLM provider and vector storage (AI preparation) | ADR | F-19 | — | — | TBD |
 | M2-10 | `ai.md` v1 — corpus, retrieval, guardrails, evaluation design and evaluation set (AI preparation) | Enabler | F-19 | — | M2-05, M2-09 | TBD |
 | M2-11 | Beyond LeetCode pilot roadmap ("OS basics") | Content | F-16, F-15 | — | M2-04, M1-12 | TBD |

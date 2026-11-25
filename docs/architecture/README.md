@@ -28,9 +28,13 @@ CONCURRENCY, DEVELOPMENT, TECH_DEBT) and `docs/DEPLOYMENT.md` remain the code-le
 
 ## Architecture decisions
 
-| ADR | Status | Milestone |
-|---|---|---|
-| [ADR-0004 — Azure topology and subscription layout](adr/0004-azure-topology-and-subscription-layout.md) | Proposed | M0-09 |
+Architecture Decision Records (ADRs) document significant architectural
+decisions, their rationale, alternatives, and trade-offs.
+
+See the [`adr/` directory](adr/) for all architecture decisions.
+
+ADRs follow the review and acceptance process defined in
+[Team Workflow](../process/workflow.md#10-adrs).
 
 ## How they are used
 
