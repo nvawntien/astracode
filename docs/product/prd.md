@@ -465,7 +465,7 @@ feature flags) is described in `delivery-plan.md` and `docs/architecture/deploym
 
 | Milestone | Product content | Course parts exercised |
 |---|---|---|
-| M0 Foundation | Product documents and baseline specs; existing platform running on Azure | P1, P2, P3 |
+| M0 Foundation | Product documents and baseline specs; existing application deployed to Azure through the walking skeleton | P1, P2, P3 |
 | M1 Community core and premium | F-03 (incl. Contributor removal), F-06, F-16 minimal with Beyond LeetCode pilot content, F-21 core events | P2, P3 |
 | M2 Competition and learning | F-09, F-10, F-15 (DSA track, with its readings and "Continue learning"); AI preparation (provider decision, `ai.md`, evaluation set) | P2, P4, P5 |
 | M3 KPIs and production readiness | F-20; SLOs, security hardening, drills | P3, P4 |
@@ -572,8 +572,8 @@ contains it.
 | Premium entitlement threat model (beyond NFR-S03) | `security.md` |
 | AI corpus composition (approved readings, problem/quiz statements without solutions; no site pages, no community posts) | `ai.md` |
 | LLM provider choice (Gemini) and vector storage (pgvector) | ADR; `ai.md` |
-| Azure topology: subscription layout, VM-centric vs managed services, DR target subscription | ADRs; `deployment.md`; `finops.md` |
-| Walking skeleton, IaC-provisioned staging, auto-deploy to staging, feature flags, judge-worker scaling | `delivery-plan.md`; `deployment.md`; `reliability-observability.md` |
+| Azure topology, subscription allocation and recovery target | [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md) |
+| Walking skeleton, IaC-provisioned staging, approval-gated staging deployment, feature flags, judge-worker scaling | `delivery-plan.md`; `deployment.md`; `reliability-observability.md` |
 | Known technical limits: in-process SSE fan-out, no DLT replay consumer, runtime schema auto-migration, logging-only observability | `docs/codebase/TECH_DEBT.md`; ADRs |
 | Sandbox may need privileged containers (affects Azure hosting); multi-threaded submission support unverified | ADR (Azure topology); F-05 change |
-| Existing production topology: separate App Node and Judge Node; release flow develop → main → immutable tag → manual deploy | `deployment.md`; ADR (Azure topology) |
+| Checked-in dual-node Compose release and deployment reference | [Compose deployment reference](../DEPLOYMENT.md) |

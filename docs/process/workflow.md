@@ -34,14 +34,15 @@ Capability owners are not assigned yet; until they are, the Orchestrator reviews
 
 ## 3. Branches, environments and releases
 
-The repository's existing release flow is kept:
+The target release flow keeps `develop`, milestone release PRs into `main`, and protected semantic tags.
+M0-13 implements approval-gated staging and immutable release promotion.
+[ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md#delivery-and-access-control)
 
 ```
-feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy──►  STAGING   (auto-deploy and staging: planned, M0-13)
-                                         │
-                              milestone release PR
-                                         ▼
-                                       main ──► tag vX.Y.Z ──► release images ──► manual deploy ──► PRODUCTION
+feature/<change-id> ──PR (Gate 2)──► develop ──CI──► immutable GHCR release
+immutable GHCR release ──approved staging deployment──► STAGING ──► smoke-test evidence
+develop ──milestone release PR──► main ──► tag referencing the validated release
+tag referencing the validated release ──approved promotion──► PRODUCTION
 ```
 
 - One change = one branch `feature/<change-id>` from `develop` = one git worktree per agent session.
@@ -60,7 +61,7 @@ feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy─�
 | 5 | Apply in sessions following the `AGENTS.md` protocol; update `progress.md` each session | Change owner + agent | OpenSpec apply | All tasks ticked with evidence; CI green |
 | 6 | Cross-agent review: the **other** agent reviews the diff against the delta spec (Claude Code reviews Codex work and vice versa) | Change owner | Claude Code / Codex | Findings fixed or answered in the PR |
 | 7 | **Gate 2 — PR review** (PR template checklist) | Reviewer | GitHub | Approved; CI green |
-| 8 | Merge to `develop` → auto-deploy to staging → smoke tests (planned: M0-13) | Pipeline | GitHub Actions | Staging healthy |
+| 8 | Merge to `develop` → CI and immutable release publication. Deploy and smoke-test during an approved staging session after deployment approval (planned: M0-13). | Pipeline | GitHub Actions | Release published and staging validation recorded |
 | 9 | Archive the change (specs updated) in a follow-up commit on `develop` | Change owner | OpenSpec archive | `openspec/specs` reflects the change |
 | 10 | Close the issue | Change owner | GitHub | — |
 
@@ -86,7 +87,7 @@ The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 ## 7. Definition of done (per change)
 
 1. Gate 2 approved and merged to `develop`.
-2. Deployed to staging and smoke-tested (planned: M0-13).
+2. Deployed to staging with the required approvals and smoke-tested (planned: M0-13).
 3. Change archived; specs updated.
 4. Doc impact handled (architecture docs, contracts, ADRs).
 5. Issue closed.
@@ -113,7 +114,7 @@ The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 
 - Any decision that is costly to reverse or affects several capabilities gets an ADR (`docs/architecture/adr/NNNN-title.md`).
 - Status: Proposed → Accepted / Rejected; later Superseded by a newer ADR. Accepted ADRs are not edited.
-- An ADR is reviewed like a change (draft PR, one reviewer).
+- Author the ADR directly in the ADR directory. Submit it for review in a draft documentation PR with one reviewer.
 
 ## 11. Cadence
 

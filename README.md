@@ -70,13 +70,15 @@ flowchart TB
 
 ### Production topology
 
-The diagram above describes the logical runtime relationships. The verified
-production deployment separates those components across two physical roles:
+The diagram above describes the logical runtime relationships. The reference
+Compose deployment separates those components across two physical roles:
 
 - **App Node** — runs `website`, `auth-service`, `problem-service`,
   `submission-service`, Envoy, PostgreSQL, Redis, Kafka, and MinIO. It
   does not run Judge Worker or the go-judge executor.
 - **Judge Node** — runs `judge-worker` and the go-judge sandbox/executor.
+
+The Azure/k3s target is proposed in [ADR-0004](docs/architecture/adr/0004-azure-topology-and-subscription-layout.md).
 
 Official submissions travel asynchronously from Submission Service to Judge
 Worker through Kafka. Interactive Run Code requests use the direct internal
@@ -294,10 +296,10 @@ Further technical documentation:
 
 ## Production deployment
 
-Production uses immutable GHCR images and includes the standalone Next.js
-website in the Compose topology. Envoy provides same-origin routes for the UI,
+The checked-in deployment workflow uses GHCR images and includes the
+standalone Next.js website. Envoy provides same-origin routes for the UI,
 API, SSE, and avatars; only its configurable loopback port is bound by default.
-Production has separate App and Judge nodes. The release path is:
+The reference topology has separate App and Judge nodes. Its release path is:
 
 ```text
 develop
@@ -341,9 +343,9 @@ release tag and records the deployment through the GitHub `production`
 Environment. Application secrets and node-specific Compose/configuration files
 stay outside the checkout.
 
-Read [Production deployment](docs/DEPLOYMENT.md) before operating the stack. It
-covers first bootstrap, TLS, strict SSH host verification, GHCR, external secret
-files, firewall rules, backups, smoke checks, and schema-aware rollback limits.
+The Compose runbook covers first bootstrap, TLS, strict SSH host verification,
+GHCR, external secret files, firewall rules, backups, smoke checks, and
+schema-aware rollback limits. [Compose deployment runbook](docs/DEPLOYMENT.md)
 The reference Compose deployment is intentionally not described as zero downtime.
 
 Known limits include in-process SSE fan-out, no checked-in DLT replay consumer,
