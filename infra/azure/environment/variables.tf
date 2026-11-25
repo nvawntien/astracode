@@ -60,6 +60,7 @@ variable "compute" {
     app_os_disk_gib   = optional(number, 64)
     judge_os_disk_gib = optional(number, 64)
     app_data_disk_gib = optional(number, 64)
+    app_data_uuid     = optional(string)
     ssh_public_key    = optional(string)
     os_image = optional(object({
       publisher = string

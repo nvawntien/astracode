@@ -29,10 +29,21 @@ resource "terraform_data" "compute_admission" {
     precondition {
       condition = !var.compute.enabled || try(
         can(regex("^ssh-(ed25519|rsa) +[A-Za-z0-9+/=]+", var.compute.ssh_public_key)) &&
-        can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.compute.os_image.version)),
+        can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.compute.os_image.version)) &&
+        var.compute.app_data_uuid != null &&
+        local.disk_uuid != "00000000-0000-0000-0000-000000000000" &&
+        can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", local.disk_uuid)),
         false
       )
-      error_message = "Enabling compute requires an SSH public key and a pinned Marketplace image version."
+      error_message = "Enabling compute requires an SSH public key, a pinned Marketplace image version and the approved App ext4 filesystem UUID."
+    }
+
+    precondition {
+      condition = (
+        local.network_bounds.vnet[1] < local.network_bounds.pods[0] ||
+        local.network_bounds.vnet[0] > local.network_bounds.services[1]
+      )
+      error_message = "The Azure VNet must not overlap the reserved K3s Pod or Service CIDRs (10.42.0.0/15)."
     }
   }
 }
@@ -62,6 +73,7 @@ resource "azurerm_linux_virtual_machine" "node" {
   admin_username                  = "astraops"
   disable_password_authentication = true
   network_interface_ids           = [azurerm_network_interface.node[each.key].id]
+  custom_data                     = base64encode(local.cloud_config[each.key])
 
   admin_ssh_key {
     username   = "astraops"

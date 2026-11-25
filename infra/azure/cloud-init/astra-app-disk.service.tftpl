@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify the approved Azure App data device
+DefaultDependencies=no
+Requires=${device_unit}
+After=${device_unit}
+Before=srv-astracode-data.mount shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/astra/app-disk before-mount

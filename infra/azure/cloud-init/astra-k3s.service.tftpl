@@ -1,0 +1,26 @@
+[Unit]
+Description=AstraCode K3s ${node}
+Wants=network-online.target
+Requires=astra-host-firewall.service
+After=cloud-final.service network-online.target astra-host-firewall.service
+%{ if node == "app" ~}
+BindsTo=srv-astracode-data.mount
+After=srv-astracode-data.mount
+%{ endif ~}
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+Delegate=yes
+KillMode=mixed
+TimeoutStartSec=180
+Restart=on-failure
+RestartSec=10
+%{ if node == "app" ~}
+ExecStartPre=/usr/local/libexec/astra/app-disk before-k3s
+%{ endif ~}
+ExecStartPre=/usr/local/libexec/astra/k3s-credential ${node}
+ExecStart=/usr/local/bin/k3s ${mode}
+
+[Install]
+WantedBy=multi-user.target

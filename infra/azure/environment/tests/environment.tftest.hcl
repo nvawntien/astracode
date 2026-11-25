@@ -1,5 +1,6 @@
 variable "approved_subscription_ids" {}
 variable "controller" {}
+variable "network" {}
 variable "target" {}
 
 mock_provider "azurerm" {
@@ -115,12 +116,23 @@ run "reject_subscription_slot_mismatch" {
   expect_failures = [var.target]
 }
 
+run "reject_k3s_network_overlap" {
+  command = plan
+
+  variables {
+    network = merge(var.network, { vnet_cidr = "10.43.128.0/24" })
+  }
+
+  expect_failures = [terraform_data.compute_admission]
+}
+
 run "reject_unarmed_compute" {
   command = plan
 
   variables {
     compute = {
       enabled        = true
+      app_data_uuid  = "00000000-0000-4000-8000-000000000001"
       ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
       os_image = {
         publisher = "Canonical"
@@ -141,6 +153,7 @@ run "plan_only_the_approved_vm_pair" {
     controller = merge(var.controller, { armed = true })
     compute = {
       enabled        = true
+      app_data_uuid  = "00000000-0000-4000-8000-000000000001"
       ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
       os_image = {
         publisher = "Canonical"
