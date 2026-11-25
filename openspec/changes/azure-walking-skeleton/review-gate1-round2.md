@@ -8,8 +8,8 @@ base_commit: 1804dc27eeaf30286da1a1d301023c876d4e7b16
 risk: high
 verify: not_run_independently
 status: approved
-orchestrator_sequence_approval: pending
-apply_authorization: pending_owner_decision_and_required_gate_checks
+orchestrator_sequence_approval: approved
+apply_authorization: approved_phase_a_only
 ---
 
 # Gate 1 - M0-13 Azure walking skeleton - Round 2
