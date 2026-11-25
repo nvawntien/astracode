@@ -1,0 +1,59 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: astracode-app-retained
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowedTopologies:
+  - matchLabelExpressions:
+      - key: astracode.io/node-role
+        values: [app]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: astracode-app
+spec:
+  storageClassName: astracode-app-retained
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 24Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: astracode-app
+spec:
+  storageClassName: astracode-app-retained
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 4Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  namespace: astracode-app
+spec:
+  storageClassName: astracode-app-retained
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 8Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: astracode-app
+spec:
+  storageClassName: astracode-app-retained
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 16Gi
