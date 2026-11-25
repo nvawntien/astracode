@@ -17,7 +17,7 @@ product rules **inside** this frame. A change that needs to move ownership or ad
 journey needs a new ADR that supersedes this one.
 
 Out of scope: event envelope, error format, versioning and compatibility rules (ADR-0005, M0-10, not yet written); event and API field definitions (contracts-first change M1-06 and each feature change); physical placement on
-Azure (ADR-0004, M0-09); product rules (PRD Appendix A, then specs).
+Azure ([ADR-0004](0004-azure-topology-and-subscription-layout.md), M0-09); product rules (PRD Appendix A, then specs).
 [Delivery plan](../../product/delivery-plan.md) · [FRD capability map](../../product/frd.md#2-capability-map) ·
 [PRD features](../../product/prd.md#part-3--features)
 
@@ -52,8 +52,8 @@ Facts that shape this decision:
   next sign-in, up to 7 days later.
 - **Scope.** PRD v0.6 Must capabilities to place: membership, quiz, learning-roadmap, contest, rating, notification,
   kpi-analytics. Should: ai-assistant, social-follow, discussion, gamification, problem-leaderboard.
-- **Constraints.** Budget of 5 student subscriptions × ~$100 (NFR-F01). The Azure topology (ADR-0004) is not decided;
-  production today separates an App node and a Judge node. A 6-person team owns capabilities in parallel.
+- **Constraints.** Budget of 5 student subscriptions × ~$100 (NFR-F01). The Compose reference separates the App
+  and Judge roles. ADR-0004 proposes their Azure placement. A 6-person team owns capabilities in parallel.
 
 ## Options
 

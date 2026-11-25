@@ -118,6 +118,9 @@ GitHub Actions workflows in `.github/workflows/`:
 | `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
 | `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
 
+These rows describe the checked-in workflows. M0-13 implements the approval-gated
+Azure/k3s delivery model proposed in [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md).
+
 Documentation-only PRs skip the Docker build steps and still report all six
 required image checks. CI checks both paths of renames. Code, migration SQL,
 configuration and tooling changes run the image builds, as do indeterminate

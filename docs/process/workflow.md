@@ -34,22 +34,25 @@ Capability owners are not assigned yet; until they are, the Orchestrator reviews
 
 ## 3. Branches, environments and releases
 
-The repository's existing release flow is kept:
+The target release flow keeps `develop`, milestone release PRs into `main`, and protected semantic tags.
+M0-13 implements approval-gated staging and immutable release promotion.
+[ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md#delivery-and-access-control)
 
 ```
-feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy──►  STAGING   (auto-deploy and staging: planned, M0-13)
-                                         │
-                              milestone release PR
-                                         ▼
-                                       main ──► tag vX.Y.Z ──► release images ──► manual deploy ──► PRODUCTION
+feature/<change-id> ──PR (Gate 2)──► develop ──CI──► immutable GHCR release
+immutable GHCR release ──approved staging deployment──► STAGING ──► smoke-test evidence
+develop ──milestone release PR──► main ──► tag referencing the validated release
+tag referencing the validated release ──approved promotion──► PRODUCTION
 ```
 
-- One change = one branch `feature/<change-id>` from `develop` = one git worktree per agent session.
-- Gate 1 is a **draft PR** containing only the change folder (and contract files).
-- Gate 2 is the same PR, ready for review.
+- For OpenSpec implementation, use one `feature/<change-id>` branch from `develop` and one git worktree per agent session.
+- OpenSpec Gate 1 is a **draft PR** containing only the change folder (and contract files).
+- OpenSpec Gate 2 is the same PR, ready for review.
 - No deployment during a contest window (NFR-A06).
 
 ## 4. Change lifecycle
+
+This lifecycle applies to OpenSpec implementation changes. [ADR-only changes follow §10.](#10-adrs)
 
 | # | Step | Who | Tool | Exit criterion |
 |---|---|---|---|---|
@@ -60,7 +63,7 @@ feature/<change-id>  ──PR (Gate 2)──►  develop  ──auto-deploy─�
 | 5 | Apply in sessions following the `AGENTS.md` protocol; update `progress.md` each session | Change owner + agent | OpenSpec apply | All tasks ticked with evidence; CI green |
 | 6 | Cross-agent review: the **other** agent reviews the diff against the delta spec (Claude Code reviews Codex work and vice versa) | Change owner | Claude Code / Codex | Findings fixed or answered in the PR |
 | 7 | **Gate 2 — PR review** (PR template checklist) | Reviewer | GitHub | Approved; CI green |
-| 8 | Merge to `develop` → auto-deploy to staging → smoke tests (planned: M0-13) | Pipeline | GitHub Actions | Staging healthy |
+| 8 | Merge to `develop` → CI and immutable release publication. Deploy and smoke-test during an approved staging session after deployment approval (planned: M0-13). | Pipeline | GitHub Actions | Release published and staging validation recorded |
 | 9 | Archive the change (specs updated) in a follow-up commit on `develop` | Change owner | OpenSpec archive | `openspec/specs` reflects the change |
 | 10 | Close the issue | Change owner | GitHub | — |
 
@@ -85,8 +88,10 @@ The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 
 ## 7. Definition of done (per change)
 
+These completion criteria apply to OpenSpec implementation changes. [ADR-only changes follow §10.](#10-adrs)
+
 1. Gate 2 approved and merged to `develop`.
-2. Deployed to staging and smoke-tested (planned: M0-13).
+2. Deployed to staging with the required approvals and smoke-tested (planned: M0-13).
 3. Change archived; specs updated.
 4. Doc impact handled (architecture docs, contracts, ADRs).
 5. Issue closed.
@@ -97,7 +102,7 @@ The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 |---|---|
 | Instructions | Both follow `AGENTS.md` (Codex reads it directly; Claude Code reads `CLAUDE.md`, which imports `AGENTS.md`). Agent-specific notes go only in `CLAUDE.md`. |
 | OpenSpec commands | Installed for both tools by `openspec init`; regenerated with `openspec update` after upgrading OpenSpec. |
-| Context | A session starts from `AGENTS.md`, the module `AGENTS.md`, if one exists, the change folder and `progress.md`; product documents: During implementation, do not read prd.md or frd.md. Read nfr.md only for the NFR IDs cited in the change. At propose time, use only the F-xx section given in the prompt. |
+| Context | Start with `AGENTS.md` and the module `AGENTS.md`, if one exists. In OpenSpec implementation sessions, also read the change folder and `progress.md`. During implementation, do not read prd.md or frd.md. Read nfr.md only for the NFR IDs cited in the change. At propose time, use only the F-xx section given in the prompt. |
 | Parallelism | One agent session per worktree; never two agents in one worktree. |
 | Autonomous loops | Allowed only for changes with automated tests as the stop condition, with an iteration cap, on a feature branch, outside sandbox, authentication, outbox and production-deployment code. |
 | Reviewing | The agent that wrote the code does not review it; the other tool does (step 6), then a human (Gate 2). |
@@ -112,8 +117,15 @@ The Gate 2 checklist is the PR template (`.github/pull_request_template.md`).
 ## 10. ADRs
 
 - Any decision that is costly to reverse or affects several capabilities gets an ADR (`docs/architecture/adr/NNNN-title.md`).
-- Status: Proposed → Accepted / Rejected; later Superseded by a newer ADR. Accepted ADRs are not edited.
-- An ADR is reviewed like a change (draft PR, one reviewer).
+- Start at **Proposed**. Maintainers change ADR status through the established review and acceptance process.
+  An ADR may become **Accepted** or **Rejected**, or be **Superseded** later by a newer ADR. Accepted ADRs are immutable.
+- Author ADR-only changes directly in `docs/architecture/adr/`. Submit a draft documentation PR for human review by
+  a reviewer other than the author. Review the ADR and directly affected documentation and run applicable
+  documentation checks.
+- ADR-only completion requires no OpenSpec change, delta specs, `tasks.md`, `progress.md`, OpenSpec
+  propose/apply/archive, or staging deployment. Existing repository-wide CI still applies, including OpenSpec
+  validation where configured. Decision-specific acceptance criteria, required evidence, NFRs and milestone
+  dependencies still apply.
 
 ## 11. Cadence
 

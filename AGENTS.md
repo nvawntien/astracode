@@ -22,12 +22,14 @@ Run `make migrate` before starting services directly with Go.
 ## Hard constraints (read first)
 
 1. Never edit `openspec/specs/*` directly. Behaviour changes only through a change folder and archive.
-2. Work only inside the current change's `tasks.md` scope. Anything else: stop and report.
+2. Work only inside the current OpenSpec change's `tasks.md` scope or the explicitly authorized
+   [ADR-only documentation scope](#adr-only-workflow). If work falls outside that scope, stop and report.
 3. Never weaken sandbox limits, authentication/JWT handling, the transactional outbox or attempt-aware result handling without an approved change that says so.
 4. Never change `proto/`, event schemas or gateway routes without a contract update marked BREAKING / NON-BREAKING in the change.
 5. Never commit secrets, real credentials, the development JWK or `.env` files. Never put personal data in logs or LLM prompts.
 6. Premium content must be checked server-side on every read path; never rely on the UI.
-7. Do not mark a task done without evidence (test name or command output) in `progress.md`.
+7. Require evidence before marking work done. Record test names or command results in `progress.md` for OpenSpec
+   implementation and in the PR or final work summary for ADR-only work.
 8. Do not deploy, tag releases or touch production configuration.
 
 
@@ -54,7 +56,7 @@ Run `make migrate` before starting services directly with Go.
 )
 (cd website && { [ -f .env.local ] || cp .env.example .env.local; } && npm ci && npm run dev)
 
-# Verify Go modules, website, Compose config and OpenSpec
+# OpenSpec implementation checks for Go modules, website, Compose config and OpenSpec
 make test-quick   # session start: skip race, benchmark, website tests and build
 make test         # before claiming done
 ```
@@ -63,6 +65,8 @@ If JWK validation fails, check the local Auth access secret and follow the
 [Envoy key replacement and activation steps](envoy/README.md#configuration-and-secrets).
 
 ## Session protocol
+
+### OpenSpec implementation
 
 Start:
 1. Read this file, then the `AGENTS.md` of the module you will touch, if one exists.
@@ -77,6 +81,14 @@ End:
 6. Run verify. Tick tasks only with evidence.
 7. Overwrite `progress.md` (template: `docs/process/templates/progress.md`).
 8. Commit with a message referencing the change ID. Leave no uncommitted work.
+
+### ADR-only workflow
+
+Check the current branch and working tree, then read the ADR and directly affected documentation. Follow the
+explicitly authorized documentation scope and the [ADR review process](docs/process/workflow.md#10-adrs).
+Author the ADR directly in the ADR directory. ADR-only work requires no OpenSpec change, `tasks.md`, or
+`progress.md`. Run applicable documentation checks and report results and remaining issues in the PR or final
+work summary. Apply the existing CI gates and decision-specific acceptance criteria.
 
 ## Where to look (only when relevant)
 
@@ -97,5 +109,5 @@ During implementation, do not read prd.md or frd.md. Read nfr.md only for the NF
 ## Hard constraints (repeat)
 
 - No direct edits to `openspec/specs/*`.
-- Stay inside `tasks.md`.
+- Stay within the scope of the applicable workflow.
 - No secrets; no premium checks in the UI only; no done without evidence.

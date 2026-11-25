@@ -9,7 +9,7 @@
 
 | Document | Status | Responsibility (owns) | Must NOT contain | First needed | Updated when | Course part |
 |---|---|---|---|---|---|---|
-| `adr/NNNN-*.md` | Planned | One decision each: context, options, decision, trade-offs, consequences. Immutable once accepted; superseded by a new ADR | Anything not about that decision | **M0** (topology, conventions, migrations) | A new decision is taken | P1–P5 |
+| `adr/NNNN-*.md` | In use | One decision each: context, options, decision, trade-offs, consequences. Immutable once accepted; superseded by a new ADR | Anything not about that decision | **M0** (topology, conventions, migrations) | A new decision is taken | P1–P5 |
 | `workload-capacity.md` | Planned | Launch scenario → average/peak request rates → contest load profile → capacity per component, headroom, 10× analysis | Targets (→ NFR), measured results (→ evidence) | **M0** (rates); capacity after the stack footprint is measured | Load-test results change assumptions | P1, P4 |
 | `deployment.md` | Planned | Environments (dev, staging, production), branch and release flow, CI/CD pipeline, registry, IaC layout, App/Judge node topology, feature flags, rollback, schema migration procedure, deployment freeze | Security controls (→ security.md), cost (→ finops.md) | **M0** (walking skeleton) | Pipeline or topology changes | P3 |
 | `finops.md` | Planned | Subscription layout and purpose, cost model per environment, burn rate vs credit, unit costs, 5× estimate, cost controls | Targets (→ NFR-F) | **M0** (first model from measured footprint) | Weekly burn review; new paid resource | P4, P5 |
@@ -25,6 +25,16 @@
 Existing source-grounded notes in `docs/codebase/` (OVERVIEW, ARCHITECTURE, SERVICES, DOMAIN, DATA, FLOWS,
 CONCURRENCY, DEVELOPMENT, TECH_DEBT) and `docs/DEPLOYMENT.md` remain the code-level reference. The documents above
 **link to them** rather than repeating them, and add the target state and decisions.
+
+## Architecture decisions
+
+Architecture Decision Records (ADRs) document significant architectural
+decisions, their rationale, alternatives, and trade-offs.
+
+See the [`adr/` directory](adr/) for all architecture decisions.
+
+ADRs follow the review and acceptance process defined in
+[Team Workflow](../process/workflow.md#10-adrs).
 
 ## How they are used
 

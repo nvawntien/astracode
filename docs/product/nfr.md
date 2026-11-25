@@ -39,8 +39,10 @@ load profile used for testing is defined in NFR-C01.
 
 ### 1.2 Constraints that shape the targets
 
-- Budget: 5 student Azure subscriptions × ~$100, not poolable (PRD §1.3). A single-VM production environment is
-  expected (topology ADR), so targets accept a single point of failure and avoid multi-zone or HA-database requirements.
+- The five Azure Student subscriptions each have ~$100 in credits, with a separate balance per subscription
+  (PRD §1.3). The production design uses one App VM and one Judge VM, each a single point of failure for
+  its role. Multi-zone and HA-database requirements remain out of scope.
+  [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md)
 - Course rubric: performance, scalability, reliability, security, observability, cost and AI evaluation must each be
   **demonstrated with evidence**, not only described.
 
@@ -166,8 +168,8 @@ requests, running-contest questions, premium-content probes and prompt-injection
 
 | ID | Requirement | Target | Verification | Priority | Related |
 |---|---|---|---|---|---|
-| NFR-D01 | Every merge to `develop` is built, deployed to staging and smoke-tested automatically | 100% of merges | Pipeline history | Must | — |
-| NFR-D02 | Production runs the same immutable image that passed staging; promotion requires manual approval | 100% of releases | Pipeline history | Must | — |
+| NFR-D01 | Every merge to `develop` runs CI and publishes immutable release artifacts after checks pass. Staging deployment requires approval from a designated maintainer and separate owner approval to run staging. Deployment and smoke tests run automatically after approval. | 100% of merges checked, all passing merges published, and 100% of staging deployments approved and smoke-tested before promotion | CI and deployment history, recorded digests and approval records | Must | ADR-0004 |
+| NFR-D02 | Production promotion requires approval from a designated maintainer and uses the exact immutable release that passed staging, including the same image digests. | 100% of releases | Compare release metadata, deployed digests, staging evidence and production approval in pipeline history | Must | ADR-0004 |
 | NFR-D03 | Rollback to the previous release | ≤ 15 min | Rollback drill | Must | — |
 | NFR-D04 | All cloud infrastructure is defined as code; a complete environment can be recreated in another subscription | ≤ 2 h from empty subscription to running stack | Recreation drill | Must | — |
 | NFR-D05 | Database schema changes use versioned, backward-compatible migrations (no runtime auto-migration in production) | 100% of schema changes | CI check; migration review | Must | — |
@@ -184,7 +186,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 |---|---|---|---|---|---|
 | NFR-F01 | Spend stays within credits | Each subscription ≤ its ~$100 credit for the semester; burn rate tracked weekly | Azure cost reports; `finops.md` | Must | — |
 | NFR-F02 | Budget alerts on every subscription | Alerts at 50%, 80%, 100% | Alert configuration review | Must | — |
-| NFR-F03 | Non-production compute stops outside working hours | Staging off ≥ 12 h/day | Schedule configuration; cost report | Must | — |
+| NFR-F03 | Non-production compute stops outside working hours. Staging runs only in owner-approved sessions, followed by automatic VM deallocation. Extensions require fresh owner approval. | One hour from readiness per approved session, with bounded startup and shutdown. Staging off ≥ 12 h/day. | Lifecycle approval and expiry records, Azure VM power-state history and cost report | Must | ADR-0004 |
 | NFR-F04 | Unit costs are reported | Cost per 1,000 submissions, per contest, per active user; per AI answer once F-19 is delivered | `finops.md` | Must | F-20 |
 | NFR-F05 | Cost at 5× the launch scenario is estimated | Documented estimate with top 3 cost drivers | `finops.md` | Must | — |
 

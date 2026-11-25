@@ -1,7 +1,11 @@
-# AstraCode dual-node production deployment
+# AstraCode dual-node Compose deployment reference
 
-Production uses immutable GHCR release images, Docker Compose, and a protected
-manual GitHub Actions deployment. It has two distinct nodes:
+This runbook documents the checked-in Docker Compose and SSH deployment
+workflow. The proposed Azure/k3s deployment starts from fresh infrastructure.
+[ADR-0004](architecture/adr/0004-azure-topology-and-subscription-layout.md)
+
+The reference workflow uses GHCR release images and protected manual
+GitHub Actions deployment across two node roles.
 
 ```text
 GitHub Actions runner
@@ -9,21 +13,19 @@ GitHub Actions runner
   └─ SSH ProxyJump through App Node ─────> Judge Node (astracode-judge-01)
 ```
 
-This document describes the production deployment contract. It does not claim
-zero downtime or replace host/sandbox security review.
+Using this reference on a host requires a separate host and sandbox security review.
 
 ## Database migrations before activation
 
-AstraCode has yet to deploy to production. The first and subsequent deployments
-must successfully execute the reviewed Goose migrations for Auth, Problem and
-Submission before activating the applications. Run one sequence per owning
-database with deployment-provided
+The first and subsequent deployments must successfully execute the reviewed
+Goose migrations for Auth, Problem and Submission before activating the
+applications. Run one sequence per owning database with deployment-provided
 credentials. Verify all three outcomes before starting the applications.
 Each service also checks its expected version read-only at startup.
 
 The existing production Compose configuration does not run migrations before
 activation. It excludes the local migration job and local database credential
-overrides. Future Kubernetes and GitOps tooling must reuse the existing
+overrides. The planned Kubernetes delivery pipeline must reuse the existing
 Goose CLI and service-owned SQL migrations. Separate managed migration and
 runtime privileges, rollout coordination and backup procedures belong to the
 infrastructure implementation before first deployment.
@@ -276,8 +278,10 @@ judge_sandbox (Compose service: go-judge)
 judge_worker  (Compose service: judge-worker)
 ```
 
-It reaches App services through the private network/WireGuard. Its Compose and
-runtime configuration are external and node-owned:
+The reference Compose configuration uses a private path to App services and
+allows WireGuard on that path. The proposed Azure VNet uses Flannel VXLAN as
+specified in ADR-0004. The reference Compose and runtime configuration are
+external and node-owned:
 
 ```text
 /etc/astracode/judge-node.compose.yml
