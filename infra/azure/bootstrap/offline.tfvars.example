@@ -1,0 +1,28 @@
+# Synthetic identifiers for provider-mocked tests.
+target = {
+  slot            = "S4"
+  subscription_id = "00000000-0000-0000-0000-000000000004"
+  tenant_id       = "00000000-0000-0000-0000-000000000010"
+  location        = "southeastasia"
+  storage_prefix  = "astras4mock"
+}
+
+access = {
+  operator_ipv4 = ["192.0.2.10/32"]
+  receipt_ipv4  = ["198.51.100.20/32"]
+  state_operator_ids = {
+    S2 = "00000000-0000-0000-0000-000000000022"
+    S3 = "00000000-0000-0000-0000-000000000023"
+    S4 = "00000000-0000-0000-0000-000000000024"
+  }
+  backup_operator_id     = "00000000-0000-0000-0000-000000000025"
+  receipt_publisher_id   = "00000000-0000-0000-0000-000000000026"
+  receipt_reader_ids     = ["00000000-0000-0000-0000-000000000027"]
+  receipt_retention_days = 365
+}
+
+budget = {
+  amount    = 100
+  starts_at = "2026-11-01T00:00:00Z"
+  email     = ["operations@example.invalid"]
+}

@@ -1,0 +1,32 @@
+# Synthetic identifiers for provider-mocked tests.
+target = {
+  slot            = "S2"
+  subscription_id = "00000000-0000-0000-0000-000000000002"
+  tenant_id       = "00000000-0000-0000-0000-000000000010"
+  location        = "southeastasia"
+  storage_prefix  = "astras2mock"
+  state_container = "s2-tfstate"
+}
+
+approved_subscription_ids = {
+  S2 = "00000000-0000-0000-0000-000000000002"
+  S3 = "00000000-0000-0000-0000-000000000003"
+}
+
+network = {
+  vnet_cidr   = "10.72.0.0/24"
+  tester_ipv4 = ["192.0.2.30/32"]
+}
+
+controller = {
+  api_client_id       = "00000000-0000-0000-0000-000000000031"
+  caller_client_ids   = ["00000000-0000-0000-0000-000000000032", "00000000-0000-0000-0000-000000000033"]
+  alert_email         = "operations@example.invalid"
+  emergency_object_id = "00000000-0000-0000-0000-000000000034"
+}
+
+budget = {
+  amount    = 100
+  starts_at = "2026-11-01T00:00:00Z"
+  email     = ["operations@example.invalid"]
+}

@@ -4,21 +4,23 @@
 
 ## Verified state
 - Branch / worktree — `feature/azure-walking-skeleton` in the current repository worktree.
-- Last verify run — `make test-quick` passed on Go 1.25.8 with writable temporary directories and loopback access. Go tests and vet, website typecheck, Compose configuration and strict OpenSpec validation passed. `openspec validate azure-walking-skeleton --strict` passed, and all 11 OpenSpec items passed.
-- Tasks done (with evidence) — 0 of 15 implementation tasks.
+- Baseline — `make test-quick` passed on Go 1.25.8 with writable temporary directories and loopback access. Go tests and vet, website typecheck, Compose configuration and strict OpenSpec validation passed. `openspec validate azure-walking-skeleton --strict` passed, and all 11 OpenSpec items passed.
+- Last verify run — `make test` passed, including Go test/vet/race, 620 website tests, the website build and Compose configuration. `terraform fmt -check -recursive infra/azure`, backend-disabled read-only-lock init and `terraform validate` passed.
+- Tasks done (with evidence) — 1 of 15. Task 1.1 passed `terraform test -var-file=offline.tfvars.example` in bootstrap (3 cases) and environment (7 cases). `bash infra/azure/environment/tests/check-retained-disk.sh` confirmed bound state retargeting and App disk replacement are rejected using mock state.
 
 ## Last session
-- Goal — Verify the recorded Phase A authorization and the session-start baseline for task 1.1.
-- Changed — Recorded the [Round 2 decision](review-gate1-round2.md). Its frontmatter approves the M0-13 sequencing exception and Phase A offline only. The [Round 1 review](review-gate1.md) records the original verdict.
+- Goal — Implement task 1.1 only in Phase A offline.
+- Changed — Added the [Terraform roots and offline checks](../../../infra/azure/README.md) with pinned Terraform 1.13.5 and AzureRM 4.59.0. Registry locks were verified against HashiCorp signatures. The [Round 2 decision](review-gate1-round2.md) records approval of the M0-13 sequencing exception and Phase A offline only. The [Round 1 review](review-gate1.md) records the original verdict.
 
 ## Broken or unverified
-- The independent technical review is approved. Formal Gate 1 remains unverified. GitHub's open-pull query for the feature branch returned zero results, so no approved draft PR was available to verify.
+- The owner confirmed Gate 1 acceptance and that the PR is draft. The PR link was supplied as a placeholder, so hosted PR state and checks were not independently verified.
 - Owner authorization for the separate default-branch PR and cloud operations, plus confirmation of the proposed daily off window, are outstanding.
 - GitHub protection settings, Azure tenant/access/offer/quota, hosting and egress eligibility, recurring costs and live acceptance remain unverified.
+- Phase B must verify the Flex subnet NAT cost and reachability, the pair-only Azure Policy and power-role propagation, storage and receipt access, the armed controller and independent alert delivery. No Azure resource operations were performed.
 - The installed CLI skipped string-valued artifact rules. Reviewed the proposal header/scope, behavioral delta, design references and contracts, documentation impact, and unchecked tasks with scenario coverage against those rules directly.
 
 ## Next action
-- Next task — Start task 1.1 offline once formal Gate 1 is verified or the owner explicitly approves an exception for Phase A.
+- Next task — Task 1.2 is pending for a subsequent authorized session.
 - Do not touch — Cloud resources, production, canonical specs or application contracts during Phase A.
 
 ## Notes for the reviewer
