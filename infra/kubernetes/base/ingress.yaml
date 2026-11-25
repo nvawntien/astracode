@@ -1,0 +1,41 @@
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: tester-mtls
+  namespace: astracode-app
+spec:
+  minVersion: VersionTLS12
+  clientAuth:
+    secretNames: [tester-ca]
+    clientAuthType: RequireAndVerifyClientCert
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tester-session
+  namespace: astracode-app
+spec:
+  forwardAuth:
+    address: http://tester-lease.astracode-app.svc:8080/check
+    trustForwardHeader: false
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: tester
+  namespace: astracode-app
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`inactive.invalid`)
+      middlewares:
+        - name: tester-session
+      services:
+        - name: envoy
+          port: 8080
+  tls:
+    secretName: tester-tls
+    options:
+      name: tester-mtls
+      namespace: astracode-app

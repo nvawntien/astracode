@@ -17,7 +17,7 @@ Operators SHALL be able to recreate a complete environment from versioned defini
 - **THEN** persistent workloads remain inactive and no fallback data is written to the OS disk
 
 ### Requirement: ED-02 Restricted ingress and execution
-Staging SHALL serve authorized members over HTTPS during an approved session. Cluster management, private services and backing services SHALL reject external access. The application gateway SHALL remain the source of verified identity for protected services. Submitted code SHALL use the existing sandbox limits and SHALL be unable to reach any network destination, cloud metadata or node credentials. Runtime credentials SHALL be scoped to their respective purposes and kept out of published artifacts. Workload activation SHALL enforce platform-approved placement, execution privileges and credential access.
+Staging SHALL serve authorized members over HTTPS during an approved session. Cluster management, private services and backing services SHALL reject external access. The application gateway SHALL remain the source of verified identity for protected services. Official submissions and interactive user code SHALL run only inside the sandbox with CPU, memory, process, wall-time and output limits and SHALL be unable to reach any network destination, cloud metadata or node credentials. Runtime credentials SHALL be scoped to their respective purposes and kept out of published artifacts. Workload activation SHALL enforce platform-approved placement, execution privileges and credential access. Only the platform-managed go-judge daemon SHALL receive the privileged exception, bound to the approved digest, fixed template, dedicated namespace and Judge node. The executor SHALL accept private Worker traffic only.
 
 #### Scenario: Unauthorized staging or backend access
 - **WHEN** an unauthorized client attempts staging access, or a client attempts to reach a protected service directly or supply forged identity
@@ -30,8 +30,12 @@ Staging SHALL serve authorized members over HTTPS during an approved session. Cl
 - **AND** submitted code cannot reach network destinations or access host and cloud credentials
 
 #### Scenario: Workload attempts to cross its authority boundary
-- **WHEN** an ordinary App workload or a Judge workload attempts to use a host cloud identity, another workload's credentials or an unauthorized management interface
+- **WHEN** an ordinary App workload or Judge Worker attempts to use a host cloud identity, another workload's credentials or an unauthorized management interface
 - **THEN** it obtains neither credentials nor management access through those attempts
+
+#### Scenario: Privileged executor restarts
+- **WHEN** the trusted daemon restarts with a stale or missing permit
+- **THEN** judging stays closed until authorized recovery issues a valid permit
 
 #### Scenario: Release requests additional workload privileges
 - **WHEN** a release requests unauthorized host or secret access, workload identity, placement or elevated execution privileges

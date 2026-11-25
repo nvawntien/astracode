@@ -6,3 +6,13 @@ labels:
   - pairs:
       astracode.io/environment: s2
     includeSelectors: false
+patches:
+  - target:
+      group: traefik.io
+      version: v1alpha1
+      kind: IngressRoute
+      name: tester
+    patch: |-
+      - op: replace
+        path: /spec/routes/0/match
+        value: Host(`staging.invalid`)

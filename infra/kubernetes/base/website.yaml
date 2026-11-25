@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: website
+  namespace: astracode-app
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website
+  namespace: astracode-app
+  labels:
+    astracode.io/template: website
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: website
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: website
+        astracode.io/template: website
+    spec:
+      serviceAccountName: website
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: astracode.io/node-role
+                operator: In
+                values:
+                - app
+      containers:
+      - name: website
+        image: offline.invalid/astracode/website@sha256:1502f55cab20877a8e7360b3bb335e243cea6d7efb6c72b375f8c21f99097829
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: guard
+          mountPath: /platform/launch-guard
+          readOnly: true
+        - name: website-permits
+          mountPath: /run/astra/permits
+          readOnly: true
+        command:
+        - /platform/launch-guard
+        args:
+        - website
+        - --
+        - node
+        - server.js
+        readinessProbe:
+          tcpSocket: &id001
+            port: 3000
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket: *id001
+          periodSeconds: 20
+          failureThreshold: 3
+        startupProbe:
+          tcpSocket: *id001
+          periodSeconds: 5
+          failureThreshold: 120
+      volumes:
+      - name: guard
+        hostPath:
+          path: /usr/local/libexec/astra/launch-guard
+          type: File
+      - name: website-permits
+        hostPath:
+          path: /run/astracode/permits/website
+          type: Directory
+      imagePullSecrets:
+      - name: release-pull
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: website
+  namespace: astracode-app
+spec:
+  selector:
+    app.kubernetes.io/name: website
+  ports:
+  - name: tcp-3000
+    port: 3000
+    targetPort: 3000

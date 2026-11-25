@@ -91,3 +91,15 @@ func TestProvideTestcaseCacheConfig(t *testing.T) {
 		t.Fatalf("disabled zero config = %#v/%v", got, err)
 	}
 }
+
+func TestSandboxGRPCAddress(t *testing.T) {
+	for _, tc := range []struct{ configured, want string }{
+		{"", "judge_sandbox:5051"},
+		{"127.0.0.1:5051", "127.0.0.1:5051"},
+	} {
+		t.Setenv("JUDGE_EXECUTOR_GRPC_ADDRESS", tc.configured)
+		if got := string(ProvideSandboxGRPCAddress()); got != tc.want {
+			t.Errorf("address = %q, want %q", got, tc.want)
+		}
+	}
+}
