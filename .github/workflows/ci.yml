@@ -13,8 +13,8 @@ on:
       - main
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ inputs.git_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.git_ref }}
 
 permissions:
   contents: read
@@ -34,12 +34,12 @@ jobs:
           - workers/judge
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: '1.25.8'
           cache-dependency-path: ${{ matrix.module }}/go.sum
@@ -61,12 +61,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: '1.25.8'
           cache-dependency-path: |
@@ -78,9 +78,9 @@ jobs:
 
       - name: Retain PostgreSQL fixture verification
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: postgres-integration-evidence
+          name: postgres-integration-evidence-${{ inputs.git_ref || github.sha }}
           path: |
             ${{ runner.temp }}/astracode-postgres.*/*/migration.log
             ${{ runner.temp }}/astracode-postgres.*/*/test.log
@@ -94,12 +94,12 @@ jobs:
         working-directory: website
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
           cache: npm
@@ -130,18 +130,18 @@ jobs:
     name: Envoy routing and authentication
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
           fetch-depth: 0 # Independent pre-migration route oracle uses an immutable commit.
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: '1.25.8'
           cache: false
       - name: Test local JWK generator
         run: go test envoy/gen_jwk.go envoy/gen_jwk_test.go
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
       - run: pip install -r envoy/requirements.txt
@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
@@ -226,16 +226,21 @@ jobs:
           bash -n scripts/deploy-production.sh
           bash -n infra/kafka/kafka-init.sh
           python3 scripts/deploy-release-transition_test.py
+          python3 -B scripts/release/test_policy.py
+          python3 -B scripts/release/test_approval_client.py
           bash scripts/deploy-judge-node_test.sh
 
           grep -Fqx 'readonly KAFKA_READY_MAX_ATTEMPTS=30' infra/kafka/kafka-init.sh
           grep -Fqx 'readonly KAFKA_READY_RETRY_SECONDS=2' infra/kafka/kafka-init.sh
           grep -Fq 'for ((attempt = 1; attempt <= KAFKA_READY_MAX_ATTEMPTS; attempt++)); do' infra/kafka/kafka-init.sh
+          # The assertions intentionally compare literal shell source.
+          # shellcheck disable=SC2016
           grep -Fq '"$KAFKA_TOPICS_COMMAND" --bootstrap-server "$KAFKA_BOOTSTRAP_SERVER" --list' infra/kafka/kafka-init.sh
           grep -Fq 'Kafka did not become protocol-ready' infra/kafka/kafka-init.sh
           grep -Fqx 'wait_for_kafka_protocol || exit 1' infra/kafka/kafka-init.sh
 
           activation="$(sed -n '/^activate() {/,/^}/p' scripts/deploy-app-node.sh)"
+          # shellcheck disable=SC2016
           required_activation_guards=(
             '  compose config --quiet || return 1'
             '  validate_envoy_runtime || return 1'
@@ -357,12 +362,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version: '1.25.8'
           cache: false
@@ -385,7 +390,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.changes.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         id: checkout
         continue-on-error: true # Only the classification checkout is optional.
         with:
@@ -461,17 +466,20 @@ jobs:
 
       - name: Check out repository
         if: needs.image-scope.outputs.docs_only != 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.git_ref || github.sha }}
 
       - name: Set up Docker Buildx
         if: needs.image-scope.outputs.docs_only != 'true'
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: v0.29.1
+          driver-opts: image=moby/buildkit:v0.25.1@sha256:79cc6476ab1a3371c9afd8b44e7c55610057c43e18d9b39b68e2b0c2475cc1b6
 
       - name: Build without publishing
         if: needs.image-scope.outputs.docs_only != 'true'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -484,3 +492,28 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  release-evidence:
+    name: Record exact release verification
+    if: inputs.git_ref != ''
+    needs: [go, postgres-integration, frontend, edge, compose, deployment-scripts, judge-benchmark, images]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record successful module and image checks
+        env:
+          SOURCE: ${{ inputs.git_ref }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          assert re.fullmatch('[a-f0-9]{40}',os.environ['SOURCE'])
+          checks={k:v['result'] for k,v in json.loads(os.environ['RESULTS']).items()}
+          assert set(checks.values())=={'success'}
+          Path('ci.json').write_text(json.dumps(dict(source=os.environ['SOURCE'],run=os.environ['GITHUB_RUN_ID'],attempt=os.environ['GITHUB_RUN_ATTEMPT'],checks=checks,repository=os.environ['GITHUB_REPOSITORY'],run_url='https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']+'/attempts/'+os.environ['GITHUB_RUN_ATTEMPT'])))
+          PY
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ci-evidence-${{ inputs.git_ref }}
+          path: ci.json
+          if-no-files-found: error

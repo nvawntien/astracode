@@ -85,10 +85,11 @@ class FakeNodes:
 
 
 class ReleaseTransitionTests(unittest.TestCase):
-    def test_workflow_runs_protected_transition(self):
+    def test_legacy_workflow_has_no_deployment_entry_point(self):
         workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text()
         self.assertNotIn("Deploy and verify Judge Node first", workflow)
-        self.assertIn("python3 scripts/deploy-release-transition.py", workflow)
+        self.assertNotIn("workflow_dispatch:", workflow)
+        self.assertNotIn("environment: production", workflow)
 
     def run_transition(self, nodes, target=NEW):
         stderr = io.StringIO()
@@ -108,10 +109,11 @@ class ReleaseTransitionTests(unittest.TestCase):
         self.assertIn("judging remains suspended", log)
         self.assertIsNone(nodes.worker)
 
-    def test_legacy_opt_in_is_explicit_in_workflow(self):
+    def test_retired_workflow_has_no_credentials_or_legacy_inputs(self):
         workflow = (ROOT / ".github/workflows/deploy-production.yml").read_text()
-        self.assertIn("legacy_from:", workflow)
-        self.assertIn("legacy_judge_peer:", workflow)
+        self.assertNotIn("legacy_from:", workflow)
+        self.assertNotIn("secrets.", workflow)
+        self.assertIn("permissions: {}", workflow)
 
     def test_legacy_coordinator_carries_broker_evidence_to_suspension(self):
         for member in ("sarama-member-A", ""):

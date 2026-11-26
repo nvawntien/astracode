@@ -1,0 +1,141 @@
+name: Verify and package one release revision
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        required: true
+        type: string
+      kind:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-${{ inputs.kind }}-${{ inputs.source }}
+  cancel-in-progress: false
+
+jobs:
+  context:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate the caller and exact revision
+        env:
+          SOURCE: ${{ inputs.source }}
+          KIND: ${{ inputs.kind }}
+        run: |
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,'scripts/release')
+          from policy import SHA, publication_context
+          assert SHA.fullmatch(os.environ['SOURCE'])
+          publication_context(os.environ['GITHUB_EVENT_NAME'],os.environ['GITHUB_REF'],os.environ['KIND'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+              summary.write('Reviewed publication candidate: `'+os.environ['SOURCE']+'` ('+os.environ['KIND']+'). No deployment or VM power authority.\n')
+          PY
+  verify:
+    needs: context
+    uses: ./.github/workflows/ci.yml
+    with:
+      git_ref: ${{ inputs.source }}
+    permissions:
+      contents: read
+  strict:
+    needs: context
+    uses: ./.github/workflows/openspec.yml
+    with:
+      git_ref: ${{ inputs.source }}
+    permissions:
+      contents: read
+  publish:
+    name: Publish verified revision
+    needs: [context, verify, strict]
+    if: vars.M013_PUBLICATION_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.kind == 'canonical' && 'canonical-publication' || 'testing-rehearsal' }}
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_RECORDS_ACCOUNT: ${{ vars.RELEASE_RECORDS_ACCOUNT }}
+      M013_FIRST_MERGE: ${{ vars.M013_FIRST_MERGE }}
+      SOURCE: ${{ inputs.source }}
+      KIND: ${{ inputs.kind }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          path: platform
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source }}
+          path: candidate
+          persist-credentials: false
+      - name: Install pinned public tooling
+        run: |
+          if [[ "$KIND" == canonical ]]; then
+            bash platform/scripts/release/tools.sh --azure
+          else
+            bash platform/scripts/release/tools.sh
+          fi
+      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        if: inputs.kind == 'canonical'
+        with:
+          client-id: ${{ vars.RECEIPT_PUBLISHER_CLIENT_ID }}
+          tenant-id: ${{ vars.S4_TENANT_ID }}
+          subscription-id: ${{ vars.S4_SUBSCRIPTION_ID }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: v0.29.1
+          driver-opts: image=moby/buildkit:v0.25.1@sha256:79cc6476ab1a3371c9afd8b44e7c55610057c43e18d9b39b68e2b0c2475cc1b6
+      - name: Adopt a verified existing receipt or resolve merge provenance
+        id: receipt
+        run: python3 platform/scripts/release/catalog.py prepare --root platform --kind "$KIND" --sha "$SOURCE" --file "$RUNNER_TEMP/merge.json"
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: steps.receipt.outputs.adopted != 'true'
+        with:
+          name: ci-evidence-${{ inputs.source }}
+          path: evidence
+      - name: Bind passing strict validation to CI evidence
+        if: steps.receipt.outputs.adopted != 'true'
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('evidence/ci.json')
+          value=json.loads(p.read_text())
+          assert value['source']==os.environ['SOURCE']
+          assert value['run']==os.environ['GITHUB_RUN_ID'] and value['attempt']==os.environ['GITHUB_RUN_ATTEMPT']
+          value['checks']['openspec']='success'
+          p.write_text(json.dumps(value))
+          PY
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        if: steps.receipt.outputs.adopted != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and verify the exact candidate
+        if: steps.receipt.outputs.adopted != 'true'
+        run: python3 platform/scripts/release/build.py candidate "$KIND" evidence/ci.json "$RUNNER_TEMP/merge.json" "$RUNNER_TEMP/release.json"
+      - name: Publish OCI bundle then conditionally write the canonical receipt
+        if: steps.receipt.outputs.adopted != 'true'
+        run: python3 platform/scripts/release/catalog.py publish --root platform --kind "$KIND" --sha "$SOURCE" --file "$RUNNER_TEMP/release.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.receipt.outputs.adopted != 'true'
+        with:
+          name: release-${{ inputs.kind }}-${{ inputs.source }}
+          path: ${{ runner.temp }}/release.json
+          if-no-files-found: error
