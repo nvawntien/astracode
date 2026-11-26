@@ -31,7 +31,7 @@ kubectl --kubeconfig="$FIXTURE_KUBECONFIG" config set-cluster fixture --server="
 kubectl --kubeconfig="$FIXTURE_KUBECONFIG" config set-credentials fixture --client-certificate="$fixture/client.crt" --client-key="$fixture/client.key" >/dev/null
 kubectl --kubeconfig="$FIXTURE_KUBECONFIG" config set-context fixture --cluster=fixture --user=fixture >/dev/null
 kubectl --kubeconfig="$FIXTURE_KUBECONFIG" config use-context fixture >/dev/null
-for i in {1..45}; do
+for _ in {1..45}; do
   kill -0 "$api_pid" || { tail -5 api.log; exit 1; }
   if kubectl --kubeconfig="$FIXTURE_KUBECONFIG" get --raw=/readyz >/dev/null 2>&1; then break; fi
   sleep 1

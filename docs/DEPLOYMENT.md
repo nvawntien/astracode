@@ -1,11 +1,8 @@
 # AstraCode dual-node Compose deployment reference
 
-This runbook documents the checked-in Docker Compose and SSH deployment
-workflow. The proposed Azure/k3s deployment starts from fresh infrastructure.
-[ADR-0004](architecture/adr/0004-azure-topology-and-subscription-layout.md)
+The Azure/k3s path for M0-13 is the staging delivery path. See the [staging runbook](architecture/deployment.md) for provisioning boundaries, start and deployment approvals, smoke, expiry and recovery. The first real environment requires Phase B authorization and S3 verification. [ADR-0004](architecture/adr/0004-azure-topology-and-subscription-layout.md)
 
-The reference workflow uses GHCR release images and protected manual
-GitHub Actions deployment across two node roles.
+The rest of this file preserves the previous Docker Compose and SSH deployment reference. Its hosted production workflow is retired on the maintained workflow definition. The separate default-branch transition also requires disabling historical dispatch and retiring its credentials. Local development still uses Compose.
 
 ```text
 GitHub Actions runner
@@ -25,13 +22,10 @@ Each service also checks its expected version read-only at startup.
 
 The existing production Compose configuration does not run migrations before
 activation. It excludes the local migration job and local database credential
-overrides. The planned Kubernetes delivery pipeline must reuse the existing
-Goose CLI and service-owned SQL migrations. Separate managed migration and
-runtime privileges, rollout coordination and backup procedures belong to the
-infrastructure implementation before first deployment.
+overrides. The Azure/k3s path uses the existing Goose CLI and service-owned SQL migrations with a separate managed writer fence. Follow the staging runbook for this path.
 [ADR-0011](architecture/adr/0011-local-goose-migrations.md)
 
-## Release policy
+## Historical Compose release policy
 
 Only a published semantic release tag is valid for production:
 

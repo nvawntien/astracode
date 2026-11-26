@@ -9,7 +9,7 @@ The two-stage Gate 2 sequence below is a proposed exception and requires explici
 - [x] 1.4 Implement managed database bootstrap, immutable Goose packaging, writer fencing, fail-closed boot/activation, rollout, smoke and compatible rollback. Test on disposable PostgreSQL 15.6 and a local cluster. Cover empty and repeat runs, role isolation, contention, lost lock, partial migration, stale desired workloads and Job objects after a hard stop, lost controller or App lease, ambiguous Submission termination, and rollback with equal or incompatible schemas. Verify schema, outbox and judge activity remain fenced until authorized reconciliation (ED-06, ED-07).
 - [x] 1.5 Implement exact-SHA CI and canonical publication/reconciliation, isolated S3 rehearsal packaging and non-deploying promotion eligibility. Prepare the separately reviewed minimal default-branch transition. Verify with `actionlint` and fixtures for concurrent passing merges, interruption/retry, failing CI, unapproved SHA or ref, incomplete/mismatched digests, legacy entry-point bypass, rehearsal-only/unstaged bundles, missing approval and contest freeze. Verify publishing grants no staging authority and promotion eligibility never builds or deploys (ED-03, ED-04, ED-09).
 - [x] 1.6 Implement protected staging requests and the immutable run-bound approval proof, App pull and tester access, independent expiry and cleanup, and emergency deallocate-only handling. Use clock, identity and power-state fixtures to check separate approvals, independent dispatch, wrong actions or identities, wrong ref, changed request and replay, and the readiness, extension, concurrency, contest and off-time bounds. Exercise abrupt shutdown, missing heartbeat, late/partial power operations, controller restart and S3 experiment interruption (ED-04–ED-08).
-- [ ] 1.7 Run integrated offline verification and document operator commands, trust boundaries, deployment and recovery in the design's documentation targets. Verify workflow and script changes with `actionlint`, `shellcheck`, shell syntax checks, `make test`, `make test-db` and the existing CI gates. Run `openspec validate azure-walking-skeleton --strict` and record the scenario-to-evidence map, leaving all real-cloud scenarios pending.
+- [x] 1.7 Run integrated offline verification and document operator commands, trust boundaries, deployment and recovery in the design's documentation targets. Verify workflow and script changes with `actionlint`, `shellcheck`, shell syntax checks, `make test`, `make test-db` and the existing CI gates. Run `openspec validate azure-walking-skeleton --strict` and record the scenario-to-evidence map, leaving all real-cloud scenarios pending.
 
 ## 2. Phase B — Pre-merge Azure preflight and S3 rehearsal
 
@@ -30,6 +30,8 @@ These tasks need the protected `develop` release and separate project-owner auth
 - [ ] 3.4 Record final sanitized acceptance evidence. Link every scenario to its offline, S3 or S2 result as applicable. Include canonical approved S2 evidence, recreation/sizing records and actual costs against forecast, budget thresholds and notifications, outstanding failures and any reviewed follow-up. Close only with successful canonical S2 acceptance and all required real evidence (ED-01–ED-10).
 
 ### Scenario-to-verification map
+
+The [Phase A evidence record](../../../docs/evidence/m0-13-phase-a.md) maps each scenario to its offline result or required live check. All real-cloud scenarios remain pending.
 
 | Requirements and cases | Planned verification |
 | --- | --- |

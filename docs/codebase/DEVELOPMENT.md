@@ -114,9 +114,13 @@ GitHub Actions workflows in `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race, PostgreSQL integration suites (`postgres-integration` job), judge benchmark and collector checks, website typecheck/lint/tooling format/unit tests/gateway client contract/build, Envoy checks, development and production Compose validation, deployment-script checks, image builds |
-| `openspec.yml` | pull requests targeting `develop` or `main`, and pushes to them | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
-| `release-images.yml` | pushes to `develop`, `v*.*.*` version tags, manual dispatch (full commit SHA) | Publishes container images to GHCR on each trigger; images are published, not deployed (staging deployment is planned: M0-13) |
-| `deploy-production.yml` | manual | Deploy a published release tag to production (see [DEPLOYMENT.md](../DEPLOYMENT.md)) |
+| `openspec.yml` | pull requests targeting `develop` or `main`, pushes to them, and exact-SHA release calls | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
+| `release-images.yml` | protected `develop` pushes | Exact-SHA CI and canonical OCI publication through the protected reusable workflow after registration. |
+| `reconcile-releases.yml` | schedule or manual dispatch on protected `main` | Reconciles protected merge history without accepting a SHA input. |
+| `rehearsal-checks.yml` | labeled candidate PRs to `develop` | Read-only CI for the reviewed S3 head SHA. |
+| `staging-request.yml` | protected `main` dispatch | Reviews the immutable originating request under the appropriate GitHub environment. |
+| `promotion-eligibility.yml` | protected `main` dispatch | Checks canonical S2 evidence and the reviewed tag mapping. |
+| `deploy-production.yml` | retired | Historical dispatch and credentials are retired through the separate owner-reviewed transition. |
 
 These rows describe the checked-in workflows. M0-13 implements the approval-gated
 Azure/k3s delivery model proposed in [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md).
@@ -140,6 +144,12 @@ docker compose config --quiet
 Format modified Go files with `gofmt -w <files>`. Wire injectors are in each `cmd/server/wire.go` and generated output is checked in as `wire_gen.go`; no Wire generation command or `buf`/`protoc` configuration was found, so do not guess a generation command. Proto sources are `proto/problem/v1/problem.proto` and `proto/judge/v1/run.proto`; generated Go is checked in under `pkg/pb/`.
 
 For website development, use `npm run dev` (`next dev -p 3000`), `npm run build` (`next build`), `npm run start` (`next start -p 3000`), `npm run typecheck` (`tsc --noEmit`), and `npm test` (`vitest run`) from `website/`. `node_modules` and `.next` are generated local artifacts and should not be used as architecture evidence.
+
+## Verify Azure delivery offline
+
+From the repository root, keep the usual `make test` and `make test-db` gates. For M0-13 also validate the pinned Terraform roots with the backend disabled and provider mocks, render both Kustomize overlays and run the strict schema and native API fixture, and validate the synthetic App and Judge cloud-init renders. The managed database fixture uses a disposable PostgreSQL container. The release and controller fixtures use synthetic receipts, identities, time and VM outcomes. Use `actionlint`, `shellcheck`, and shell syntax checks for changed workflow and shell files.
+
+The [Phase A evidence map](../evidence/m0-13-phase-a.md) links exact commands and the S3 and S2 acceptance still required. See the [staging runbook](../architecture/deployment.md) for the protected operator path and [release verification](../../scripts/release/README.md) for CI and default-branch registration.
 
 ## Migrations and operational checks
 
