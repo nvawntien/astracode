@@ -1,0 +1,7 @@
+version = 3
+# Retain the pinned runc implementation. Privileged go-judge needs nested
+# cgroups, standard character devices and no host block devices.
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+  privileged_without_host_devices = true
+  privileged_without_host_devices_all_devices_allowed = false
+  base_runtime_spec = "/etc/astracode/judge-runtime-base.json"

@@ -148,6 +148,11 @@ spec:
         - migrate
         - --
         - /usr/local/bin/astra-migrate
+        env:
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
       volumes:
       - name: guard
         hostPath:

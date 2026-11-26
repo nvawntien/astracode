@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
 - namespaces.yaml
 - network-defaults.yaml
+- node-permits.yaml
 - storage.yaml
 - postgres.yaml
 - redis.yaml
@@ -20,6 +21,8 @@ resources:
 - admission.yaml
 - jobs.yaml
 - ../../../infra/kafka
+generatorOptions:
+  immutable: true
 configMapGenerator:
 - name: auth-service-config
   namespace: astracode-app

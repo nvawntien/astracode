@@ -1,0 +1,24 @@
+#!/bin/sh
+# The host owns the cluster/operation preflight sessions and the per-owner
+# marker. The Job secret contains only expiring, single-attempt logins.
+set -eu
+export PGHOST=postgres.astracode-app.svc PGPORT=5432 PGCONNECT_TIMEOUT=5
+export PGSSLMODE=disable
+cd /migrations
+sha256sum -c sha256sums
+test "$(goose -version 2>&1)" = 'goose version: v3.30.0'
+attempt=$(cat /run/astra/db/operation)
+printf '%s\n' "$attempt" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+for owner in auth problem submission; do
+    PGDATABASE="${owner}_db"
+    PGUSER="${owner}_m_$(printf %s "$attempt" | tr -d '-')"
+    PGPASSWORD=$(cat "/run/astra/db/$owner")
+    export PGDATABASE PGUSER PGPASSWORD
+    unset PGOPTIONS
+    psql -Xq --set ON_ERROR_STOP=1 -v attempt="$attempt" <<'SQL'
+SELECT astra_control.claim(:'attempt'::uuid);
+SQL
+    PGOPTIONS="-c role=${owner}_owner -c search_path=public -c lock_timeout=3s -c statement_timeout=60s"
+    export PGOPTIONS
+    goose -dir "/migrations/$owner" postgres "dbname=$PGDATABASE" up-to "$(cat "/migrations/$owner.version")"
+done

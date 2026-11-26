@@ -89,6 +89,11 @@ spec:
           tcpSocket: *id001
           periodSeconds: 5
           failureThreshold: 120
+        env:
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
       volumes:
       - name: guard
         hostPath:

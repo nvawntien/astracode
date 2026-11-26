@@ -76,6 +76,10 @@ spec:
         env:
         - name: JUDGE_GRPC_ADDRESS
           value: judge-worker.astracode-judge.svc:9093
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
         readinessProbe:
           tcpSocket: &id001
             port: 8083

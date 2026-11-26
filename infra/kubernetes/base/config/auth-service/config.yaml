@@ -15,7 +15,7 @@ logger:
 database:
   host: postgres
   port: 5432
-  user: auth_runtime
+  user: auth_service
   password: ''
   dbname: auth_db
   sslmode: disable
@@ -23,6 +23,7 @@ database:
   max_idle_conns: 10
   conn_max_lifetime: 3600
 redis:
+  username: auth
   host: redis
   port: 6379
   password: ''

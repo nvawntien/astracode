@@ -15,9 +15,17 @@ locals {
   }
 
   bootstrap_common = {
-    "/usr/local/libexec/astra/install-k3s"    = [file("${local.bootstrap_root}/install-k3s.sh"), "0755"]
-    "/usr/local/libexec/astra/host-firewall"  = [file("${local.bootstrap_root}/host-firewall.sh"), "0755"]
-    "/usr/local/libexec/astra/k3s-credential" = [file("${local.bootstrap_root}/k3s-credential.py"), "0755"]
+    "/usr/local/libexec/astra/configuration.py"      = [file("${path.module}/../lifecycle/configuration.py"), "0644"]
+    "/usr/local/libexec/astra/install-platform"      = [file("${path.module}/../lifecycle/install-platform.sh"), "0755"]
+    "/etc/astracode/slot"                            = ["${lower(var.target.slot)}\n", "0644"]
+    "/usr/local/libexec/astra/node_agent.py"         = [file("${path.module}/../lifecycle/node_agent.py"), "0755"]
+    "/usr/local/libexec/astra/node_state.py"         = [file("${path.module}/../lifecycle/node_state.py"), "0644"]
+    "/usr/local/libexec/astra/permits.py"            = [file("${path.module}/../lifecycle/permits.py"), "0644"]
+    "/etc/systemd/system/astra-node-permits.service" = [file("${path.module}/../lifecycle/astra-node-permits.service"), "0644"]
+    "/usr/local/libexec/astra/reset-epochs"          = [file("${path.module}/../lifecycle/reset-epochs.sh"), "0755"]
+    "/usr/local/libexec/astra/install-k3s"           = [file("${local.bootstrap_root}/install-k3s.sh"), "0755"]
+    "/usr/local/libexec/astra/host-firewall"         = [file("${local.bootstrap_root}/host-firewall.sh"), "0755"]
+    "/usr/local/libexec/astra/k3s-credential"        = [file("${local.bootstrap_root}/k3s-credential.py"), "0755"]
     "/etc/systemd/system/astra-host-firewall.service" = [
       file("${local.bootstrap_root}/astra-host-firewall.service"), "0644",
     ]
@@ -48,8 +56,14 @@ locals {
   }
 
   bootstrap_app = {
-    "/usr/local/libexec/astra/app-disk" = [file("${local.bootstrap_root}/app-disk.py"), "0755"]
-    "/etc/astracode/app-data-uuid"      = ["${local.disk_uuid}\n", "0644"]
+    "/etc/systemd/system/astra-poller.service"     = [file("${path.module}/../lifecycle/astra-poller.service"), "0644"]
+    "/etc/systemd/system/astra-activation.service" = [file("${path.module}/../lifecycle/astra-activation.service"), "0644"]
+    "/etc/systemd/system/astra-attempt-secret.service" = [
+      file("${path.module}/../lifecycle/astra-attempt-secret.service"), "0644",
+    ]
+    "/usr/local/libexec/astra/attempt_secret.py" = [file("${path.module}/../lifecycle/attempt_secret.py"), "0644"]
+    "/usr/local/libexec/astra/app-disk"          = [file("${local.bootstrap_root}/app-disk.py"), "0755"]
+    "/etc/astracode/app-data-uuid"               = ["${local.disk_uuid}\n", "0644"]
     "/etc/systemd/system/astra-app-disk.service" = [
       templatefile("${local.bootstrap_root}/astra-app-disk.service.tftpl", { device_unit = local.disk_device_unit }), "0644",
     ]
@@ -70,10 +84,17 @@ locals {
     ]
   }
 
+  bootstrap_judge = {
+    "/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/50-judge.toml" = [
+      file("${local.bootstrap_root}/judge-runtime.toml"), "0644"
+    ]
+    "/etc/astracode/judge-runtime-base.json" = [file("${local.bootstrap_root}/judge-runtime-base.json"), "0644"]
+  }
+
   cloud_config = { for role in keys(local.vm_names) : role => "#cloud-config\n${yamlencode(merge(
     {
       write_files = [
-        for path, file in merge(local.bootstrap_common, role == "app" ? local.bootstrap_app : {}, {
+        for path, file in merge(local.bootstrap_common, role == "app" ? local.bootstrap_app : local.bootstrap_judge, {
           "/etc/astracode/node-role" = ["${role}\n", "0644"]
           "/etc/astracode/bootstrap-network" = [
             "${role} ${local.node_ips.app} ${local.node_ips.judge} ${local.api_service_ip}\n", "0644",
@@ -98,7 +119,7 @@ locals {
     },
     role == "app" ? {
       users = concat(["default"], [
-        for name in ["astra-poller", "astra-secret-loader"] : {
+        for name in ["astra-poller", "astra-secret-loader", "astra-activation"] : {
           name        = name
           system      = true
           lock_passwd = true

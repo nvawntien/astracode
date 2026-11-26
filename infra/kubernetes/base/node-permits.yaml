@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-observation
+  namespace: astracode-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-permits
+  namespace: astracode-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: astra-node-app
+  namespace: astracode-app
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-observation
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-permits
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: astra-node-app
+  namespace: astracode-app
+subjects:
+- kind: User
+  name: astra-node-app
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: astra-node-app
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: astra-activation
+  namespace: astracode-app
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-observation
+  verbs:
+  - get
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-permits
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - podtemplates
+  resourceNames:
+  - approved-auth-service
+  - approved-problem-service
+  - approved-submission-service
+  - approved-website
+  - approved-envoy
+  - approved-migrate
+  verbs:
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: astra-activation
+  namespace: astracode-app
+subjects:
+- kind: User
+  name: astra-activation
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: astra-activation
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-observation
+  namespace: astracode-judge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-permits
+  namespace: astracode-judge
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: astra-node-judge
+  namespace: astracode-judge
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-observation
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-permits
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: astra-node-judge
+  namespace: astracode-judge
+subjects:
+- kind: User
+  name: astra-node-judge
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: astra-node-judge
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: astra-activation
+  namespace: astracode-judge
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-observation
+  verbs:
+  - get
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - node-permits
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - podtemplates
+  resourceNames:
+  - approved-judge-worker
+  verbs:
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: astra-activation
+  namespace: astracode-judge
+subjects:
+- kind: User
+  name: astra-activation
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: astra-activation
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: migration-secret-delivery
+  namespace: astracode-app
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [migrate-attempt, auth-service-runtime, problem-service-runtime, submission-service-runtime,
+                  postgres-runtime, minio-runtime, redis-runtime, envoy-jwk]
+  verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: migration-secret-delivery
+  namespace: astracode-app
+subjects:
+- kind: User
+  name: astra-secret-loader
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: migration-secret-delivery
+  apiGroup: rbac.authorization.k8s.io

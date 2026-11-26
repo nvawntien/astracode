@@ -37,11 +37,13 @@ func main() {
 		err = verifyLegacyConsumerLog(os.Stdin, os.Args[2], os.Args[3])
 	case len(os.Args) == 6 && os.Args[1] == "kafka-member":
 		err = inspectLegacyMember(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+	case len(os.Args) == 5 && os.Args[1] == "kafka-empty":
+		err = verifyEmptyGroup(os.Args[2], os.Args[3], os.Args[4])
 	case len(os.Args) == 4 && os.Args[1] == "worker-settings":
 		err = workerSettings(os.Args[2], os.Args[3])
 	default:
 		err = fmt.Errorf("usage: judge-rollout-probe <metadata|legacy-metadata> <address> <problem-id> <ms> <KiB> | " +
-			"worker-settings <config.yaml> <running|planned> | legacy-consumer <broker> <group> | kafka-member <broker> <group> <topic> <peer>")
+			"kafka-empty <broker> <group> <topic> | worker-settings <config.yaml> <running|planned> | legacy-consumer <broker> <group> | kafka-member <broker> <group> <topic> <peer>")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

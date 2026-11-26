@@ -71,6 +71,11 @@ template:
         tcpSocket: *id001
         periodSeconds: 5
         failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
     volumes:
     - name: guard
       hostPath:
@@ -172,6 +177,11 @@ template:
         tcpSocket: *id001
         periodSeconds: 5
         failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
     volumes:
     - name: guard
       hostPath:
@@ -214,6 +224,7 @@ template:
       astracode.io/template: judge-worker
   spec:
     serviceAccountName: judge-worker
+    hostUsers: false
     automountServiceAccountToken: false
     enableServiceLinks: false
     affinity:
@@ -270,6 +281,10 @@ template:
         value: problem-service.astracode-app.svc:9092
       - name: KAFKA_BROKERS
         value: kafka.astracode-app.svc:9092
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
       readinessProbe:
         tcpSocket: &id001
           port: 9093
@@ -330,6 +345,10 @@ template:
         value: /cache/testcases
       - name: ES_PARALLELISM
         value: '1'
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
       readinessProbe:
         exec: &id002
           command:
@@ -455,6 +474,12 @@ template:
         value: INTERNAL
       - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
         value: 'false'
+      - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+        value: '1'
+      - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+        value: '1'
+      - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
+        value: '1'
       - name: KAFKA_HEAP_OPTS
         value: -Xms256m -Xmx512m
       envFrom:
@@ -720,6 +745,11 @@ template:
         tcpSocket: *id001
         periodSeconds: 5
         failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
     volumes:
     - name: guard
       hostPath:
@@ -791,10 +821,13 @@ template:
       - name: data
         mountPath: /data
         readOnly: false
+      - name: acl
+        mountPath: /etc/astracode-redis
+        readOnly: true
       command:
       - redis-server
-      - --requirepass
-      - $(REDIS_PASSWORD)
+      - --aclfile
+      - /etc/astracode-redis/users.acl
       - --appendonly
       - 'yes'
       - --appendfsync
@@ -803,9 +836,6 @@ template:
       - 128mb
       - --maxmemory-policy
       - allkeys-lru
-      envFrom:
-      - secretRef:
-          name: redis-runtime
       readinessProbe:
         tcpSocket: &id001
           port: 6379
@@ -822,6 +852,10 @@ template:
     - name: data
       persistentVolumeClaim:
         claimName: redis-data
+    - name: acl
+      secret:
+        secretName: redis-runtime
+        defaultMode: 292
     securityContext:
       fsGroup: 999
     tolerations:
@@ -898,6 +932,10 @@ template:
       env:
       - name: JUDGE_GRPC_ADDRESS
         value: judge-worker.astracode-judge.svc:9093
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
       readinessProbe:
         tcpSocket: &id001
           port: 8083
@@ -1002,6 +1040,11 @@ template:
         tcpSocket: *id001
         periodSeconds: 5
         failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
     volumes:
     - name: guard
       hostPath:
@@ -1378,6 +1421,9 @@ metadata:
   name: release-rollout
   namespace: astracode-app
 rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
 - apiGroups:
   - apps
   resources:
@@ -1449,6 +1495,9 @@ metadata:
   name: release-rollout
   namespace: astracode-judge
 rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
 - apiGroups:
   - apps
   resources:
@@ -1616,6 +1665,11 @@ template:
       - migrate
       - --
       - /usr/local/bin/astra-migrate
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
     volumes:
     - name: guard
       hostPath:
@@ -1717,3 +1771,31 @@ spec:
   policyName: astracode-controller-kinds
   validationActions:
   - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astra-release-configmaps
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE]
+      resources: [configmaps]
+  matchConditions:
+  - name: release-poller
+    expression: request.userInfo.username == "astra-poller"
+  validations:
+  - expression: 'object.metadata.namespace == "astracode-app" ? object.metadata.name.matches("^(auth-service|problem-service|submission-service|envoy)-config-[a-z0-9]{10}$") : object.metadata.namespace == "astracode-judge" && object.metadata.name.matches("^judge-worker-config-[a-z0-9]{10}$")'
+  - expression: has(object.immutable) && object.immutable && !has(object.binaryData) && !has(object.metadata.ownerReferences) && !has(object.metadata.finalizers)
+  - expression: 'object.metadata.name.startsWith("envoy-config-") ? object.data.size() == 2 && "envoy.yaml" in object.data && "edge.lua" in object.data : object.data.size() == 1 && "config.yaml" in object.data'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astra-release-configmaps
+spec:
+  policyName: astra-release-configmaps
+  validationActions: [Deny]

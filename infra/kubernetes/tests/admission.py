@@ -42,7 +42,7 @@ def exercise(render):
     worker = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "judge-worker")
     # Wait for the admission plugin to observe bindings before testing denials.
     invalid = copy.deepcopy(worker)
-    invalid["spec"]["template"]["spec"]["hostNetwork"] = True
+    invalid["spec"]["template"]["spec"]["containers"][1]["image"] = "offline.invalid/unauthorized:v1"
     for _ in range(60):
         response = kubectl("create", "--dry-run=server", "-f", "-", obj=invalid, success=False)
         if "ValidatingAdmissionPolicy" in response.stderr:
@@ -54,9 +54,11 @@ def exercise(render):
         if d["kind"] in {"Deployment", "Job"}:
             check(d)
     for key, value in (("hostPID", True), ("hostNetwork", True), ("hostIPC", True),
-                       ("serviceAccountName", "default"), ("nodeName", "app")):
+                       ("serviceAccountName", "default"), ("nodeName", "app"), ("hostUsers", True)):
         candidate = copy.deepcopy(worker)
         candidate["spec"]["template"]["spec"][key] = value
+        if key in {"hostNetwork", "hostPID", "hostIPC"}:
+            candidate["spec"]["template"]["spec"]["hostUsers"] = True
         check(candidate, denied=True)
     for mutate in (
         lambda s: s["containers"][0].update(securityContext={"privileged": True}),

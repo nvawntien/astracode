@@ -1,9 +1,10 @@
 [Unit]
 Description=AstraCode K3s ${node}
-Wants=network-online.target
+Wants=network-online.target astra-node-permits.service
 Requires=astra-host-firewall.service
 After=cloud-final.service network-online.target astra-host-firewall.service
 %{ if node == "app" ~}
+Wants=astra-attempt-secret.service astra-poller.service astra-activation.service
 BindsTo=srv-astracode-data.mount
 After=srv-astracode-data.mount
 %{ endif ~}
@@ -19,6 +20,7 @@ RestartSec=10
 %{ if node == "app" ~}
 ExecStartPre=/usr/local/libexec/astra/app-disk before-k3s
 %{ endif ~}
+ExecStartPre=/usr/local/libexec/astra/reset-epochs
 ExecStartPre=/usr/local/libexec/astra/k3s-credential ${node}
 ExecStart=/usr/local/bin/k3s ${mode}
 

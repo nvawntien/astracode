@@ -12,7 +12,7 @@ logger:
 database:
   host: postgres
   port: 5432
-  user: submission_runtime
+  user: submission_service
   password: ''
   dbname: submission_db
   sslmode: disable
@@ -20,6 +20,7 @@ database:
   max_idle_conns: 10
   conn_max_lifetime: 3600
 redis:
+  username: submission
   host: redis
   port: 6379
   password: ''

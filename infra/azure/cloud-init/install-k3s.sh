@@ -36,6 +36,10 @@ if ! printf '%s  %s\n' "$checksum" /usr/local/bin/k3s | sha256sum --check --stat
 fi
 
 systemctl daemon-reload
+if [[ "$(cat /etc/astracode/node-role)" == app ]] && ! command -v psql >/dev/null; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-client
+fi
 systemctl enable astra-k3s.service
 # K3s is ordered after cloud-final; the first cloud-init run must not wait for it.
 systemctl start --no-block astra-k3s.service

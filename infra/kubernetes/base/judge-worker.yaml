@@ -26,6 +26,7 @@ spec:
         astracode.io/template: judge-worker
     spec:
       serviceAccountName: judge-worker
+      hostUsers: false
       automountServiceAccountToken: false
       enableServiceLinks: false
       affinity:
@@ -82,6 +83,10 @@ spec:
           value: problem-service.astracode-app.svc:9092
         - name: KAFKA_BROKERS
           value: kafka.astracode-app.svc:9092
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
         readinessProbe:
           tcpSocket: &id001
             port: 9093
@@ -142,6 +147,10 @@ spec:
           value: /cache/testcases
         - name: ES_PARALLELISM
           value: '1'
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
         readinessProbe:
           exec: &id002
             command:

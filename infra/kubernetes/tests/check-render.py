@@ -63,9 +63,14 @@ def verify(path, validators, slot):
             assert worker["securityContext"]["allowPrivilegeEscalation"] is False
             assert daemon["securityContext"] == {"privileged": True}
             assert not pod["automountServiceAccountToken"]
+            assert pod["hostUsers"] is False
             assert {v["name"]: v["readOnly"] for v in daemon["volumeMounts"]}["testcases"]
             assert not {v["name"]: v["readOnly"] for v in worker["volumeMounts"]}["testcases"]
-            assert {e["name"]: e["value"] for e in daemon["env"]}["ES_GRPC_ADDR"] == "127.0.0.1:5051"
+            assert {e["name"]: e.get("value") for e in daemon["env"]}["ES_GRPC_ADDR"] == "127.0.0.1:5051"
+        if kind == "Deployment" and obj["metadata"]["name"] == "kafka":
+            settings = {e["name"]: e["value"] for e in pod["containers"][0]["env"]}
+            for key in ("OFFSETS_TOPIC_REPLICATION_FACTOR", "TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "TRANSACTION_STATE_LOG_MIN_ISR"):
+                assert settings["KAFKA_CFG_" + key] == '1'
         if kind == "Service":
             assert obj["spec"].get("type", "ClusterIP") == "ClusterIP"
             assert not {5050, 5051, 5052}.intersection(p["port"] for p in obj["spec"]["ports"])

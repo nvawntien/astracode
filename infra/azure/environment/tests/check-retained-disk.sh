@@ -9,6 +9,7 @@ mkdir -p "$scratch/environment/tests"
 cp -- "$root"/*.tf "$root/.terraform.lock.hcl" "$root/offline.tfvars.example" "$scratch/environment/"
 ln -s -- "$root/../modules" "$scratch/modules"
 ln -s -- "$root/../cloud-init" "$scratch/cloud-init"
+ln -s -- "$root/../lifecycle" "$scratch/lifecycle"
 cp -- "$root/tests/retained-disk.tftest.hcl.example" "$scratch/environment/tests/retained-disk.tftest.hcl"
 
 # Keep the expected-failing test and its mock state out of the regular suite.
