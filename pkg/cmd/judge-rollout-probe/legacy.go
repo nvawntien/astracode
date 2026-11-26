@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -158,4 +159,64 @@ func verifyEmptyGroup(broker, group, topic string) error {
 		return nil
 	}
 	return fmt.Errorf("Worker group is not empty")
+}
+
+// retainedWork samples consumer offsets only once the expected groups have
+// no running members. It returns aggregate counts and never reads records.
+func retainedWork(broker string) error {
+	if !singleIPv4Endpoint(broker) {
+		return fmt.Errorf("invalid private Kafka endpoint")
+	}
+	client, err := sarama.NewClient([]string{broker}, rolloutKafkaConfig())
+	if err != nil {
+		return err
+	}
+	admin, err := sarama.NewClusterAdminFromClient(client)
+	if err != nil {
+		client.Close()
+		return err
+	}
+	defer admin.Close()
+	counts := map[string]int64{}
+	for _, stream := range []struct{ name, topic, group string }{
+		{"jobs", "judge.submission.jobs", "judge-worker-v1"},
+		{"results", "judge.submission.results", "submission-service-v1"},
+		{"dlt", "judge.submission.jobs.dlt", ""},
+	} {
+		parts, err := client.Partitions(stream.topic)
+		if err != nil || len(parts) == 0 {
+			return fmt.Errorf("no verified partitions for %s", stream.topic)
+		}
+		var offsets *sarama.OffsetFetchResponse
+		if stream.group != "" {
+			groups, err := admin.DescribeConsumerGroups([]string{stream.group})
+			if err != nil || len(groups) != 1 || groups[0].GroupId != stream.group || len(groups[0].Members) != 0 ||
+				(groups[0].State != "Empty" && groups[0].State != "Dead") ||
+				(groups[0].Err != sarama.ErrNoError && groups[0].Err != sarama.ErrGroupIDNotFound) {
+				return fmt.Errorf("unconfirmed empty group %s", stream.group)
+			}
+			offsets, err = admin.ListConsumerGroupOffsets(stream.group, map[string][]int32{stream.topic: parts})
+			if err != nil || offsets.Err != sarama.ErrNoError {
+				return fmt.Errorf("offsets unavailable for %s", stream.group)
+			}
+		}
+		for _, part := range parts {
+			first, e1 := client.GetOffset(stream.topic, part, sarama.OffsetOldest)
+			last, e2 := client.GetOffset(stream.topic, part, sarama.OffsetNewest)
+			if e1 != nil || e2 != nil || first < 0 || last < first {
+				return fmt.Errorf("partition bounds unknown for %s", stream.topic)
+			}
+			if offsets != nil {
+				block := offsets.GetBlock(stream.topic, part)
+				if block == nil || block.Err != sarama.ErrNoError || block.Offset > last {
+					return fmt.Errorf("committed offset unknown for %s", stream.topic)
+				}
+				if block.Offset > first {
+					first = block.Offset
+				}
+			}
+			counts[stream.name] += last - first
+		}
+	}
+	return json.NewEncoder(os.Stdout).Encode(counts)
 }

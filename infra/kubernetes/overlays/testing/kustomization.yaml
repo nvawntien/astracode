@@ -16,3 +16,12 @@ patches:
       - op: replace
         path: /spec/routes/0/match
         value: Host(`testing.invalid`)
+  - target:
+      group: traefik.io
+      version: v1alpha1
+      kind: IngressRoute
+      name: smoke
+    patch: |-
+      - op: replace
+        path: /spec/routes/0/match
+        value: Host(`smoke.testing.invalid`)

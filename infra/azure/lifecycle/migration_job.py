@@ -104,7 +104,7 @@ class MigrationJob:
                     if cid and (c["container"] != cid or c["uid"] != uid):
                         raise RecoveryRequired("migration container changed")
                     uid, cid = c["uid"], c["container"]
-                    self.authorize(uid)
+                    self.authorize(uid, expected)
                     seen = True
                 elif seen and job.get("status", {}).get("succeeded") == 1:
                     if any(

@@ -152,6 +152,24 @@ BEGIN
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA astra_control FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION astra_control.seal(uuid),astra_control.finish(uuid) TO astra_fencer;
+
+-- The dedicated drain login can read only aggregate retained-work counts.
+\if :{?is_submission}
+CREATE OR REPLACE FUNCTION astra_control.retained_work() RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,astra_control,pg_temp AS $$
+DECLARE attempts bigint; outbox bigint;
+BEGIN
+  IF to_regclass('public.submission_attempts') IS NULL OR to_regclass('public.outbox_messages') IS NULL THEN
+    RAISE EXCEPTION 'submission schema is not available';
+  END IF;
+  SELECT count(*) INTO attempts FROM public.submission_attempts WHERE status IN ('PENDING','JUDGING');
+  SELECT count(*) INTO outbox FROM public.outbox_messages WHERE status <> 'PUBLISHED';
+  RETURN jsonb_build_object('attempts',attempts,'outbox',outbox);
+END;
+$$;
+REVOKE ALL ON FUNCTION astra_control.retained_work() FROM PUBLIC;
+\endif
+
 COMMIT;
 
 -- The protected verifier invokes this only after checking the complete release

@@ -27,7 +27,7 @@ def prepare(tag):
 
 
 def evaluate(payload):
-    result = submit(payload, "promotion-eligibility", "/v1/eligibility")
+    result = submit(payload, "promotion-eligibility", "/api/v1/eligibility")
     if result["receipt"]["bundle"] != payload["releaseDigest"]:
         raise Refused("eligibility response refers to another release")
     return eligible(

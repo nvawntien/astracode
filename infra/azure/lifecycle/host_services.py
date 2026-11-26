@@ -17,6 +17,8 @@ from attempt_secret import deliver
 from authority import Authority
 from controller_client import Controller
 from coordinator import reconcile
+from drain_work import finish as finish_drain, observe as observe_nodes
+from edge_lease import serve as serve_edge
 from kube_rollout import Cluster
 from migration_job import MigrationJob
 from node_state import RecoveryRequired
@@ -211,18 +213,32 @@ def run_poller(settings):
         daemon=True,
     ).start()
 
-    def heartbeat():
-        while True:
-            ticket = current["ticket"]
-            if ticket:
-                try:
-                    controller(settings, lambda: token(settings)).call(
-                        "app-heartbeat", operation=ticket
-                    )
-                except (OSError, ValueError, RuntimeError):
-                    pass
-            time.sleep(3)
+    def client():
+        return controller(settings, lambda: token(settings))
 
+    def heartbeat():
+        sides = {
+            role: Cluster(role, CONFIG / "rollout.kubeconfig")
+            for role in ("app", "judge")
+        }
+        drained = None
+        while True:
+            try:
+                c = client()
+                status = c.call(
+                    "observe", **observe_nodes(sides["app"], sides["judge"])
+                )
+                if status["phase"] == "draining" and drained != status["generation"]:
+                    finish_drain(c, settings, CONFIG / "rollout.kubeconfig", status)
+                    drained = status["generation"]
+            except Exception:
+                # Failure leaves the drain incomplete. The independent timer
+                # enforces the hard cleanup deadline and retains pending work.
+                pass
+            time.sleep(2)
+
+    app_ip = (CONFIG / "bootstrap-network").read_text().split()[1]
+    threading.Thread(target=serve_edge, args=(app_ip, client), daemon=True).start()
     threading.Thread(target=heartbeat, daemon=True).start()
     while True:
         try:
@@ -274,8 +290,8 @@ def run_issuer(settings):
                     raise RecoveryRequired("migration authority expired")
                 return min(req["deadline"], approval["until"])
 
-            def authorize(uid):
-                c.call("bind-migration", operation=req["id"], uid=uid)
+            def authorize(uid, job_uid):
+                c.call("bind-migration", operation=req["id"], uid=uid, job=job_uid)
                 authority.admit(req, "migrate")
                 authority.refresh_permits(req, "app")
 

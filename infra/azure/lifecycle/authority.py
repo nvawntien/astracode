@@ -4,6 +4,7 @@ import threading
 
 from kube_rollout import APP, EXECUTION, Cluster, Issuer
 from node_state import RecoveryRequired
+from permits import qualified_image
 
 
 class Authority:
@@ -180,12 +181,25 @@ class Authority:
                 "boot": view["boot_id"],
                 "epoch": view["epoch"],
                 "containers": rows,
+                "backing": {
+                    n: qualified_image(p) for n, p in view.get("backing", {}).items()
+                },
             }
         return observed
 
     def prior_submission(self, uid):
         view = self.clients["app"].observation()
         rows = [r for r in view["containers"] if r["workload"] == "submission-service"]
+        if not rows:
+            # A verified old permit can be withdrawn immediately after the
+            # durable rollout claim. Use a positive CRI exit for the same Pod.
+            rows = [
+                row
+                for row in view["exited"]
+                if row["workload"] == "submission-service"
+                and row["uid"] == uid
+                and row["finished_at"] > 0
+            ][:1]
         if len(rows) != 1 or rows[0]["uid"] != uid:
             raise RecoveryRequired("prior Submission is ambiguous")
         return dict(rows[0], epoch=view["epoch"])

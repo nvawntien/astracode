@@ -120,12 +120,24 @@ def main(partial=False):
             run(*bootstrap, "-v", "expected_system_id=" + instance)
         fence_password = secrets.token_hex(32)
         fence_script = (
-            "\\set verifier '" + password_verifier(fence_password)
+            "\\set verifier '"
+            + password_verifier(fence_password)
             + "'\n\\i /managed/fencer-login.sql\n"
         )
         for target, success in (("0", False), (instance, True), (instance, True)):
-            run(*base, "psql", "-XqAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres",
-                "-v", "expected_system_id=" + target, data=fence_script, success=success)
+            run(
+                *base,
+                "psql",
+                "-XqAt",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-v",
+                "expected_system_id=" + target,
+                data=fence_script,
+                success=success,
+            )
 
         def check_empty(owner):
             db = owner + "_db"
@@ -445,6 +457,39 @@ def main(partial=False):
                 who=user,
                 success=False,
             )
+
+        drain_password = secrets.token_hex(32)
+        run(
+            *base,
+            "psql",
+            "-XqAt",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            "submission_db",
+            "-v",
+            "expected_system_id=" + instance,
+            data="\\set verifier '"
+            + password_verifier(drain_password)
+            + "'\n\\i /managed/drain-login.sql\n",
+        )
+        assert (
+            sql(
+                "submission_db",
+                "SELECT astra_control.retained_work()",
+                who="astra_drain_submission",
+            )
+            == '{"outbox": 0, "attempts": 0}'
+        )
+        sql(
+            "submission_db",
+            "SELECT status FROM public.submission_attempts",
+            who="astra_drain_submission",
+            success=False,
+        )
+        sql("problem_db", "SELECT 1", who="astra_drain_submission", success=False)
 
         # Use a least-privilege fencer for the host coordinator and the exact
         # prefix fingerprints built into the managed image.

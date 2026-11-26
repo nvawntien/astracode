@@ -114,6 +114,7 @@ resource "azurerm_linux_virtual_machine" "node" {
   depends_on = [
     terraform_data.compute_admission,
     azurerm_monitor_scheduled_query_rules_alert_v2.heartbeat,
+    azurerm_monitor_scheduled_query_rules_alert_v2.cleanup,
     azurerm_resource_group_policy_assignment.vm_names,
     azurerm_role_assignment.power,
     azurerm_subnet_network_security_group_association.node,

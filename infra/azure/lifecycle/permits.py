@@ -73,6 +73,15 @@ def revoke(root, workload):
         (root / "permits" / workload / name).unlink(missing_ok=True)
 
 
+def qualified_image(reference):
+    repository, sep, pin = reference.partition("@")
+    if "/" not in repository:
+        repository = "docker.io/library/" + repository
+    elif "." not in repository.split("/")[0] and ":" not in repository.split("/")[0]:
+        repository = "docker.io/" + repository
+    return repository + sep + pin
+
+
 def running_image(container, inspect=cri):
     # On pinned containerd the list response's image.image is a config ID.
     # userSpecifiedImage preserves the Pod's index/manifest reference.
@@ -80,7 +89,11 @@ def running_image(container, inspect=cri):
     if not DIGEST.fullmatch(requested.partition("@")[2]):
         raise RecoveryRequired("running container lacks a digest-qualified request")
     status = inspect("inspecti", "-o", "json", container["imageRef"])["status"]
-    if requested not in status["repoDigests"] or status["id"] != container["imageRef"]:
+    if (
+        qualified_image(requested)
+        not in {qualified_image(p) for p in status["repoDigests"]}
+        or status["id"] != container["imageRef"]
+    ):
         raise RecoveryRequired("local descriptor differs from the requested image")
     return requested
 

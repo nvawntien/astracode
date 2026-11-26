@@ -34,14 +34,22 @@ def api(role, *args, data=None):
 def observe(role):
     containers = []
     exited = []
+    backing = {}
     for c in cri("ps", "-a", "-o", "json")["containers"]:
         labels = c.get("labels", {})
-        if (
-            labels.get("io.kubernetes.pod.namespace") != "astracode-" + role
-            or c["metadata"]["name"] not in ROLES[role]
-        ):
+        if labels.get("io.kubernetes.pod.namespace") != "astracode-" + role:
             continue
         name = c["metadata"]["name"]
+        if (
+            role == "app"
+            and name in {"postgres", "redis", "kafka", "minio"}
+            and c["state"] == "CONTAINER_RUNNING"
+        ):
+            if name in backing:
+                raise RuntimeError("ambiguous backing-store identity")
+            backing[name] = running_image(c)
+        if name not in ROLES[role]:
+            continue
         row = {
             "workload": name,
             "uid": labels["io.kubernetes.pod.uid"],
@@ -76,6 +84,7 @@ def observe(role):
     return {
         "epoch": Path("/run/astracode/epoch").read_text().strip(),
         "containers": containers,
+        "backing": backing,
         "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
         "exited": sorted(exited, key=lambda row: row["finished_at"], reverse=True)[:32],
         "reported_at": int(time.time()),

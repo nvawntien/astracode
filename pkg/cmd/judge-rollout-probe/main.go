@@ -39,6 +39,8 @@ func main() {
 		err = inspectLegacyMember(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 	case len(os.Args) == 5 && os.Args[1] == "kafka-empty":
 		err = verifyEmptyGroup(os.Args[2], os.Args[3], os.Args[4])
+	case len(os.Args) == 3 && os.Args[1] == "retained-work":
+		err = retainedWork(os.Args[2])
 	case len(os.Args) == 4 && os.Args[1] == "worker-settings":
 		err = workerSettings(os.Args[2], os.Args[3])
 	default:

@@ -69,4 +69,5 @@ GRANT CONNECT ON DATABASE submission_db TO submission_runtime, submission_owner;
 \connect submission_db
 \set owner submission_owner
 \set runtime submission_runtime
+\set is_submission true
 \ir owner.sql

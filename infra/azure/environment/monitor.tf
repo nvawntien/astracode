@@ -49,16 +49,54 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "heartbeat" {
 
   criteria {
     query                   = <<-KQL
-      AppTraces
-      | where TimeGenerated >= ago(5m)
-      | where _ResourceId =~ "${azurerm_application_insights.controller.id}"
-      | where Message == "reconciliation_succeeded"
-      | summarize Heartbeats = count()
+      let expected = "${azurerm_application_insights.controller.id}";
+      union (print Controller=expected, Count=long(0)),
+            (AppTraces
+             | where TimeGenerated >= ago(5m)
+             | where _ResourceId =~ expected and Message == "reconciliation_succeeded"
+             | project Controller=expected, Count=long(1))
+      | summarize Heartbeats=sum(Count) by Controller
     KQL
     time_aggregation_method = "Minimum"
     metric_measure_column   = "Heartbeats"
     operator                = "LessThan"
     threshold               = 1
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.controller.id]
+  }
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cleanup" {
+  name                    = "${local.name}-controller-cleanup"
+  resource_group_name     = azurerm_resource_group.operations.name
+  location                = azurerm_resource_group.operations.location
+  scopes                  = [azurerm_log_analytics_workspace.controller.id]
+  severity                = 2
+  evaluation_frequency    = "PT1M"
+  window_duration         = "PT5M"
+  enabled                 = var.controller.armed
+  auto_mitigation_enabled = true
+  skip_query_validation   = true
+
+  criteria {
+    query                   = <<-KQL
+      AppTraces
+      | where TimeGenerated >= ago(5m)
+      | where _ResourceId =~ "${azurerm_application_insights.controller.id}"
+      | where Message == "astra-controller-cleanup-overdue"
+      | summarize Failures=count()
+    KQL
+    time_aggregation_method = "Maximum"
+    metric_measure_column   = "Failures"
+    operator                = "GreaterThan"
+    threshold               = 0
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 1

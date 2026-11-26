@@ -47,7 +47,7 @@ class Jobs(unittest.TestCase):
         self.adapter = MigrationJob(
             self,
             lambda attempt, values: self.events.append(("credentials", values)),
-            lambda uid: self.events.append(("permit", uid)),
+            lambda uid, job: self.events.append(("permit", (uid, job))),
             lambda: self.events.append(("revoke", None)),
             lambda: {
                 "metadata": {"labels": {"astracode.io/template": "migrate"}},
@@ -92,7 +92,7 @@ class Jobs(unittest.TestCase):
             [
                 ("delete", "old"),
                 ("credentials", {"auth": "synthetic"}),
-                ("permit", "pod"),
+                ("permit", ("pod", "new")),
                 ("revoke", None),
                 ("credentials", None),
             ],

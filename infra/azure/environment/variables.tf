@@ -94,6 +94,7 @@ variable "controller" {
     alert_email         = string
     emergency_object_id = string
     armed               = optional(bool, false)
+    policy_json         = optional(string, "{}")
   })
 
   validation {

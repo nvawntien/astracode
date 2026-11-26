@@ -35,6 +35,7 @@ table inet astra_host {
   chain input {
     type filter hook input priority -10; policy accept;
     iifname { "cni0", "flannel.1", "veth*" } jump pod_input
+    iifname != "cni0" tcp dport 18080 drop
   }
   chain pod_input {
     jump pod_common

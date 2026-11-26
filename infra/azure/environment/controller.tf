@@ -144,6 +144,11 @@ resource "azurerm_function_app_flex_consumption" "controller" {
     AzureWebJobsStorage__credential           = "managedidentity"
     AzureWebJobsStorage__clientId             = azurerm_user_assigned_identity.runtime["controller"].client_id
     APPLICATIONINSIGHTS_AUTHENTICATION_STRING = "Authorization=AAD;ClientId=${azurerm_user_assigned_identity.runtime["controller"].client_id}"
+    ASTRA_CONTROLLER_POLICY                   = var.controller.policy_json
+    ASTRA_TENANT_ID                           = var.target.tenant_id
+    ASTRA_CONTROLLER_AUDIENCE                 = "api://${var.controller.api_client_id}"
+    ASTRA_POLLER_CLIENT_ID                    = azurerm_user_assigned_identity.runtime["app-poller"].client_id
+    ASTRA_POLLER_OBJECT_ID                    = azurerm_user_assigned_identity.runtime["app-poller"].principal_id
     ASTRA_ENVIRONMENT                         = var.target.slot
     ASTRA_CONTROLLER_MODE                     = var.target.slot == "S3" ? "rehearsal" : "staging"
     ASTRA_TARGET_VM_IDS                       = jsonencode(local.vm_ids)

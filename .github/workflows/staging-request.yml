@@ -1,0 +1,59 @@
+name: Approve the originating staging request
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Exact JSON from the authenticated requesting member
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  freeze:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      payload: ${{ steps.request.outputs.payload }}
+      environment: ${{ steps.request.outputs.environment }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - id: request
+        env:
+          REQUEST: ${{ inputs.request }}
+        run: python3 -B scripts/release/staging_request.py prepare
+
+  approve:
+    needs: freeze
+    if: vars.M013_DELIVERY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: ${{ needs.freeze.outputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: |
+          python3 -m venv "$RUNNER_TEMP/staging-client"
+          "$RUNNER_TEMP/staging-client/bin/pip" install azure-cli==2.76.0
+          echo "$RUNNER_TEMP/staging-client/bin" >> "$GITHUB_PATH"
+      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6
+        with:
+          client-id: ${{ vars.STAGING_APPROVAL_CLIENT_ID }}
+          tenant-id: ${{ vars.S2_TENANT_ID }}
+          allow-no-subscriptions: true
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FROZEN_REQUEST: ${{ needs.freeze.outputs.payload }}
+          APPROVAL_ENVIRONMENT: ${{ needs.freeze.outputs.environment }}
+          APPROVER_IDS: ${{ vars.STAGING_APPROVER_IDS }}
+          CONTROLLER_ENDPOINT: ${{ vars.CONTROLLER_ENDPOINT }}
+          CONTROLLER_AUDIENCE: ${{ vars.CONTROLLER_AUDIENCE }}
+        run: python3 -B scripts/release/staging_request.py submit

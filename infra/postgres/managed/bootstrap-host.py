@@ -50,6 +50,8 @@ def bootstrap(system_id, secrets):
     for owner in OWNERS:
         psql("astra_bootstrap_" + owner, "runtime-login.sql", {"owner": owner}, owner)
 
+    psql("astra_bootstrap_submission", "drain-login.sql", {}, "drain")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

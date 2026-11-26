@@ -76,7 +76,8 @@ def verify(path, validators, slot):
             assert not {5050, 5051, 5052}.intersection(p["port"] for p in obj["spec"]["ports"])
         if kind == "IngressRoute":
             expected = "testing" if slot == "s3" else "staging"
-            assert obj["spec"]["routes"][0]["match"] == f"Host(`{expected}.invalid`)"
+            prefix = "smoke." if obj["metadata"]["name"] == "smoke" else ""
+            assert obj["spec"]["routes"][0]["match"] == f"Host(`{prefix}{expected}.invalid`)"
     assert len(images) == 13
     print(f"{slot}: {len(resources)} resources passed strict schemas, {len(images)} pinned containers")
     return images

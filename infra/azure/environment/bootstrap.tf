@@ -70,6 +70,23 @@ locals {
     "/etc/systemd/system/srv-astracode-data.mount" = [
       templatefile("${local.bootstrap_root}/srv-astracode-data.mount.tftpl", { uuid = local.disk_uuid }), "0644",
     ]
+    "/var/lib/rancher/k3s/server/manifests/astra-tester-lease-endpoint.yaml" = [
+      yamlencode({
+        apiVersion = "discovery.k8s.io/v1"
+        kind       = "EndpointSlice"
+        metadata = {
+          name      = "tester-lease-app"
+          namespace = "astracode-app"
+          labels = {
+            "kubernetes.io/service-name"             = "tester-lease"
+            "endpointslice.kubernetes.io/managed-by" = "astracode-platform"
+          }
+        }
+        addressType = "IPv4"
+        ports       = [{ name = "forward-auth", protocol = "TCP", port = 18080 }]
+        endpoints   = [{ addresses = [local.node_ips.app], conditions = { ready = true } }]
+      }), "0644",
+    ]
     "/var/lib/rancher/k3s/server/manifests/traefik-config.yaml" = [
       yamlencode({
         apiVersion = "helm.cattle.io/v1"

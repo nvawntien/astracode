@@ -90,6 +90,10 @@ def main(probe):
                 )
 
         check("fixture-unseen", True)
+        baseline = subprocess.check_output(
+            [probe, "retained-work", endpoint], timeout=20
+        )
+        assert json.loads(baseline) == dict(jobs=0, results=0, dlt=0)
         consumer = subprocess.Popen(
             [
                 *command,
@@ -99,7 +103,7 @@ def main(probe):
                 "--topic",
                 "judge.submission.jobs",
                 "--group",
-                "fixture-active",
+                "judge-worker-v1",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -113,7 +117,7 @@ def main(probe):
                 endpoint,
                 "--describe",
                 "--group",
-                "fixture-active",
+                "judge-worker-v1",
                 "--state",
             )
             if "Stable" in description:
@@ -121,7 +125,16 @@ def main(probe):
             time.sleep(1)
         else:
             raise AssertionError("fixture consumer failed to join")
-        check("fixture-active", False)
+        check("judge-worker-v1", False)
+        active = subprocess.run(
+            [probe, "retained-work", endpoint], capture_output=True, timeout=20
+        )
+        assert active.returncode != 0
+        consumer.terminate()
+        consumer.wait(5)
+        # The Docker exec process may stop before the broker's group session
+        # expires. Use a separate group-free broker sample below.
+
         run(
             *command,
             "/opt/bitnami/kafka/bin/kafka-console-producer.sh",
