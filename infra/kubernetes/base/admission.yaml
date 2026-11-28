@@ -1,0 +1,1801 @@
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-auth-service
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: auth-service
+      astracode.io/template: auth-service
+  spec:
+    serviceAccountName: auth-service
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: auth-service
+      image: offline.invalid/astracode/auth-service@sha256:55f77d568ab55b6ac1d3042285e7e0ebe23854b96f3c2d0667790d705629172d
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: auth-service-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: config
+        mountPath: /app/config
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - auth-service
+      - --
+      - /app/app
+      envFrom:
+      - secretRef:
+          name: auth-service-runtime
+      readinessProbe:
+        tcpSocket: &id001
+          port: 8081
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: auth-service-permits
+      hostPath:
+        path: /run/astracode/permits/auth-service
+        type: Directory
+    - name: config
+      configMap:
+        name: auth-service-config
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-envoy
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: envoy
+      astracode.io/template: envoy
+  spec:
+    serviceAccountName: envoy
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: envoy
+      image: envoyproxy/envoy@sha256:daca6a3f353ba289cc786d2162d13d4ec2b16d921c6c3f2fc57ce6f7900ab3d9
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: envoy-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: config
+        mountPath: /etc/envoy
+        readOnly: true
+      - name: jwk
+        mountPath: /etc/envoy/secrets
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - envoy
+      - --
+      - envoy
+      - -c
+      - /etc/envoy/envoy.yaml
+      - --log-level
+      - warn
+      readinessProbe:
+        tcpSocket: &id001
+          port: 8080
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: envoy-permits
+      hostPath:
+        path: /run/astracode/permits/envoy
+        type: Directory
+    - name: config
+      configMap:
+        name: envoy-config
+    - name: jwk
+      secret:
+        secretName: envoy-jwk
+        defaultMode: 292
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-judge-worker
+  namespace: astracode-judge
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: judge-worker
+      astracode.io/template: judge-worker
+  spec:
+    serviceAccountName: judge-worker
+    hostUsers: false
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - judge
+    containers:
+    - name: judge-worker
+      image: offline.invalid/astracode/judge-worker@sha256:6865364b178b52ed6fcea3f4549a1f26940eb9a97e820c4073cdf53f40c480a4
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: judge-worker-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: config
+        mountPath: /app/config
+        readOnly: true
+      - name: testcases
+        mountPath: /cache/testcases
+        readOnly: false
+      command:
+      - /platform/launch-guard
+      args:
+      - judge-worker
+      - --
+      - /app/app
+      env:
+      - name: WORKER_POOL_SIZE
+        value: '1'
+      - name: JUDGE_EXECUTOR_GRPC_ADDRESS
+        value: 127.0.0.1:5051
+      - name: PROBLEM_GRPC_ADDRESS
+        value: problem-service.astracode-app.svc:9092
+      - name: KAFKA_BROKERS
+        value: kafka.astracode-app.svc:9092
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+      readinessProbe:
+        tcpSocket: &id001
+          port: 9093
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    - name: go-judge
+      image: offline.invalid/astracode/sandbox@sha256:8f33899eb5d162e0b17d37a6b1e1fd1c658b5fcf3077d945b883f5f3a4bb19b1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '2'
+          memory: 2Gi
+      securityContext:
+        privileged: true
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: go-judge-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: testcases
+        mountPath: /cache/testcases
+        readOnly: true
+      - name: tmp
+        mountPath: /tmp
+        readOnly: false
+      - name: work
+        mountPath: /w
+        readOnly: false
+      command:
+      - /platform/launch-guard
+      args:
+      - go-judge
+      - --
+      - /opt/executorserver
+      env:
+      - name: ES_ENABLE_GRPC
+        value: 'true'
+      - name: ES_GRPC_ADDR
+        value: 127.0.0.1:5051
+      - name: ES_HTTP_ADDR
+        value: 127.0.0.1:5050
+      - name: ES_MONITOR_ADDR
+        value: 127.0.0.1:5052
+      - name: ES_NET_SHARE
+        value: 'false'
+      - name: ES_SRC_PREFIX
+        value: /cache/testcases
+      - name: ES_PARALLELISM
+        value: '1'
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+      readinessProbe:
+        exec: &id002
+          command:
+          - /bin/bash
+          - -ec
+          - exec 3<>/dev/tcp/127.0.0.1/5051
+        periodSeconds: 5
+      livenessProbe:
+        exec: *id002
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        exec: *id002
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: judge-worker-permits
+      hostPath:
+        path: /run/astracode/permits/judge-worker
+        type: Directory
+    - name: go-judge-permits
+      hostPath:
+        path: /run/astracode/permits/go-judge
+        type: Directory
+    - name: config
+      configMap:
+        name: judge-worker-config
+    - name: testcases
+      emptyDir:
+        sizeLimit: 512Mi
+    - name: tmp
+      emptyDir:
+        medium: Memory
+        sizeLimit: 256Mi
+    - name: work
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
+    tolerations:
+    - key: astracode.io/node-role
+      operator: Equal
+      value: judge
+      effect: NoSchedule
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    securityContext:
+      fsGroup: 2000
+    imagePullSecrets:
+    - name: release-pull
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-kafka
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: backing
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: kafka
+      astracode.io/template: kafka
+  spec:
+    serviceAccountName: kafka
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: kafka
+      image: bitnamilegacy/kafka@sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 1Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: data
+        mountPath: /bitnami/kafka
+        readOnly: false
+      env:
+      - name: KAFKA_CFG_NODE_ID
+        value: '1'
+      - name: KAFKA_CFG_PROCESS_ROLES
+        value: controller,broker
+      - name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS
+        value: 1@localhost:9093
+      - name: KAFKA_CFG_LISTENERS
+        value: INTERNAL://:9092,CONTROLLER://:9093
+      - name: KAFKA_CFG_ADVERTISED_LISTENERS
+        value: INTERNAL://kafka.astracode-app.svc:9092
+      - name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP
+        value: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES
+        value: CONTROLLER
+      - name: KAFKA_CFG_INTER_BROKER_LISTENER_NAME
+        value: INTERNAL
+      - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+        value: 'false'
+      - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+        value: '1'
+      - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+        value: '1'
+      - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
+        value: '1'
+      - name: KAFKA_HEAP_OPTS
+        value: -Xms256m -Xmx512m
+      envFrom:
+      - secretRef:
+          name: kafka-runtime
+      readinessProbe:
+        tcpSocket: &id001
+          port: 9092
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: kafka-data
+    securityContext:
+      fsGroup: 1001
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-minio
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: backing
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: minio
+      astracode.io/template: minio
+  spec:
+    serviceAccountName: minio
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: minio
+      image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: data
+        mountPath: /data
+        readOnly: false
+      args:
+      - server
+      - /data
+      envFrom:
+      - secretRef:
+          name: minio-runtime
+      readinessProbe:
+        tcpSocket: &id001
+          port: 9000
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: minio-data
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-postgres
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: backing
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: postgres
+      astracode.io/template: postgres
+  spec:
+    serviceAccountName: postgres
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: postgres
+      image: postgres@sha256:8a8d55343d6fc456cb183453e3094ff140b984157b36b48f817dd581654f2aec
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 70
+      volumeMounts:
+      - name: data
+        mountPath: /var/lib/postgresql/data
+        readOnly: false
+      env:
+      - name: PGDATA
+        value: /var/lib/postgresql/data/pgdata
+      envFrom:
+      - secretRef:
+          name: postgres-runtime
+      readinessProbe:
+        tcpSocket: &id001
+          port: 5432
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: postgres-data
+    securityContext:
+      fsGroup: 70
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-problem-service
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: problem-service
+      astracode.io/template: problem-service
+  spec:
+    serviceAccountName: problem-service
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: problem-service
+      image: offline.invalid/astracode/problem-service@sha256:c515c407858f214123d49c2e79790fc13c2c23ef44d1f38dc90e59b18ee78f6a
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: problem-service-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: config
+        mountPath: /app/config
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - problem-service
+      - --
+      - /app/app
+      envFrom:
+      - secretRef:
+          name: problem-service-runtime
+      readinessProbe:
+        tcpSocket: &id001
+          port: 8082
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: problem-service-permits
+      hostPath:
+        path: /run/astracode/permits/problem-service
+        type: Directory
+    - name: config
+      configMap:
+        name: problem-service-config
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-redis
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: backing
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: redis
+      astracode.io/template: redis
+  spec:
+    serviceAccountName: redis
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: redis
+      image: redis@sha256:dfa18828cbc07b3ae6a95ec7343f6c214fdee2d836197b4be8e9904420762cd8
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 192Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 999
+      volumeMounts:
+      - name: data
+        mountPath: /data
+        readOnly: false
+      - name: acl
+        mountPath: /etc/astracode-redis
+        readOnly: true
+      command:
+      - redis-server
+      - --aclfile
+      - /etc/astracode-redis/users.acl
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+      readinessProbe:
+        tcpSocket: &id001
+          port: 6379
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: redis-data
+    - name: acl
+      secret:
+        secretName: redis-runtime
+        defaultMode: 292
+    securityContext:
+      fsGroup: 999
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-submission-service
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: submission-service
+      astracode.io/template: submission-service
+  spec:
+    serviceAccountName: submission-service
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: submission-service
+      image: offline.invalid/astracode/submission-service@sha256:eab587ff28f45a39fb5f306120686cc236be6385ff6838bf06d2d2922ff04bff
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: submission-service-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: config
+        mountPath: /app/config
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - submission-service
+      - --
+      - /app/app
+      envFrom:
+      - secretRef:
+          name: submission-service-runtime
+      env:
+      - name: JUDGE_GRPC_ADDRESS
+        value: judge-worker.astracode-judge.svc:9093
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+      readinessProbe:
+        tcpSocket: &id001
+          port: 8083
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: submission-service-permits
+      hostPath:
+        path: /run/astracode/permits/submission-service
+        type: Directory
+    - name: config
+      configMap:
+        name: submission-service-config
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-website
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: website
+      astracode.io/template: website
+  spec:
+    serviceAccountName: website
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: website
+      image: offline.invalid/astracode/website@sha256:1502f55cab20877a8e7360b3bb335e243cea6d7efb6c72b375f8c21f99097829
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: website-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - website
+      - --
+      - node
+      - server.js
+      readinessProbe:
+        tcpSocket: &id001
+          port: 3000
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket: *id001
+        periodSeconds: 20
+        failureThreshold: 3
+      startupProbe:
+        tcpSocket: *id001
+        periodSeconds: 5
+        failureThreshold: 120
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: website-permits
+      hostPath:
+        path: /run/astracode/permits/website
+        type: Directory
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astracode-workload-names
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ''
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+        - astracode-app
+        - astracode-judge
+  variables:
+  - name: label
+    expression: object.metadata.labels["astracode.io/template"]
+  validations:
+  - expression: (object.metadata.namespace == "astracode-app" && variables.label in ["auth-service", "envoy", "kafka", "minio",
+      "kafka-init", "migrate", "postgres", "problem-service", "redis", "submission-service", "website"] || object.metadata.namespace
+      == "astracode-judge" && variables.label in ["judge-worker"])
+  - expression: object.kind == "Pod" || object.spec.template.metadata.labels["astracode.io/template"] == variables.label
+  - expression: object.kind != "Deployment" || object.metadata.name == variables.label
+  - expression: object.kind == "Deployment" || object.metadata.labels["app.kubernetes.io/name"] == variables.label
+  - expression: object.kind != "Job" || (variables.label in ["kafka-init","migrate"] && object.metadata.name == variables.label
+      && object.spec.parallelism == 1 && object.spec.completions == 1 && object.spec.backoffLimit == 0 && object.spec.activeDeadlineSeconds
+      <= 600)
+  - expression: object.kind != "Deployment" || !(variables.label in ["kafka-init","migrate"])
+  - expression: object.kind != "Job" || request.userInfo.username != "astra-poller" || variables.label == "migrate"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workload-names
+spec:
+  policyName: astracode-workload-names
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astracode-workloads
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: PodTemplate
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ''
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+        - astracode-app
+        - astracode-judge
+  variables:
+  - name: label
+    expression: object.metadata.labels["astracode.io/template"]
+  - name: p
+    expression: 'object.kind == "Pod" ? object.spec : object.spec.template.spec'
+  - name: approved
+    expression: params.template.spec
+  - name: meta
+    expression: 'object.kind == "Pod" ? object.metadata : object.spec.template.metadata'
+  validations:
+  - expression: params.template.metadata.labels["astracode.io/template"] == variables.label
+  - expression: params.metadata.annotations["astracode.io/activation"] in ["backing", "authorized"] || (object.kind == "Deployment"
+      && object.spec.replicas == 0) || (object.kind == "Job" && has(object.spec.suspend) && object.spec.suspend)
+  - expression: variables.p.containers == variables.approved.containers
+  - expression: variables.p.volumes == variables.approved.volumes
+  - expression: variables.p.serviceAccountName == variables.approved.serviceAccountName
+  - expression: has(variables.p.automountServiceAccountToken) && !variables.p.automountServiceAccountToken
+  - expression: '!has(variables.p.nodeName) || (request.operation == "UPDATE" && object.kind == "Pod" && variables.p.nodeName
+      == oldObject.spec.nodeName)'
+  - expression: (!has(variables.p.hostNetwork) || !variables.p.hostNetwork) && (!has(variables.p.hostPID) || !variables.p.hostPID)
+      && (!has(variables.p.hostIPC) || !variables.p.hostIPC)
+  - expression: '!has(variables.p.shareProcessNamespace) || !variables.p.shareProcessNamespace'
+  - expression: variables.p.affinity == variables.approved.affinity
+  - expression: variables.p.tolerations.all(t, t in variables.approved.tolerations || (t.key == "node.kubernetes.io/memory-pressure"
+      && t.operator == "Exists" && t.effect == "NoSchedule" && !has(t.tolerationSeconds) && !has(t.value)))
+  - expression: object.kind == "Pod" || object.spec.template.metadata.labels["app.kubernetes.io/name"] == variables.label
+  - expression: '!has(variables.p.initContainers)'
+  - expression: '!has(variables.p.ephemeralContainers)'
+  - expression: '!has(variables.p.hostAliases)'
+  - expression: '!has(variables.p.runtimeClassName)'
+  - expression: '!has(variables.p.dnsConfig)'
+  - expression: '!has(variables.p.nodeSelector)'
+  - expression: '!has(variables.p.resourceClaims)'
+  - expression: '!has(variables.p.readinessGates)'
+  - expression: has(variables.p.securityContext) == has(variables.approved.securityContext) && (!has(variables.p.securityContext)
+      || variables.p.securityContext == variables.approved.securityContext)
+  - expression: has(variables.p.imagePullSecrets) == has(variables.approved.imagePullSecrets) && (!has(variables.p.imagePullSecrets)
+      || variables.p.imagePullSecrets == variables.approved.imagePullSecrets)
+  - expression: has(variables.p.dnsPolicy) == has(variables.approved.dnsPolicy) && (!has(variables.p.dnsPolicy) || variables.p.dnsPolicy
+      == variables.approved.dnsPolicy)
+  - expression: has(variables.p.schedulerName) == has(variables.approved.schedulerName) && (!has(variables.p.schedulerName)
+      || variables.p.schedulerName == variables.approved.schedulerName)
+  - expression: has(variables.p.enableServiceLinks) == has(variables.approved.enableServiceLinks) && (!has(variables.p.enableServiceLinks)
+      || variables.p.enableServiceLinks == variables.approved.enableServiceLinks)
+  - expression: has(variables.p.hostUsers) == has(variables.approved.hostUsers) && (!has(variables.p.hostUsers) || variables.p.hostUsers
+      == variables.approved.hostUsers)
+  - expression: variables.p.restartPolicy == variables.approved.restartPolicy
+  - expression: '!has(variables.p.priorityClassName) && !has(variables.p.schedulingGates)'
+  - expression: '!has(variables.p.os) || variables.p.os.name == "linux"'
+  - expression: object.kind != "Deployment" || (object.spec.strategy.type == "Recreate" && object.spec.replicas <= 1)
+  - expression: '!has(variables.meta.annotations) || variables.meta.annotations.size() == 0'
+  - expression: variables.meta.labels.all(k, k in ["app.kubernetes.io/name","astracode.io/template","astracode.io/environment","pod-template-hash","batch.kubernetes.io/controller-uid","batch.kubernetes.io/job-name","controller-uid","job-name"])
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-auth-service
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-auth-service
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: auth-service
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-envoy
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-envoy
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: envoy
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-kafka
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-kafka
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: kafka
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-minio
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-minio
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: minio
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-postgres
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-postgres
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: postgres
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-problem-service
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-problem-service
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: problem-service
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-redis
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-redis
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: redis
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-submission-service
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-submission-service
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: submission-service
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-website
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-website
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: website
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: release-rollout
+  namespace: astracode-app
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch
+  - update
+  resourceNames:
+  - auth-service
+  - envoy
+  - problem-service
+  - submission-service
+  - website
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - get
+  - patch
+  - delete
+  resourceNames:
+  - migrate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: release-rollout
+  namespace: astracode-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: release-rollout
+subjects:
+- kind: User
+  name: astra-poller
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-judge-worker
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-judge-worker
+    namespace: astracode-judge
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-judge
+    objectSelector:
+      matchLabels:
+        astracode.io/template: judge-worker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: release-rollout
+  namespace: astracode-judge
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch
+  - update
+  resourceNames:
+  - judge-worker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: release-rollout
+  namespace: astracode-judge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: release-rollout
+subjects:
+- kind: User
+  name: astra-poller
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-kafka-init
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: backing
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: kafka-init
+      astracode.io/template: kafka-init
+  spec:
+    serviceAccountName: kafka-init
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: kafka-init
+      image: bitnamilegacy/kafka@sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: scripts
+        mountPath: /scripts
+        readOnly: true
+      command:
+      - /bin/bash
+      - /scripts/kafka-init.sh
+    volumes:
+    - name: scripts
+      configMap:
+        name: kafka-init-scripts
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    restartPolicy: Never
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-kafka-init
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-kafka-init
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: kafka-init
+---
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: approved-migrate
+  namespace: astracode-app
+  annotations:
+    astracode.io/activation: closed
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: migrate
+      astracode.io/template: migrate
+  spec:
+    serviceAccountName: migrate
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: astracode.io/node-role
+              operator: In
+              values:
+              - app
+    containers:
+    - name: migrate
+      image: offline.invalid/astracode/migrate@sha256:1cf318e5d2c054d5c7915eefdd52edfb71c146b18bcfeba21bb38a672a404d2b
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - name: guard
+        mountPath: /platform/launch-guard
+        readOnly: true
+      - name: migrate-permits
+        mountPath: /run/astra/permits
+        readOnly: true
+      - name: credentials
+        mountPath: /run/astra/db
+        readOnly: true
+      command:
+      - /platform/launch-guard
+      args:
+      - migrate
+      - --
+      - /usr/local/bin/astra-migrate
+      env:
+      - name: ASTRA_POD_UID
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.uid
+    volumes:
+    - name: guard
+      hostPath:
+        path: /usr/local/libexec/astra/launch-guard
+        type: File
+    - name: migrate-permits
+      hostPath:
+        path: /run/astracode/permits/migrate
+        type: Directory
+    - name: credentials
+      secret:
+        secretName: migrate-attempt
+        defaultMode: 292
+    imagePullSecrets:
+    - name: release-pull
+    tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    restartPolicy: Never
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-workloads-migrate
+spec:
+  policyName: astracode-workloads
+  validationActions:
+  - Deny
+  paramRef:
+    name: approved-migrate
+    namespace: astracode-app
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: astracode-app
+    objectSelector:
+      matchLabels:
+        astracode.io/template: migrate
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astracode-controller-kinds
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+        - astracode-app
+        - astracode-judge
+    resourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - statefulsets
+      - daemonsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - cronjobs
+    - apiGroups:
+      - ''
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - replicationcontrollers
+  validations:
+  - expression: 'false'
+    message: Only reviewed Deployments and single-attempt Jobs may create workloads here.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astracode-controller-kinds
+spec:
+  policyName: astracode-controller-kinds
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astra-release-configmaps
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE]
+      resources: [configmaps]
+  matchConditions:
+  - name: release-poller
+    expression: request.userInfo.username == "astra-poller"
+  validations:
+  - expression: 'object.metadata.namespace == "astracode-app" ? object.metadata.name.matches("^(auth-service|problem-service|submission-service|envoy)-config-[a-z0-9]{10}$") : object.metadata.namespace == "astracode-judge" && object.metadata.name.matches("^judge-worker-config-[a-z0-9]{10}$")'
+  - expression: has(object.immutable) && object.immutable && !has(object.binaryData) && !has(object.metadata.ownerReferences) && !has(object.metadata.finalizers)
+  - expression: 'object.metadata.name.startsWith("envoy-config-") ? object.data.size() == 2 && "envoy.yaml" in object.data && "edge.lua" in object.data : object.data.size() == 1 && "config.yaml" in object.data'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astra-release-configmaps
+spec:
+  policyName: astra-release-configmaps
+  validationActions: [Deny]

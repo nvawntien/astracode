@@ -1,0 +1,24 @@
+name: Publish canonical container release
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-canonical-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    uses: nvawntien/astracode/.github/workflows/release-candidate.yml@main
+    with:
+      source: ${{ github.sha }}
+      kind: canonical
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write

@@ -1,0 +1,20 @@
+[Unit]
+Description=AstraCode node-bound process permits
+After=astra-k3s.service
+PartOf=astra-k3s.service
+Requires=astra-k3s.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/astra/node_agent.py
+Restart=on-failure
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run/astracode
+PrivateTmp=yes
+
+[Install]
+WantedBy=astra-k3s.service

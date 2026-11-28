@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespaces.yaml
+- network-defaults.yaml
+- node-permits.yaml
+- storage.yaml
+- postgres.yaml
+- redis.yaml
+- minio.yaml
+- kafka.yaml
+- website.yaml
+- envoy.yaml
+- auth-service.yaml
+- problem-service.yaml
+- submission-service.yaml
+- judge-worker.yaml
+- connections.yaml
+- ingress.yaml
+- ../../../envoy
+- admission.yaml
+- jobs.yaml
+- ../../../infra/kafka
+generatorOptions:
+  immutable: true
+configMapGenerator:
+- name: auth-service-config
+  namespace: astracode-app
+  files:
+  - config/auth-service/config.yaml
+- name: problem-service-config
+  namespace: astracode-app
+  files:
+  - config/problem-service/config.yaml
+- name: submission-service-config
+  namespace: astracode-app
+  files:
+  - config/submission-service/config.yaml
+- name: judge-worker-config
+  namespace: astracode-judge
+  files:
+  - config/judge-worker/config.yaml

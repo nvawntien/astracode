@@ -1,0 +1,25 @@
+name: Package the reviewed S3 candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Exact reviewed 40-character candidate SHA; S3 only, never canonical
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    uses: nvawntien/astracode/.github/workflows/release-candidate.yml@main
+    with:
+      source: ${{ inputs.source }}
+      kind: rehearsal
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write

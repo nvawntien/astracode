@@ -1,0 +1,225 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: judge-worker
+  namespace: astracode-judge
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: judge-worker
+  namespace: astracode-judge
+  labels:
+    astracode.io/template: judge-worker
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: judge-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: judge-worker
+        astracode.io/template: judge-worker
+    spec:
+      serviceAccountName: judge-worker
+      hostUsers: false
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: astracode.io/node-role
+                operator: In
+                values:
+                - judge
+      containers:
+      - name: judge-worker
+        image: offline.invalid/astracode/judge-worker@sha256:6865364b178b52ed6fcea3f4549a1f26940eb9a97e820c4073cdf53f40c480a4
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: guard
+          mountPath: /platform/launch-guard
+          readOnly: true
+        - name: judge-worker-permits
+          mountPath: /run/astra/permits
+          readOnly: true
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: testcases
+          mountPath: /cache/testcases
+          readOnly: false
+        command:
+        - /platform/launch-guard
+        args:
+        - judge-worker
+        - --
+        - /app/app
+        env:
+        - name: WORKER_POOL_SIZE
+          value: '1'
+        - name: JUDGE_EXECUTOR_GRPC_ADDRESS
+          value: 127.0.0.1:5051
+        - name: PROBLEM_GRPC_ADDRESS
+          value: problem-service.astracode-app.svc:9092
+        - name: KAFKA_BROKERS
+          value: kafka.astracode-app.svc:9092
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        readinessProbe:
+          tcpSocket: &id001
+            port: 9093
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket: *id001
+          periodSeconds: 20
+          failureThreshold: 3
+        startupProbe:
+          tcpSocket: *id001
+          periodSeconds: 5
+          failureThreshold: 120
+      - name: go-judge
+        image: offline.invalid/astracode/sandbox@sha256:8f33899eb5d162e0b17d37a6b1e1fd1c658b5fcf3077d945b883f5f3a4bb19b1
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '2'
+            memory: 2Gi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: guard
+          mountPath: /platform/launch-guard
+          readOnly: true
+        - name: go-judge-permits
+          mountPath: /run/astra/permits
+          readOnly: true
+        - name: testcases
+          mountPath: /cache/testcases
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+          readOnly: false
+        - name: work
+          mountPath: /w
+          readOnly: false
+        command:
+        - /platform/launch-guard
+        args:
+        - go-judge
+        - --
+        - /opt/executorserver
+        env:
+        - name: ES_ENABLE_GRPC
+          value: 'true'
+        - name: ES_GRPC_ADDR
+          value: 127.0.0.1:5051
+        - name: ES_HTTP_ADDR
+          value: 127.0.0.1:5050
+        - name: ES_MONITOR_ADDR
+          value: 127.0.0.1:5052
+        - name: ES_NET_SHARE
+          value: 'false'
+        - name: ES_SRC_PREFIX
+          value: /cache/testcases
+        - name: ES_PARALLELISM
+          value: '1'
+        - name: ASTRA_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        readinessProbe:
+          exec: &id002
+            command:
+            - /bin/bash
+            - -ec
+            - exec 3<>/dev/tcp/127.0.0.1/5051
+          periodSeconds: 5
+        livenessProbe:
+          exec: *id002
+          periodSeconds: 20
+          failureThreshold: 3
+        startupProbe:
+          exec: *id002
+          periodSeconds: 5
+          failureThreshold: 120
+      volumes:
+      - name: guard
+        hostPath:
+          path: /usr/local/libexec/astra/launch-guard
+          type: File
+      - name: judge-worker-permits
+        hostPath:
+          path: /run/astracode/permits/judge-worker
+          type: Directory
+      - name: go-judge-permits
+        hostPath:
+          path: /run/astracode/permits/go-judge
+          type: Directory
+      - name: config
+        configMap:
+          name: judge-worker-config
+      - name: testcases
+        emptyDir:
+          sizeLimit: 512Mi
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi
+      - name: work
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
+      tolerations:
+      - key: astracode.io/node-role
+        operator: Equal
+        value: judge
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      securityContext:
+        fsGroup: 2000
+      imagePullSecrets:
+      - name: release-pull
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: judge-worker
+  namespace: astracode-judge
+spec:
+  selector:
+    app.kubernetes.io/name: judge-worker
+  ports:
+  - name: tcp-9093
+    port: 9093
+    targetPort: 9093

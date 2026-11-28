@@ -1,0 +1,9 @@
+[Unit]
+Description=AstraCode host network guard
+After=cloud-final.service network-online.target nftables.service
+Before=astra-k3s.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/astra/host-firewall

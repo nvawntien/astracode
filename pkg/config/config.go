@@ -89,6 +89,7 @@ type DatabaseConfig struct {
 }
 
 type RedisConfig struct {
+	Username     string        `mapstructure:"username"`
 	Host         string        `mapstructure:"host"`
 	Port         int           `mapstructure:"port"`
 	Password     string        `mapstructure:"password"`

@@ -1,0 +1,53 @@
+variable "target" {}
+
+mock_provider "azurerm" {
+  mock_data "azurerm_client_config" {
+    defaults = {
+      subscription_id = "00000000-0000-0000-0000-000000000002"
+      tenant_id       = "00000000-0000-0000-0000-000000000010"
+    }
+  }
+}
+
+run "seed_disk" {
+  command = apply
+
+  plan_options {
+    target = [azurerm_managed_disk.app]
+  }
+}
+
+run "reject_bound_state_retarget" {
+  command = plan
+
+  plan_options {
+    target = [terraform_data.target]
+  }
+
+  variables {
+    target = merge(var.target, {
+      slot            = "S3"
+      subscription_id = "00000000-0000-0000-0000-000000000003"
+      state_container = "s3-tfstate"
+    })
+  }
+
+  override_data {
+    target = data.azurerm_client_config.current
+    values = {
+      subscription_id = "00000000-0000-0000-0000-000000000003"
+      tenant_id       = "00000000-0000-0000-0000-000000000010"
+    }
+  }
+
+  expect_failures = [terraform_data.target]
+}
+
+run "blocked_replacement" {
+  command = plan
+
+  plan_options {
+    target  = [azurerm_managed_disk.app]
+    replace = [azurerm_managed_disk.app]
+  }
+}

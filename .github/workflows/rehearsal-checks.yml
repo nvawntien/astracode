@@ -1,0 +1,21 @@
+name: Verify the reviewed S3 head without publishing
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: contains(github.event.pull_request.labels.*.name, 'm013-rehearsal')
+    uses: ./.github/workflows/ci.yml
+    with:
+      git_ref: ${{ github.event.pull_request.head.sha }}
+  strict:
+    if: contains(github.event.pull_request.labels.*.name, 'm013-rehearsal')
+    uses: ./.github/workflows/openspec.yml
+    with:
+      git_ref: ${{ github.event.pull_request.head.sha }}

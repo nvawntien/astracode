@@ -1,0 +1,11 @@
+[Unit]
+Description=AstraCode retained App data disk
+Requires=astra-app-disk.service
+After=astra-app-disk.service
+
+[Mount]
+What=/dev/disk/by-uuid/${uuid}
+Where=/srv/astracode/data
+Type=ext4
+# The host must remain available for recovery if the disk is missing.
+Options=nodev,nosuid,nofail,x-systemd.device-bound

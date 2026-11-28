@@ -1,0 +1,33 @@
+server:
+  port: 0
+  grpc_port: 9093
+logger:
+  level: info
+  filename: ''
+  max_size: 10
+  max_backups: 5
+  max_age: 30
+  compress: true
+kafka:
+  brokers: kafka:9092
+  consumer_group: judge-worker-v1
+  job_topic: judge.submission.jobs
+  result_topic: judge.submission.results
+  dlt_topic: judge.submission.jobs.dlt
+problem_grpc:
+  address: problem-service:9092
+  timeout: 5s
+judging:
+  timeout_seconds: 30
+  memory_limit_mb: 256
+  go_judge_url: ''
+  max_concurrent_jobs: 4
+testcase_cache:
+  enabled: false
+  max_bytes: 0
+  max_entries: 0
+  idle_ttl: 0s
+  cleanup_interval: 0s
+run_code:
+  max_captured_output_bytes: 1048576
+  default_output_limit_bytes: 1048576

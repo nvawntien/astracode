@@ -186,7 +186,7 @@ requests, running-contest questions, premium-content probes and prompt-injection
 |---|---|---|---|---|---|
 | NFR-F01 | Spend stays within credits | Each subscription ≤ its ~$100 credit for the semester; burn rate tracked weekly | Azure cost reports; `finops.md` | Must | — |
 | NFR-F02 | Budget alerts on every subscription | Alerts at 50%, 80%, 100% | Alert configuration review | Must | — |
-| NFR-F03 | Non-production compute stops outside working hours. Staging runs only in owner-approved sessions, followed by automatic VM deallocation. Extensions require fresh owner approval. | One hour from readiness per approved session, with bounded startup and shutdown. Staging off ≥ 12 h/day. | Lifecycle approval and expiry records, Azure VM power-state history and cost report | Must | ADR-0004 |
+| NFR-F03 | Non-production compute stops outside approved working windows. Staging requires owner approval before startup and fresh approval for window changes. Both VMs deallocate automatically at the daily shutdown time independently of GitHub. | Staging deallocated ≥ 12 h/day, with actual deallocation verified for both VMs | Owner approval and schedule records, Azure VM instance views and power-state history, cost report | Must | ADR-0004, ADR-0013 |
 | NFR-F04 | Unit costs are reported | Cost per 1,000 submissions, per contest, per active user; per AI answer once F-19 is delivered | `finops.md` | Must | F-20 |
 | NFR-F05 | Cost at 5× the launch scenario is estimated | Documented estimate with top 3 cost drivers | `finops.md` | Must | — |
 

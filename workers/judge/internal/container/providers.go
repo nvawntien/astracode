@@ -2,6 +2,7 @@ package container
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -123,6 +124,9 @@ type SandboxClientConn struct {
 }
 
 func ProvideSandboxGRPCAddress() SandboxGRPCAddress {
+	if address := strings.TrimSpace(os.Getenv("JUDGE_EXECUTOR_GRPC_ADDRESS")); address != "" {
+		return SandboxGRPCAddress(address)
+	}
 	return "judge_sandbox:5051"
 }
 

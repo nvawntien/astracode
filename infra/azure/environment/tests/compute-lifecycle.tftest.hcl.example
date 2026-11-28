@@ -1,0 +1,162 @@
+# Provider-mocked existing compute with valid synthetic resource IDs.
+variable "approved_subscription_ids" {}
+variable "operations" {}
+variable "network" {}
+variable "target" {}
+
+mock_provider "azurerm" {
+  mock_resource "azurerm_virtual_network" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/virtualNetworks/astra-s2-vnet"
+    }
+  }
+  mock_resource "azurerm_key_vault" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.KeyVault/vaults/astras2mock-vault"
+    }
+  }
+  mock_resource "azurerm_private_dns_zone" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+    }
+  }
+  mock_resource "azurerm_subnet" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/virtualNetworks/astra-s2-vnet/subnets/fixture"
+    }
+  }
+  mock_resource "azurerm_network_security_group" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/networkSecurityGroups/fixture"
+    }
+  }
+  mock_resource "azurerm_public_ip" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/publicIPAddresses/fixture"
+    }
+  }
+  mock_resource "azurerm_network_interface" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/networkInterfaces/fixture"
+    }
+  }
+  mock_resource "azurerm_user_assigned_identity" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.ManagedIdentity/userAssignedIdentities/fixture"
+      principal_id = "00000000-0000-4000-8000-000000000009"
+    }
+  }
+  mock_resource "azurerm_linux_virtual_machine" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app"
+    }
+  }
+  mock_resource "azurerm_managed_disk" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/disks/astra-s2-app-data"
+    }
+  }
+  mock_resource "azurerm_resource_group" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2"
+    }
+  }
+  mock_resource "azurerm_policy_definition" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/providers/Microsoft.Authorization/policyDefinitions/fixture"
+    }
+  }
+  mock_resource "azurerm_role_definition" {
+    defaults = {
+      role_definition_resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/providers/Microsoft.Authorization/roleDefinitions/00000000-0000-4000-8000-000000000010"
+    }
+  }
+  mock_data "azurerm_client_config" {
+    defaults = {
+      subscription_id = "00000000-0000-0000-0000-000000000002"
+      tenant_id       = "00000000-0000-0000-0000-000000000010"
+    }
+  }
+}
+
+run "seed_existing_compute" {
+  command = apply
+
+  variables {
+    compute = {
+      enabled        = true
+      app_data_uuid  = "00000000-0000-4000-8000-000000000001"
+      ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      os_image = {
+        publisher = "Canonical"
+        offer     = "ubuntu-24_04-lts"
+        sku       = "server"
+        version   = "24.04.1"
+      }
+      startup = {
+        approval_ref  = "synthetic-approval"
+        target_vm_ids = [
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
+        ]
+        expires_at = timeadd(timestamp(), "10m")
+      }
+    }
+  }
+
+}
+run "reconcile_existing_pair_without_startup_approval" {
+  command = plan
+  variables {
+    compute = {
+      enabled        = true
+      app_data_uuid  = "00000000-0000-4000-8000-000000000001"
+      ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      os_image = {
+        publisher = "Canonical"
+        offer     = "ubuntu-24_04-lts"
+        sku       = "server"
+        version   = "24.04.1"
+      }
+    }
+  }
+  assert {
+    condition     = length(azurerm_linux_virtual_machine.node) == 2 && one(azurerm_virtual_machine_data_disk_attachment.app).managed_disk_id == azurerm_managed_disk.app.id
+    error_message = "The existing pair and retained disk must reconcile without startup inputs."
+  }
+}
+
+run "reject_expired_saved_startup_inputs" {
+  command = plan
+
+  variables {
+    compute = {
+      enabled        = true
+      app_data_uuid  = "00000000-0000-4000-8000-000000000001"
+      ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      os_image = {
+        publisher = "Canonical"
+        offer     = "ubuntu-24_04-lts"
+        sku       = "server"
+        version   = "24.04.1"
+      }
+      startup = {
+        approval_ref  = "synthetic-approval"
+        target_vm_ids = [
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
+        ]
+        expires_at = "2020-01-01T00:00:00Z"
+      }
+    }
+  }
+
+  expect_failures = [terraform_data.compute_admission]
+}
+
+run "forbid_compute_flag_shutdown" {
+  command = plan
+  variables {
+    compute    = {}
+  }
+}

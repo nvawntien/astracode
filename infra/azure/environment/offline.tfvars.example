@@ -1,0 +1,33 @@
+# Synthetic identifiers for provider-mocked tests.
+target = {
+  slot            = "S2"
+  subscription_id = "00000000-0000-0000-0000-000000000002"
+  tenant_id       = "00000000-0000-0000-0000-000000000010"
+  location        = "koreacentral"
+  storage_prefix  = "astras2mock"
+  state_container = "s2-tfstate"
+}
+
+approved_subscription_ids = {
+  S2 = "00000000-0000-0000-0000-000000000002"
+  S3 = "00000000-0000-0000-0000-000000000003"
+}
+
+network = {
+  vnet_cidr   = "10.72.0.0/24"
+  tester_ipv4 = ["192.0.2.30/32"]
+}
+
+operations = {
+  approved       = "synthetic-owner-approval"
+  earliest_start = "0800"
+  shutdown       = "1800"
+  alert_email    = "operations@example.invalid"
+  emergency_id   = "00000000-0000-0000-0000-000000000034"
+}
+
+budget = {
+  amount    = 80
+  starts_at = "2026-11-01T00:00:00Z"
+  email     = ["operations@example.invalid"]
+}

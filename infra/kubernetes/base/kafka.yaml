@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka
+  namespace: astracode-app
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: astracode-app
+  labels:
+    astracode.io/template: kafka
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        astracode.io/template: kafka
+    spec:
+      serviceAccountName: kafka
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: astracode.io/node-role
+                operator: In
+                values:
+                - app
+      containers:
+      - name: kafka
+        image: bitnamilegacy/kafka@sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/kafka
+          readOnly: false
+        env:
+        - name: KAFKA_CFG_NODE_ID
+          value: '1'
+        - name: KAFKA_CFG_PROCESS_ROLES
+          value: controller,broker
+        - name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS
+          value: 1@localhost:9093
+        - name: KAFKA_CFG_LISTENERS
+          value: INTERNAL://:9092,CONTROLLER://:9093
+        - name: KAFKA_CFG_ADVERTISED_LISTENERS
+          value: INTERNAL://kafka.astracode-app.svc:9092
+        - name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP
+          value: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+        - name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES
+          value: CONTROLLER
+        - name: KAFKA_CFG_INTER_BROKER_LISTENER_NAME
+          value: INTERNAL
+        - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+          value: 'false'
+        - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: '1'
+        - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: '1'
+        - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
+          value: '1'
+        - name: KAFKA_HEAP_OPTS
+          value: -Xms256m -Xmx512m
+        envFrom:
+        - secretRef:
+            name: kafka-runtime
+        readinessProbe:
+          tcpSocket: &id001
+            port: 9092
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket: *id001
+          periodSeconds: 20
+          failureThreshold: 3
+        startupProbe:
+          tcpSocket: *id001
+          periodSeconds: 5
+          failureThreshold: 120
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: kafka-data
+      securityContext:
+        fsGroup: 1001
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: astracode-app
+spec:
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+  - name: tcp-9092
+    port: 9092
+    targetPort: 9092

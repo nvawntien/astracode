@@ -1,0 +1,82 @@
+app:
+  frontend_url: ''
+server:
+  name: auth-service
+  port: 8081
+  grpc_port: 9091
+  mode: release
+logger:
+  level: info
+  filename: ''
+  max_size: 10
+  max_backups: 5
+  max_age: 30
+  compress: true
+database:
+  host: postgres
+  port: 5432
+  user: auth_service
+  password: ''
+  dbname: auth_db
+  sslmode: disable
+  max_open_conns: 30
+  max_idle_conns: 10
+  conn_max_lifetime: 3600
+redis:
+  username: auth
+  host: redis
+  port: 6379
+  password: ''
+  db: 0
+  pool_size: 10
+  min_idle_conns: 5
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+smtp:
+  host: ''
+  port: 587
+  username: ''
+  password: ''
+  security: starttls
+  timeout: 10s
+  from_name: AstraCode
+  from: noreply@localhost
+jwt:
+  access_secret: ''
+  refresh_secret: ''
+  access_ttl: 15m
+  refresh_ttl: 168h
+auth_abuse:
+  login_ip_identifier_limit: 5
+  login_identifier_risk_limit: 5
+  login_identifier_risk_delay: 250ms
+  login_broad_ip_limit: 200
+  login_window: 15m
+  register_ip_email_limit: 3
+  register_broad_ip_hourly_limit: 100
+  register_broad_ip_daily_limit: 500
+  mail_hourly_window: 1h
+  mail_daily_window: 24h
+  resend_account_hourly_limit: 5
+  resend_account_daily_limit: 12
+  resend_ip_account_limit: 5
+  resend_broad_ip_hourly_limit: 100
+  resend_broad_ip_daily_limit: 500
+  forgot_account_hourly_limit: 3
+  forgot_account_daily_limit: 10
+  forgot_ip_account_limit: 5
+  forgot_broad_ip_hourly_limit: 100
+  forgot_broad_ip_daily_limit: 500
+  email_cooldown: 60s
+  token_ip_limit: 30
+  token_window: 5m
+  refresh_ip_limit: 60
+  refresh_window: 1m
+minio:
+  endpoint: minio:9000
+  access_key: ''
+  secret_key: ''
+  use_ssl: false
+  bucket: avatars
+  public_url: ''
