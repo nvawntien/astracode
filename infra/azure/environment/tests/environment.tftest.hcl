@@ -126,7 +126,7 @@ run "reject_k3s_network_overlap" {
   expect_failures = [terraform_data.compute_admission]
 }
 
-run "reject_unarmed_compute" {
+run "reject_startup_approval_for_unarmed_compute" {
   command = plan
 
   variables {
@@ -139,6 +139,15 @@ run "reject_unarmed_compute" {
         offer     = "ubuntu-24_04-lts"
         sku       = "server"
         version   = "24.04.1"
+      }
+      startup = {
+        approval_ref  = "synthetic-approval"
+        controller_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2-ops/providers/Microsoft.Web/sites/astras2mock-controller"
+        target_vm_ids = [
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
+          "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
+        ]
+        expires_at = "9999-01-01T00:00:00Z"
       }
     }
   }
@@ -176,6 +185,8 @@ run "plan_only_the_approved_vm_pair" {
   assert {
     condition = (
       toset(keys(azurerm_linux_virtual_machine.node)) == toset(["app", "judge"]) &&
+      azurerm_linux_virtual_machine.node["app"].size == "Standard_B4s_v2" &&
+      azurerm_linux_virtual_machine.node["judge"].size == "Standard_B2ls_v2" &&
       length(azurerm_virtual_machine_data_disk_attachment.app) == 1 &&
       length(azurerm_linux_virtual_machine.node["app"].identity) == 1 &&
       length(azurerm_linux_virtual_machine.node["judge"].identity) == 0

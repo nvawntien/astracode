@@ -33,3 +33,25 @@ if ! grep -Fq 'run "seed_disk"... pass' "$scratch/result" ||
 fi
 
 echo "Terraform rejected state retargeting and replacement of the retained App data disk."
+
+cp -- "$root/tests/compute-lifecycle.tftest.hcl.example" "$scratch/environment/tests/compute-lifecycle.tftest.hcl"
+if terraform -chdir="$scratch/environment" test -no-color -var-file=offline.tfvars.example \
+  -filter=tests/compute-lifecycle.tftest.hcl >"$scratch/compute-result" 2>&1; then
+  cat "$scratch/compute-result"
+  echo "Expected Terraform to reject removing managed VM resources."
+  exit 1
+fi
+
+if ! grep -Fq 'run "seed_existing_compute"... pass' "$scratch/compute-result" ||
+   ! grep -Fq 'run "reconcile_existing_pair_without_startup_approval"... pass' "$scratch/compute-result" ||
+   ! grep -Fq 'run "reject_expired_saved_startup_inputs"... pass' "$scratch/compute-result" ||
+   ! grep -Fq 'run "forbid_compute_flag_shutdown"... fail' "$scratch/compute-result" ||
+   ! grep -Fq 'has lifecycle.prevent_destroy' "$scratch/compute-result" ||
+   ! grep -Fq 'azurerm_linux_virtual_machine.node["app"]' "$scratch/compute-result" ||
+   ! grep -Fq 'azurerm_virtual_machine_data_disk_attachment.app[0]' "$scratch/compute-result"; then
+  cat "$scratch/compute-result"
+  echo "The mocked VM lifecycle did not exhibit the expected maintenance and protection behavior."
+  exit 1
+fi
+
+echo "Terraform reconciled existing VMs without startup inputs and rejected expired approval and VM removal."

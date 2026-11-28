@@ -17,10 +17,12 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path[:0] = [str(ROOT / "scripts/release"), str(ROOT / "infra/azure/lifecycle")]
 
 from auth import Auth
-from azure_adapters import Power
+from azure_adapters import Power, Releases
 from emergency import deallocate
 from function_app import api
 from policy import canonical, digest, envelope
+from policy import Refused as ReleaseRefused
+from node_state import RecoveryRequired
 from service import Service
 from state import Refused
 from test_policy import fixture
@@ -208,6 +210,7 @@ class Lifecycle(unittest.TestCase):
                 repository=self.repo,
                 repository_id="123",
                 ref="refs/heads/main",
+                ref_protected="true",
                 event_name="workflow_dispatch",
                 environment=self.review_env,
                 workflow_ref=self.repo
@@ -238,7 +241,7 @@ class Lifecycle(unittest.TestCase):
             operation=action,
             requestId=uid(),
             requester="1",
-            **extra
+            **extra,
         )
 
     def approve(self, payload, role="lifecycle"):
@@ -285,10 +288,11 @@ class Lifecycle(unittest.TestCase):
         self.approve(payload, "deployment")
         return payload, nodes
 
-    def verify_release(self, payload, nodes):
+    def verify_release(self, payload, nodes, *, open_edge=True):
         op = payload["requestId"]
-        images = fixture()["images"]
-        workloads = fixture()["environments"]["s2"]["workloads"]
+        expected = self.store.state["operation"]["expected"]
+        images = expected["images"]
+        workloads = expected["workloads"]
         evidence = {}
         for role, names in (
             (
@@ -323,9 +327,329 @@ class Lifecycle(unittest.TestCase):
         self.service.app(
             self.app,
             "complete",
-            dict(operation=op, observed=evidence, versions=fixture()["versions"]),
+            dict(operation=op, observed=evidence, versions=expected["versions"]),
         )
-        self.service.app(self.app, "open", dict(operation=op))
+        if open_edge:
+            self.service.app(self.app, "open", dict(operation=op))
+
+    def rehearsal(self):
+        def receipt(char, name):
+            data = fixture()
+            source = char * 40
+            data.update(kind="rehearsal", source=source, configuration_revision=source)
+            data["ci"]["source"] = source
+            data["images"]["website"] = "ghcr.io/fixture/rehearsal/website@" + digest(
+                name.encode()
+            )
+            return envelope(data)
+
+        self.first, self.second, self.unapproved = (
+            receipt("a", "first"),
+            receipt("b", "second"),
+            receipt("c", "unknown"),
+        )
+        receipts = (self.first, self.second)
+        self.policy.update(
+            environment="s3",
+            rehearsal_owner="1",
+            experiment=dict(
+                id=uid(),
+                targets=self.policy["targets"],
+                approval_ref="reviewed-experiment",
+                deadline=(self.time + timedelta(minutes=45)).isoformat(),
+                releases={row["bundle"]: row["source"] for row in receipts},
+            ),
+        )
+        self.store = Store()
+        self.cloud = Cloud(self.store)
+        self.cloud.states = dict.fromkeys(self.cloud.states, "running")
+        self.receipts = {
+            "rehearsal-" + row["bundle"][7:] + ".json": row
+            for row in (*receipts, self.unapproved)
+        }
+        self.catalog = Releases(
+            self.policy, None, "https://fixture.blob.core.windows.net"
+        )
+        blob = patch("azure_adapters.BlobStore")
+        store = blob.start()
+        self.addCleanup(blob.stop)
+        store.side_effect = self.rehearsal_blob
+        self.service = self.rehearsal_service()
+        self.service.reconcile()
+        self.operator = dict(role="rehearsal-operator", object_id="rehearsal-principal")
+
+    def rehearsal_blob(self, endpoint, container, name, identity):
+        self.assertEqual(
+            (endpoint, container),
+            ("https://fixture.blob.core.windows.net", "controller-state"),
+        )
+        return type(
+            "Receipt", (), {"read": lambda _: (self.receipts.get(name), None)}
+        )()
+
+    def rehearsal_service(self):
+        return Service(
+            self.policy,
+            self.store,
+            self.auth,
+            self.catalog,
+            self.cloud,
+            lambda: self.time,
+        )
+
+    def rehearsal_request(self, action, **extra):
+        return dict(
+            self.request(action),
+            environment="s3",
+            sessionGeneration=self.store.state["generation"],
+            **extra,
+        )
+
+    def rehearsal_deploy(self, selected, rollback, action="deploy", **evidence):
+        return self.rehearsal_request(
+            action,
+            releaseDigest=selected["bundle"],
+            migration=dict(
+                system_id="123456",
+                recovery_point="verified/fixture",
+                rollbackDigest=rollback["bundle"],
+                **evidence,
+            ),
+        )
+
+    def rehearsal_begin(self, payload):
+        self.service.approved(self.operator, None, payload)
+        self.service.app(
+            self.app,
+            "begin",
+            dict(operation=payload["requestId"], release=payload["releaseDigest"]),
+        )
+
+    def test_s3_two_reviewed_releases_deploy_and_rollback(self):
+        self.rehearsal()
+        nodes = self.nodes()
+        original = copy.deepcopy(self.store.state["experiment"])
+        first = self.rehearsal_deploy(self.first, self.first)
+        self.rehearsal_begin(first)
+        self.verify_release(first, nodes)
+        for candidate in (
+            self.rehearsal_deploy(self.first, self.second, "deploy"),
+            self.rehearsal_deploy(self.unapproved, self.first),
+            self.rehearsal_deploy(self.first, self.unapproved),
+            self.rehearsal_deploy(self.second, self.first, "rollback"),
+        ):
+            with self.assertRaises((Refused, ReleaseRefused)):
+                self.service.approved(self.operator, None, candidate)
+        self.policy["experiment"] = dict(
+            original,
+            releases=dict(
+                original["releases"],
+                **{
+                    self.unapproved["bundle"]: self.unapproved["source"],
+                },
+            ),
+        )
+        with self.assertRaisesRegex(Refused, "experiment deadline differs"):
+            self.service.approved(
+                self.operator, None, self.rehearsal_deploy(self.unapproved, self.first)
+            )
+        self.policy["experiment"] = original
+        for selected, previous, action in (
+            (self.second, self.first, "deploy"),
+            (self.first, self.second, "rollback"),
+        ):
+            payload = self.rehearsal_deploy(selected, previous, action)
+            self.rehearsal_begin(payload)
+            self.verify_release(payload, nodes)
+            self.assertEqual(self.store.state["last_verified"], selected["bundle"])
+        self.assertEqual(self.store.state["experiment"], original)
+        self.assertEqual(self.store.state["expires"], original["deadline"])
+
+    def test_s3_drain_hard_stop_resume_and_separate_workload_recovery(self):
+        self.rehearsal()
+        old_nodes = self.nodes()
+        original = copy.deepcopy(self.store.state["experiment"])
+        interrupted = self.rehearsal_deploy(self.first, self.first)
+        self.rehearsal_begin(interrupted)
+        job = uid()
+        op = interrupted["requestId"]
+        self.service.app(
+            self.app, "bind-migration", dict(operation=op, job=job, uid=uid())
+        )
+        self.cloud.states = dict.fromkeys(self.cloud.states, "deallocated")
+        self.advance(60)
+        self.service.reconcile()
+        self.advance(301)
+        self.service.reconcile()
+        self.assertEqual(self.store.state["phase"], "off")
+        self.assertEqual(self.store.state["in_flight"], op)
+        resume = self.rehearsal_request("resume-rehearsal", recoveryAttempt=op)
+        for request, caller in (
+            (dict(resume, sessionGeneration=uid()), self.operator),
+            (dict(resume, recoveryAttempt=uid()), self.operator),
+            (resume, self.app),
+        ):
+            with self.assertRaises(Refused):
+                self.service.approved(caller, None, request)
+        self.service.approved(self.operator, None, resume)
+        with self.assertRaises(Refused):
+            self.service.approved(self.operator, None, resume)
+        # Recreate the service against the same durable state while powered off.
+        self.service = self.rehearsal_service()
+        self.service.reconcile()
+        self.cloud.states = dict.fromkeys(self.cloud.states, "running")
+        self.service.reconcile()
+        with self.assertRaises(Refused):
+            self.service.app(self.app, "observe", old_nodes)
+        nodes = self.nodes()
+        self.assertIsNone(self.service.app(self.app, "poll", {})["ticket"])
+        with self.assertRaises(RecoveryRequired):
+            self.service.app(self.app, "authorization", dict(operation=op))
+        self.assertFalse(self.service.app(self.app, "tester", {})["tester"])
+        recover = self.rehearsal_deploy(
+            self.first,
+            self.first,
+            "recover",
+            reconcile_attempt=op,
+            observed_versions=fixture()["versions"],
+            confirmed_retired_jobs=[job],
+            work_reconciled=True,
+        )
+        with self.assertRaises(Refused):
+            self.service.approved(
+                self.operator,
+                None,
+                dict(
+                    recover,
+                    migration=dict(recover["migration"], confirmed_retired_jobs=[]),
+                ),
+            )
+        self.rehearsal_begin(recover)
+        self.assertNotIn(
+            "migrate",
+            self.service.app(
+                self.app, "authorization", dict(operation=recover["requestId"])
+            )["allowed_workloads"],
+        )
+        self.verify_release(recover, nodes)
+        self.assertEqual(self.store.state["experiment"], original)
+        self.assertEqual(self.store.state["expires"], original["deadline"])
+        self.assertIsNone(self.store.state["in_flight"])
+        self.assertEqual(self.cloud.sent, [])
+
+    def test_s3_unapproved_and_expired_external_start_are_drained(self):
+        self.rehearsal()
+        self.nodes()
+        interrupted = self.rehearsal_deploy(self.first, self.first)
+        self.rehearsal_begin(interrupted)
+        self.cloud.states = dict.fromkeys(self.cloud.states, "deallocated")
+        self.advance(60)
+        self.service.reconcile()
+        self.advance(301)
+        self.service.reconcile()
+        resume = self.rehearsal_request(
+            "resume-rehearsal", recoveryAttempt=interrupted["requestId"]
+        )
+        self.cloud.states = dict.fromkeys(self.cloud.states, "running")
+        self.service.reconcile()
+        self.assertEqual(self.store.state["phase"], "draining")
+        with self.assertRaises(Refused):
+            self.service.approved(self.operator, None, resume)
+        self.advance(301)
+        self.service.reconcile()
+        for role in self.cloud.states:
+            self.cloud.done(role, "deallocate")
+        self.service.reconcile()
+        self.service.approved(self.operator, None, resume)
+        self.advance(601)
+        self.service.reconcile()
+        self.cloud.states = dict.fromkeys(self.cloud.states, "running")
+        with self.assertRaises(Refused):
+            self.service.approved(self.operator, None, dict(resume, requestId=uid()))
+        self.advance(301)
+        self.service.reconcile()
+        self.assertEqual(self.store.state["phase"], "stopping")
+        self.assertEqual(
+            set(self.cloud.sent), {("app", "deallocate"), ("judge", "deallocate")}
+        )
+
+    def test_s3_sealed_partial_recovery_requires_separate_forward_deploy(self):
+        self.rehearsal()
+        self.nodes()
+        interrupted = self.rehearsal_deploy(self.first, self.first)
+        self.rehearsal_begin(interrupted)
+        self.cloud.states = dict.fromkeys(self.cloud.states, "deallocated")
+        self.advance(60)
+        self.service.reconcile()
+        self.advance(301)
+        self.service.reconcile()
+        resume = self.rehearsal_request(
+            "resume-rehearsal", recoveryAttempt=interrupted["requestId"]
+        )
+        self.service.approved(self.operator, None, resume)
+        self.cloud.states = dict.fromkeys(self.cloud.states, "running")
+        self.service.reconcile()
+        nodes = self.nodes()
+        versions = dict(auth=0, problem=1, submission=0)
+        recover = self.rehearsal_deploy(
+            self.first,
+            self.first,
+            "recover",
+            reconcile_attempt=interrupted["requestId"],
+            observed_versions=versions,
+            confirmed_retired_jobs=[],
+            work_reconciled=True,
+        )
+        self.rehearsal_begin(recover)
+        operation = recover["requestId"]
+        with self.assertRaises(RecoveryRequired):
+            self.service.app(
+                self.app,
+                "sealed-recovery",
+                dict(operation=operation, versions=fixture()["versions"]),
+            )
+        self.service.app(
+            self.app, "sealed-recovery", dict(operation=operation, versions=versions)
+        )
+        self.service.app(self.app, "recovery-required", dict(operation=operation))
+        self.assertEqual(self.store.state["operation"]["phase"], "forward-required")
+        self.assertEqual(self.store.state["forward_required"]["versions"], versions)
+        self.assertIsNone(self.service.app(self.app, "poll", {})["ticket"])
+        self.assertFalse(self.service.app(self.app, "tester", {})["tester"])
+        with self.assertRaises(Refused):
+            self.service.approved(
+                self.operator, None, self.rehearsal_deploy(self.second, self.second)
+            )
+        deploy = self.rehearsal_deploy(self.first, self.first)
+        self.rehearsal_begin(deploy)
+        self.verify_release(deploy, nodes)
+        self.assertNotIn("forward_required", self.store.state)
+
+    def test_s2_provisioning_window_never_starts_or_admits_workloads(self):
+        self.cloud.states = dict.fromkeys(self.cloud.states, "not-found")
+        self.service.reconcile()
+        plan = dict(
+            sha256="d" * 64,
+            operation="create",
+            role=None,
+            expiresAt=(self.time + timedelta(minutes=25)).isoformat(),
+        )
+        request = self.request("start", terraformPlan=plan)
+        result = self.approve(request)
+        self.assertEqual(result["terraformPlan"], plan)
+        self.assertEqual(result["phase"], "compute-maintenance")
+        self.cloud.states["app"] = "running"
+        self.advance(60)
+        self.service.reconcile()
+        self.assertEqual(self.cloud.sent, [])
+        with self.assertRaises(Refused):
+            self.nodes()
+        self.assertFalse(self.service.app(self.app, "tester", {})["tester"])
+        self.advance(1500)
+        self.service.reconcile()
+        self.advance(300)
+        self.service.reconcile()
+        self.assertEqual(self.cloud.sent, [("app", "deallocate")])
 
     def test_separate_start_deploy_lease_ready_clock_and_extension(self):
         started = self.start()
@@ -370,6 +694,7 @@ class Lifecycle(unittest.TestCase):
         self.service.draft(dict(role="member", object_id="member-1"), p)
         for claims in (
             dict(ref="refs/heads/develop"),
+            dict(ref_protected="false"),
             dict(run_attempt="2"),
             dict(workflow_sha="b" * 40),
             dict(environment="staging-deployment"),
@@ -504,6 +829,8 @@ class Lifecycle(unittest.TestCase):
                 targets=self.policy["targets"],
                 approval_ref="reviewed",
                 deadline=(self.time + timedelta(minutes=20)).isoformat(),
+                release=self.release,
+                source=self.catalog_record["source"],
             ),
         )
         store = Store()
@@ -593,14 +920,17 @@ class Emergency(unittest.TestCase):
             with self.assertRaises(Refused):
                 power.send("app", "start", uid())
             http.assert_not_called()
-        with patch.object(
-            power,
-            "observe",
-            side_effect=[
-                dict(app="deallocated", judge="running"),
-                dict(app="deallocated", judge="deallocated"),
-            ],
-        ), patch.object(power, "send", return_value=None) as send:
+        with (
+            patch.object(
+                power,
+                "observe",
+                side_effect=[
+                    dict(app="deallocated", judge="running"),
+                    dict(app="deallocated", judge="deallocated"),
+                ],
+            ),
+            patch.object(power, "send", return_value=None) as send,
+        ):
             states, confirmed = deallocate(power, sleep=lambda _: None)
             self.assertTrue(confirmed)
             self.assertEqual(states, dict(app="deallocated", judge="deallocated"))

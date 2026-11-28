@@ -21,6 +21,12 @@ class GateError(RuntimeError):
     pass
 
 
+class ForwardRequired(GateError):
+    def __init__(self, versions):
+        super().__init__("writers reconciled; separate forward deployment required")
+        self.versions = versions
+
+
 def password_verifier(password):
     # Run-specific passwords are random ASCII. Send only the verifier to SQL.
     encode = lambda value: base64.b64encode(value).decode("ascii")
@@ -233,9 +239,7 @@ def reconcile(
             if erase_attempt is not None:
                 erase_attempt(recovery)
             if before != targets:
-                raise GateError(
-                    "writers reconciled; separate forward deployment required"
-                )
+                raise ForwardRequired(before)
             for conn in sessions.values():
                 assert_lease()
                 conn.query("SELECT astra_control.allow_runtime()")

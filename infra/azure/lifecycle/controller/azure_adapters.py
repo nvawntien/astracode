@@ -13,7 +13,7 @@ from azure.core.exceptions import (
 from azure.storage.blob import BlobClient
 
 from policy import DIGEST, SHA, canonical, verify_record
-from state import Refused
+from state import Refused, rehearsal_sources
 from transport import request
 
 ARM = "https://management.azure.com"
@@ -93,9 +93,9 @@ class Releases:
                 self.identity,
             )
         else:
-            if self.policy["experiment"]["release"] != bundle:
+            source = rehearsal_sources(self.policy["experiment"]).get(bundle)
+            if source is None:
                 raise Refused("not the reviewed S3 bundle")
-            source = self.policy["experiment"]["source"]
             store = BlobStore(
                 self.state_endpoint,
                 "controller-state",

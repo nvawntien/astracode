@@ -14,8 +14,13 @@ resource "terraform_data" "compute_admission" {
 
   lifecycle {
     precondition {
-      condition = !var.compute.enabled || try(
-        var.controller.armed &&
+      condition     = !var.compute.enabled || var.controller.armed
+      error_message = "Keep the controller and independent alerts armed while Terraform manages the VM pair."
+    }
+
+    precondition {
+      condition = var.compute.startup == null || try(
+        var.compute.enabled &&
         trimspace(var.compute.startup.approval_ref) != "" &&
         lower(var.compute.startup.controller_id) == lower(local.controller_id) &&
         toset([for id in var.compute.startup.target_vm_ids : lower(id)]) == toset([for id in values(local.vm_ids) : lower(id)]) &&
@@ -23,7 +28,12 @@ resource "terraform_data" "compute_admission" {
         timecmp(var.compute.startup.expires_at, timeadd(plantimestamp(), "30m")) <= 0,
         false
       )
-      error_message = "Before enabling compute, verify the controller is armed for exactly the approved VM pair and supply its startup approval with a deadline within 30 minutes."
+      error_message = "A compute startup approval requires the already armed controller, the exact VM pair and a deadline within 30 minutes."
+    }
+
+    precondition {
+      condition     = var.compute.startup == null ? true : timecmp(var.compute.startup.expires_at, timestamp()) > 0
+      error_message = "The compute startup approval expired before apply."
     }
 
     precondition {
@@ -105,10 +115,7 @@ resource "azurerm_linux_virtual_machine" "node" {
   }
 
   lifecycle {
-    precondition {
-      condition     = try(timecmp(var.compute.startup.expires_at, timestamp()) > 0, false)
-      error_message = "The startup approval deadline has passed. Obtain a new verified controller approval before applying."
-    }
+    prevent_destroy = true
   }
 
   depends_on = [
@@ -128,4 +135,8 @@ resource "azurerm_virtual_machine_data_disk_attachment" "app" {
   virtual_machine_id = azurerm_linux_virtual_machine.node["app"].id
   lun                = 0
   caching            = "None"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }

@@ -36,7 +36,8 @@ def transition(state, action, data, now, bundle):
         return {}
     if action == "recovery-required":
         state["tester_open"] = False
-        op["phase"] = "recovery-required"
+        if op["phase"] != "forward-required":
+            op["phase"] = "recovery-required"
         return {}
     if action == "close":
         state["tester_open"] = False
@@ -115,6 +116,24 @@ def transition(state, action, data, now, bundle):
         raise RecoveryRequired("active exclusive operation required")
     if action == "migration":
         return op["migration"]
+    if action == "sealed-recovery":
+        versions = data["versions"]
+        if (
+            req["environment"] != "s3"
+            or req["action"] != "recover"
+            or versions != op["migration"]["observed_versions"]
+            or versions == op["expected"]["versions"]
+        ):
+            raise RecoveryRequired("no sealed partial recovery for this operation")
+        op["phase"] = "forward-required"
+        state["forward_required"] = dict(
+            recovery=req["id"],
+            release=req["release"],
+            epochs=dict(state["epochs"]),
+            versions=versions,
+        )
+        state.update(in_flight=None, tester_open=False)
+        return {}
     if action == "bind-migration" and req["action"] == "deploy":
         uid = str(uuid.UUID(data["uid"]))
         if op.get("migration_uid", uid) != uid:
@@ -162,6 +181,7 @@ def transition(state, action, data, now, bundle):
             "uid"
         ]
         state["in_flight"] = None
+        state.pop("forward_required", None)
         state["clean_drain"] = False
         op["phase"] = "verified"
         return {}

@@ -16,6 +16,12 @@ Operators SHALL be able to recreate a complete environment from versioned defini
 - **WHEN** the designated App data disk is absent, wrong or unmounted
 - **THEN** persistent workloads remain inactive and no fallback data is written to the OS disk
 
+#### Scenario: VM existence or power changes
+- **WHEN** an operator shuts down, reconciles or proposes creation or replacement of a VM
+- **THEN** shutdown deallocates the VM and retains its managed resources and the App disk
+- **AND** routine reconciliation needs no startup grant, while creation or replacement requires its exact approved plan and a current controller window at apply
+- **AND** replacement fits existing capacity, preserves the network identities and reattaches the retained App disk as-is
+
 ### Requirement: ED-02 Restricted ingress and execution
 Staging SHALL serve authorized members over HTTPS during an approved session. Cluster management, private services and backing services SHALL reject external access. The application gateway SHALL remain the source of verified identity for protected services. Official submissions and interactive user code SHALL run only inside the sandbox with CPU, memory, process, wall-time and output limits and SHALL be unable to reach any network destination, cloud metadata or node credentials. Runtime credentials SHALL be scoped to their respective purposes and kept out of published artifacts. Workload activation SHALL enforce platform-approved placement, execution privileges and credential access. Only the platform-managed go-judge daemon SHALL receive the privileged exception, bound to the approved digest, fixed template, dedicated namespace and Judge node. The executor SHALL accept private Worker traffic only.
 
@@ -128,6 +134,11 @@ An authorized rollback SHALL restore a previously verified compatible applicatio
 - **WHEN** the selected rollback release cannot start on the schema now present
 - **THEN** rollback is refused before application activation and no schema downgrade is attempted
 
+#### Scenario: S3 rehearses a two-release rollback
+- **WHEN** the protected operator deploys and rolls back between two compatible S3 bundles approved for the experiment
+- **THEN** both bundles are independently bound to reviewed sources and verified receipts, and rollback requires a previously verified target for that environment
+- **AND** the controller refuses any selected or fallback bundle outside the immutable experiment set
+
 ### Requirement: ED-08 Durable shutdown and recovery
 Staging SHALL close admission for new testing work at expiry, finish or safely interrupt in-flight work within a bounded drain, and automatically deallocate both VMs while preserving persistent data. Expiry and cleanup SHALL survive a failed or cancelled delivery workflow and a partial start or stop. The system SHALL retry unfinished deallocation and alert maintainers independently on missed controller health or missed cleanup deadlines. It SHALL block new sessions and tester access during unresolved uncertainty. Operators SHALL have a separately authorized emergency path limited to reading and deallocating the affected VMs. Temporary test compute SHALL have an approved expiry and independent cleanup tracking.
 
@@ -148,6 +159,12 @@ Staging SHALL close admission for new testing work at expiry, finish or safely i
 #### Scenario: Temporary experiment is interrupted
 - **WHEN** the provisioning or test session ends before its authorized experiment expiry
 - **THEN** independent cleanup tracks and verifies deallocation of the experiment VMs by their observed states and reports any remaining inventory for operator review
+
+#### Scenario: Authorized S3 hard-stop recovery
+- **WHEN** both S3 VMs are confirmed deallocated after a hard stop with a retained operation
+- **THEN** a single-use approval binds the exact retained operation and experiment to a bounded external restart without extending its deadline
+- **AND** fresh node boots and separate workload reconciliation are required before clearing stale work or reopening access
+- **AND** independent cleanup remains active and the controller has no S3 VM start authority
 
 ### Requirement: ED-09 Future promotion eligibility
 When production promotion is enabled, a protected semantic tag SHALL identify the exact release that passed staging. Promotion SHALL require a designated maintainer's approval and preserve that release's source, image digests, configuration revision and migration artifact. The promotion flow SHALL block operations during a contest window. M0-13 SHALL exercise promotion eligibility without deploying production.

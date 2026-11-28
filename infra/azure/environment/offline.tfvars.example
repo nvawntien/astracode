@@ -3,7 +3,7 @@ target = {
   slot            = "S2"
   subscription_id = "00000000-0000-0000-0000-000000000002"
   tenant_id       = "00000000-0000-0000-0000-000000000010"
-  location        = "southeastasia"
+  location        = "koreacentral"
   storage_prefix  = "astras2mock"
   state_container = "s2-tfstate"
 }

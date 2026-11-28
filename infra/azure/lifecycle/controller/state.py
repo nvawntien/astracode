@@ -1,6 +1,7 @@
 """Pure durable lifecycle transitions; callers commit them before any power effect."""
 
 from datetime import datetime, time, timedelta, timezone
+import re
 from zoneinfo import ZoneInfo
 import uuid
 
@@ -10,6 +11,7 @@ SESSION = timedelta(hours=1)
 DRAIN = timedelta(minutes=5)
 CLEANUP = timedelta(minutes=15)
 OPERATION = timedelta(minutes=10)
+REHEARSAL_BOOT = timedelta(minutes=10)
 
 
 class Refused(ValueError):
@@ -27,6 +29,28 @@ def fresh(value, now, seconds):
     return bool(value) and timedelta(0) <= now - stamp(value) < timedelta(
         seconds=seconds
     )
+
+
+def rehearsal_sources(experiment):
+    # Retained v1 records may bind one release. Never widen such a record
+    # through a change to the Function's configuration.
+    if "releases" in experiment:
+        sources = experiment["releases"]
+    else:
+        sources = {experiment.get("release"): experiment.get("source")}
+    if (
+        not isinstance(sources, dict)
+        or not 1 <= len(sources) <= 16
+        or any(
+            not isinstance(bundle, str)
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", bundle)
+            or not isinstance(source, str)
+            or not re.fullmatch(r"[a-f0-9]{40}", source)
+            for bundle, source in sources.items()
+        )
+    ):
+        raise Refused("exact rehearsal bundle and source bindings required")
+    return sources
 
 
 def initial(policy, now):
@@ -70,6 +94,7 @@ def initial(policy, now):
             or experiment["targets"] != policy["targets"]
         ):
             raise Refused("owner-approved immutable S3 experiment required")
+        rehearsal_sources(experiment)
         deadline = stamp(experiment["deadline"])
         state.update(
             phase="starting",
@@ -112,11 +137,22 @@ def fits(policy, state, now, duration, *, starting=False):
         raise Refused("insufficient observed daily off time")
 
 
-def known_off(state):
+def known_off(state, *, missing=False):
+    inactive = {"deallocated", "not-found"} if missing else {"deallocated"}
     return all(
-        p["state"] == "deallocated"
+        p["state"] in inactive
         and not any(i["status"] not in {"done", "failed"} for i in p["intents"])
         for p in state["power"].values()
+    )
+
+
+def may_have_uncreated_targets(state):
+    if state["environment"] == "s3":
+        return not state.get("power_seen_running") and not state.get("nodes")
+    window = state.get("terraform_window") or {}
+    return (
+        window.get("generation") == state["generation"]
+        and window.get("plan", {}).get("operation") == "create"
     )
 
 
@@ -136,6 +172,10 @@ def powered(state):
 def drain(state, now, reason):
     state["tester_open"] = False
     if state["phase"] not in {"draining", "stopping"}:
+        if state["environment"] == "s3" and state.get("nodes"):
+            state["recovery_prior_boots"] = {
+                role: node["boot"] for role, node in state["nodes"].items()
+            }
         state["phase"] = "draining"
         state["drain"] = dict(
             deadline=(now + DRAIN).isoformat(),
@@ -146,6 +186,100 @@ def drain(state, now, reason):
         state["cleanup"] = dict(deadline=(now + CLEANUP).isoformat(), overdue=False)
     if state["operation"] and state["operation"]["phase"] in {"approved", "running"}:
         state["operation"]["phase"] = "recovery-required"
+
+
+def resume_rehearsal(state, request, identity, now):
+    attempt = request["recoveryAttempt"]
+    prior = state.get("rehearsal_recovery") or {}
+    until = stamp(state["expires"])
+    operation = state["operation"]
+    if (
+        state["environment"] != "s3"
+        or identity["role"] != "rehearsal-operator"
+        or state["phase"] != "off"
+        or state["generation"] != request["sessionGeneration"]
+        or state["in_flight"] != attempt
+        or not operation
+        or operation["request"]["id"] != attempt
+        or prior.get("attempt") == attempt
+        or set(state.get("nodes", {})) != {"app", "judge"}
+        or state["contest"]
+        or state["inventory_followup"]
+        or not fresh(state["heartbeat"], now, 180)
+        or not all(fresh(p["sample"], now, 180) for p in state["power"].values())
+        or not known_off(state)
+        or now + REHEARSAL_BOOT + OPERATION + timedelta(minutes=1) >= until
+    ):
+        raise Refused("no current off, retained S3 attempt with time for recovery")
+    boot_deadline = min(now + REHEARSAL_BOOT, until)
+    state["rehearsal_recovery"] = dict(
+        attempt=attempt,
+        request=request["requestId"],
+        identity=identity,
+        approval_ref=state["experiment"]["approval_ref"],
+        prior_boots=state.get("recovery_prior_boots")
+        or {role: node["boot"] for role, node in state["nodes"].items()},
+        accepted=now.isoformat(),
+        boots_confirmed=False,
+    )
+    operation["phase"] = "recovery-required"
+    state.update(
+        phase="starting",
+        tester_open=False,
+        app_seen=None,
+        epochs={},
+        boot_deadline=boot_deadline.isoformat(),
+        power_seen_running=False,
+    )
+    return dict(
+        accepted=True,
+        generation=state["generation"],
+        phase="starting",
+        bootDeadline=boot_deadline.isoformat(),
+        expires=state["expires"],
+    )
+
+
+def admit_terraform(state, request, identity, policy, now):
+    plan = request["terraformPlan"]
+    deadline = stamp(plan["expiresAt"])
+    create = plan["operation"] == "create"
+    if (
+        state["phase"] != "off"
+        or not known_off(state, missing=create)
+        or not all(fresh(p["sample"], now, 180) for p in state["power"].values())
+        or (
+            create
+            and not any(p["state"] == "not-found" for p in state["power"].values())
+        )
+        or (create and state["last_verified"])
+        or state["in_flight"] != request.get("recoveryAttempt")
+        or not now < deadline <= now + BOOT
+    ):
+        raise Refused(
+            "Terraform needs confirmed inactive targets and a fresh exact plan"
+        )
+    fits(policy, state, now, deadline - now, starting=True)
+    state.update(
+        phase="compute-maintenance",
+        generation=str(uuid.uuid4()),
+        expires=deadline.isoformat(),
+        tester_open=False,
+        app_seen=None,
+        epochs={},
+        terraform_window=dict(
+            request=request["requestId"], plan=plan, identity=identity
+        ),
+    )
+    state["terraform_window"]["generation"] = state["generation"]
+    return dict(
+        accepted=True,
+        generation=state["generation"],
+        phase=state["phase"],
+        expires=state["expires"],
+        terraformPlan=plan,
+        requestId=request["requestId"],
+    )
 
 
 def admit(state, request, identity, policy, now, release=None):
@@ -170,6 +304,8 @@ def admit(state, request, identity, policy, now, release=None):
     if not fresh(state["heartbeat"], now, 180):
         raise Refused("controller heartbeat is stale")
     if action == "start":
+        if "terraformPlan" in request:
+            return admit_terraform(state, request, identity, policy, now)
         if (
             state["phase"] != "off"
             or not known_off(state)
@@ -236,6 +372,17 @@ def admit(state, request, identity, policy, now, release=None):
         raise Refused("insufficient safe operation window")
     if release is None or release["digest"] != request["releaseDigest"]:
         raise Refused("verified release required")
+    forward = state.get("forward_required")
+    if forward and (
+        release["digest"] != forward["release"]
+        or (
+            not state["in_flight"]
+            and (action != "deploy" or state["epochs"] != forward["epochs"])
+        )
+    ):
+        raise Refused(
+            "sealed recovery requires a separate forward deployment on the same epochs"
+        )
     if action == "rollback" and release["digest"] not in state["verified_releases"]:
         raise Refused("rollback release has no verified environment history")
     if action == "restart" and (
@@ -291,7 +438,7 @@ def ready(state, policy, now):
         fits(policy, state, now, SESSION)
     expires = now + SESSION
     if policy["environment"] == "s3":
-        expires = min(expires, stamp(state["experiment"]["deadline"]))
+        expires = min(expires, stamp(state["expires"]))
     state.update(
         phase="ready",
         ready_at=now.isoformat(),
@@ -343,12 +490,24 @@ def tick(state, policy, now, observations, operations):
                     intent["status"] = "unknown"
     expired = state["expires"] and now >= stamp(state["expires"])
     experiment = state["experiment"]
+    recovering = state.get("rehearsal_recovery")
+    was_running = state.get("power_seen_running")
+    if experiment and all(v == "running" for v in observations.values()):
+        state["power_seen_running"] = True
     if experiment and now >= stamp(experiment["deadline"]):
-        if not known_off(state):
+        if not known_off(state, missing=may_have_uncreated_targets(state)):
             drain(state, stamp(experiment["deadline"]), "S3 experiment deadline")
         else:
             state.update(phase="off", tester_open=False)
         state["inventory_followup"] = True
+    elif state["phase"] == "compute-maintenance" and (
+        expired or state["contest"] or not fresh(state["heartbeat"], now, 180)
+    ):
+        drain(
+            state,
+            stamp(state["expires"]) if expired else now,
+            "Terraform power window closed",
+        )
     elif state["phase"] in {"starting", "ready"}:
         if expired or (state["heartbeat"] and not fresh(state["heartbeat"], now, 180)):
             drain(
@@ -360,6 +519,13 @@ def tick(state, policy, now, observations, operations):
             state["app_seen"], now, 15
         ):
             drain(state, now, "App heartbeat lost")
+        elif (
+            state["phase"] == "starting"
+            and recovering
+            and not recovering["boots_confirmed"]
+            and now >= stamp(state["boot_deadline"])
+        ):
+            drain(state, now, "S3 recovery power window expired")
         elif any(
             i["action"] == "start"
             and i["generation"] == state["generation"]
@@ -368,7 +534,7 @@ def tick(state, policy, now, observations, operations):
             for i in p["intents"]
         ):
             drain(state, now, "start outcome failed or uncertain")
-        elif state["phase"] == "ready" and any(
+        elif (state["phase"] == "ready" or (experiment and was_running)) and any(
             v != "running" for v in observations.values()
         ):
             drain(state, now, "unexpected VM power state")
@@ -381,8 +547,13 @@ def tick(state, policy, now, observations, operations):
     ):
         if not state["drain"]["complete"]:
             state["clean_drain"] = False
-            if state["last_verified"] and not state["in_flight"]:
-                state["in_flight"] = state.get("last_operation")
+            if not state["in_flight"]:
+                if state.get("forward_required") or (
+                    experiment and state["last_verified"] and state["operation"]
+                ):
+                    state["in_flight"] = state["operation"]["request"]["id"]
+                elif state["last_verified"]:
+                    state["in_flight"] = state.get("last_operation")
         state["phase"] = "stopping"
     if (
         state["operation"]
@@ -396,11 +567,11 @@ def tick(state, policy, now, observations, operations):
                 if intent["action"] == "start" and intent["status"] == "planned":
                     intent["status"] = "failed"
     if state["phase"] == "stopping":
-        if known_off(state):
+        if known_off(state, missing=may_have_uncreated_targets(state)):
             state.update(phase="off", tester_open=False)
         else:
             for role, power in state["power"].items():
-                if power["state"] == "deallocated":
+                if power["state"] in {"deallocated", "not-found"}:
                     continue
                 waiting = [
                     i

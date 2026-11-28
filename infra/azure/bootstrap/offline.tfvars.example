@@ -3,7 +3,7 @@ target = {
   slot            = "S4"
   subscription_id = "00000000-0000-0000-0000-000000000004"
   tenant_id       = "00000000-0000-0000-0000-000000000010"
-  location        = "southeastasia"
+  location        = "koreacentral"
   storage_prefix  = "astras4mock"
 }
 

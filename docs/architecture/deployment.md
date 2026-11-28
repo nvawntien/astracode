@@ -2,7 +2,13 @@
 
 M0-13 defines separate App and Judge VMs for S2 Staging and disposable S3 Testing. Terraform state, approved release receipts and environment data have separate scopes. Follow the [Terraform roots and pinned inputs](../../infra/azure/README.md), the [Kubernetes workload templates](../../infra/kubernetes/README.md) and [ADR-0004](adr/0004-azure-topology-and-subscription-layout.md).
 
-Phase A uses fixtures. Live operations first require explicit Phase B authorization and the S3 sequence in [OpenSpec tasks](../../openspec/changes/azure-walking-skeleton/tasks.md). Before creating either VM, verify the exact target, reviewed plan, controller package, independent alerts and deadline. On S3, arm cleanup outside the disposable workload group and use the exact reviewed rehearsal bundle. Measure time from first provisioning through readiness and retain the sanitized costs, limit checks and interruption evidence for Gate 2.
+## Azure topology
+
+The selected configuration for S2 and S3 uses Korea Central and Ubuntu 24.04 x64. App runs the k3s control plane, ingress, application services and backing stores on `Standard_B4s_v2` with 4 vCPUs and 16 GiB RAM. Judge runs the k3s agent and its judging workloads on `Standard_B2ls_v2` with 2 vCPUs and 4 GiB RAM. Each node has a 64 GiB Standard SSD LRS OS disk. App has a separate retained 64 GiB Standard SSD LRS data disk. S4 shared storage uses the same candidate region. [Preflight observations and allocation status](../evidence/m0-13-phase-a.md#azure-preflight-observations)
+
+The infrastructure plan arms the independent controller and monitors before compute creation. A reviewed plan and a current, target-bound controller window authorize creation or replacement. Routine power-off deallocates VMs, retains their network identities and preserves the App data disk. A capacity-constrained replacement recreates one VM after deleting its prior instance and reuses its network identity. S3 rehearsals use explicit experiment deadlines and two approved immutable releases. [Terraform operation](../../infra/azure/README.md) · [S3 rollout and recovery](../../infra/azure/lifecycle/README.md#s3-pre-merge-rehearsal-and-cleanup)
+
+## Release and operational lifecycle
 
 For protected S2, the separate owner-reviewed default-branch maintenance PR registers workflows and retires the legacy hosted SSH/tag deployment entry point. Confirm the off window, forecast, operator access and identity separation before arming S2. A merged application SHA gets one canonical OCI bundle and write-once receipt after exact-SHA CI. The App retrieves the approved bundle with its protected poller. See [release publication and main transition](../../scripts/release/README.md).
 

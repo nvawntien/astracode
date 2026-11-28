@@ -16,7 +16,7 @@ from app_rollout import Rollout
 from attempt_secret import deliver
 from authority import Authority
 from controller_client import Controller
-from coordinator import reconcile
+from coordinator import ForwardRequired, reconcile
 from drain_work import finish as finish_drain, observe as observe_nodes
 from edge_lease import serve as serve_edge
 from kube_rollout import Cluster
@@ -187,7 +187,7 @@ def run_poller(settings):
                         "resourceVersion": patch["metadata"]["resourceVersion"]
                     },
                     "spec": {"suspend": False},
-                }
+                },
             )
         raise RecoveryRequired("unknown Job action")
 
@@ -323,13 +323,22 @@ def run_issuer(settings):
 
             with tempfile.TemporaryDirectory() as root:
                 unpack_migrations(release, root)
-                return reconcile(
-                    op,
-                    root,
-                    run_job,
-                    fresh,
-                    erase_attempt=lambda attempt: deliver(attempt, None),
-                )
+                try:
+                    return reconcile(
+                        op,
+                        root,
+                        run_job,
+                        fresh,
+                        erase_attempt=lambda attempt: deliver(attempt, None),
+                    )
+                except ForwardRequired as exc:
+                    if slot == "s3":
+                        c.call(
+                            "sealed-recovery",
+                            operation=req["id"],
+                            versions=exc.versions,
+                        )
+                    raise
 
     authority = Authority(c, catalog, migrate, slot, CONFIG)
     threading.Thread(target=authority.renew_loop, daemon=True).start()

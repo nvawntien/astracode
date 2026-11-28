@@ -10,11 +10,14 @@ from state import (
     Refused,
     admit,
     claim,
+    drain,
     fresh,
     initial,
     powered,
     power_result,
     ready,
+    rehearsal_sources,
+    resume_rehearsal,
     stamp,
     tick,
 )
@@ -26,6 +29,7 @@ class Conflict(RuntimeError):
 
 ACTIONS = {"start", "extend", "cancel", "deploy", "rollback", "restart", "recover"}
 DEPLOY = {"deploy", "rollback", "restart", "recover"}
+RESUME = "resume-rehearsal"
 OWNERS = {"auth", "problem", "submission"}
 
 
@@ -41,19 +45,34 @@ def validate(payload, slot):
         type(payload["schemaVersion"]) is not int
         or payload["schemaVersion"] != 1
         or payload["environment"] != slot
-        or action not in ACTIONS | {"promotion-eligibility"}
+        or (
+            action not in ACTIONS | {"promotion-eligibility"}
+            and (slot != "s3" or action != RESUME)
+        )
     ):
         raise Refused("invalid operation contract")
     fields = {"schemaVersion", "environment", "operation", "requestId", "requester"}
     identifier(payload["requestId"])
     if not re.fullmatch("[0-9]+", payload["requester"]):
         raise Refused("invalid requester")
-    if action in ACTIONS - {"start"}:
+    if action in (ACTIONS - {"start"}) | {RESUME}:
         fields.add("sessionGeneration")
         identifier(payload["sessionGeneration"])
-    if action == "start" and "recoveryAttempt" in payload:
+    if action == RESUME or (action == "start" and "recoveryAttempt" in payload):
         fields.add("recoveryAttempt")
         identifier(payload["recoveryAttempt"])
+    if action == "start" and "terraformPlan" in payload:
+        fields.add("terraformPlan")
+        plan = payload["terraformPlan"]
+        if (
+            slot != "s2"
+            or set(plan) != {"sha256", "operation", "role", "expiresAt"}
+            or not re.fullmatch(r"[a-f0-9]{64}", plan["sha256"])
+            or (plan["operation"], plan["role"])
+            not in {("create", None), ("replace", "app"), ("replace", "judge")}
+        ):
+            raise Refused("invalid Terraform compute plan")
+        stamp(plan["expiresAt"])
     if action == "extend":
         fields.add("requestedExpiry")
         stamp(payload["requestedExpiry"])
@@ -164,7 +183,7 @@ class Service:
         if self.slot == "s3":
             if (
                 caller["role"] != "rehearsal-operator"
-                or payload["operation"] not in DEPLOY
+                or payload["operation"] not in DEPLOY | {RESUME}
                 or payload["requester"] != self.policy["rehearsal_owner"]
             ):
                 raise Refused(
@@ -180,15 +199,20 @@ class Service:
         else:
             identity = self.auth.approval(proof, payload, caller)
         action = payload["operation"]
+        power_snapshot = (
+            self.power.observe()
+            if action == RESUME or "terraformPlan" in payload
+            else None
+        )
         record, release = (
             self.load_release(payload["releaseDigest"])
             if action in DEPLOY | {"promotion-eligibility"}
             else (None, None)
         )
-        rollback = (
-            self.load_release(payload["migration"]["rollbackDigest"])[1]
+        rollback_record, rollback = (
+            self.load_release(payload["migration"]["rollbackDigest"])
             if action in DEPLOY
-            else None
+            else (None, None)
         )
         ticket_key = identity["run"] + ":" + identity["attempt"]
         binding = digest(canonical(dict(payload=payload, identity=identity)))
@@ -196,6 +220,8 @@ class Service:
         def consume(state, now):
             previous = state["tickets"].get(ticket_key)
             if previous:
+                if action == RESUME:
+                    raise Refused("S3 recovery authorization already consumed")
                 if previous["binding"] != binding:
                     raise Refused("approval ticket is already bound")
                 return previous["result"]
@@ -203,7 +229,14 @@ class Service:
                 t["request"] == payload["requestId"] for t in state["tickets"].values()
             ):
                 raise Refused("request already consumed by a prior run")
-            if action == "promotion-eligibility":
+            if power_snapshot is not None and power_snapshot != {
+                role: observation["state"]
+                for role, observation in state["power"].items()
+            }:
+                raise Refused("current VM power differs from the durable observation")
+            if action == RESUME:
+                result = stored = resume_rehearsal(state, payload, identity, now)
+            elif action == "promotion-eligibility":
                 mapping = self.policy["promotion_mappings"].get(
                     payload["mappingRevision"], {}
                 )
@@ -250,11 +283,14 @@ class Service:
                         raise Refused(
                             "protected originating request missing or changed"
                         )
-                elif (
-                    state["experiment"].get("release") != payload.get("releaseDigest")
-                    or stamp(state["experiment"]["deadline"]) <= now
-                ):
-                    raise Refused("release or experiment deadline differs")
+                else:
+                    experiment = state["experiment"]
+                    sources = rehearsal_sources(experiment)
+                    if stamp(experiment["deadline"]) <= now or any(
+                        sources.get(row["bundle"]) != row["source"]
+                        for row in (record, rollback_record)
+                    ):
+                        raise Refused("release or experiment deadline differs")
                 internal = dict(payload)
                 if action in DEPLOY:
                     internal.update(
@@ -285,7 +321,10 @@ class Service:
     def activation_inputs(self, state, payload, release, rollback):
         policy = dict(payload["migration"])
         action = payload["operation"]
-        if rollback["versions"] != release["versions"]:
+        if rollback["versions"] != release["versions"] or (
+            self.slot == "s3"
+            and rollback["migration_package"] != release["migration_package"]
+        ):
             raise Refused("rollback schema is incompatible")
         if (
             action == "deploy"
@@ -300,6 +339,10 @@ class Service:
         if not view:
             raise Refused("fresh local observation required")
         previous = state.get("last_app_boot")
+        if self.slot == "s3" and action == "recover":
+            recovery = state.get("rehearsal_recovery")
+            if recovery and recovery["attempt"] == policy["reconcile_attempt"]:
+                previous = recovery["prior_boots"]["app"]
         same = previous and previous != view["boot"]
         termination = dict(
             epoch=view["epoch"],
@@ -311,6 +354,11 @@ class Service:
             previous_boot=previous,
             boot=view["boot"],
             work_reconciled=policy.get("work_reconciled", False),
+            sealed_recovery=(
+                (state.get("forward_required") or {}).get("recovery")
+                if action == "deploy" and not state["in_flight"]
+                else None
+            ),
         )
         if action == "recover":
             if policy["reconcile_attempt"] != state["in_flight"]:
@@ -447,11 +495,33 @@ class Service:
             for job in row["retired_jobs"]:
                 identifier(job)
         epochs = {r: row["epoch"] for r, row in data.items()}
+        recovery = state.get("rehearsal_recovery")
+        if (
+            state["phase"] == "starting"
+            and recovery
+            and not recovery["boots_confirmed"]
+        ):
+            if (
+                now >= stamp(state["boot_deadline"])
+                or not powered(state)
+                or any(
+                    data[r]["boot"] == boot
+                    for r, boot in recovery["prior_boots"].items()
+                )
+            ):
+                raise Refused("both new S3 VM boots must be confirmed before recovery")
+            recovery["boots_confirmed"] = True
+            # Bound only the externally issued power-on, not the separate rollout.
+            state["boot_deadline"] = state["expires"]
         if (
             state["epochs"]
             and epochs != state["epochs"]
             and state["phase"] in {"starting", "ready"}
         ):
+            if self.slot == "s3":
+                # Keep the old node observations for the eventual two-boot fence.
+                drain(state, now, "unapproved S3 node epoch change")
+                return
             state["tester_open"] = False
             if state["operation"]:
                 if state["operation"]["phase"] == "running":
@@ -496,13 +566,15 @@ class Service:
             "rehearsal-operator",
         }:
             raise Refused("status authority required")
-        return self.change(
-            lambda s, now: dict(
+
+        def view(s, now):
+            result = dict(
                 environment=self.slot,
                 phase=s["phase"],
                 generation=s["generation"],
                 ready=s.get("ready_at"),
                 expires=s["expires"],
+                contest=s["contest"],
                 release=s["last_verified"],
                 heartbeat=s["heartbeat"],
                 power={r: p["state"] for r, p in s["power"].items()},
@@ -517,7 +589,30 @@ class Service:
                     else None
                 ),
             )
-        )
+            if self.slot == "s3":
+                experiment = s["experiment"]
+                result["experiment"] = dict(
+                    id=experiment["id"],
+                    approvalRef=experiment["approval_ref"],
+                    deadline=experiment["deadline"],
+                    targets=s["targets"],
+                )
+                recovery = s.get("rehearsal_recovery")
+                if recovery:
+                    result["rehearsal_recovery"] = {
+                        key: recovery[key]
+                        for key in ("attempt", "request", "accepted", "boots_confirmed")
+                    }
+                    result["rehearsal_recovery"]["bootDeadline"] = s["boot_deadline"]
+            elif s["phase"] == "compute-maintenance":
+                window = s["terraform_window"]
+                result["terraform_window"] = dict(
+                    requestId=window["request"],
+                    terraformPlan=window["plan"],
+                )
+            return result
+
+        return self.change(view)
 
     def reconcile(self):
         state, _ = self.store.read()

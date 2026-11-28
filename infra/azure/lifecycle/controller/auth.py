@@ -116,6 +116,10 @@ class Auth:
             proof.get("repository_id") != str(self.policy["repository_id"])
             or proof.get("repository") != self.policy["repository"]
             or proof.get("ref") != "refs/heads/main"
+            or not (
+                proof.get("ref_protected") is True
+                or proof.get("ref_protected") == "true"
+            )
             or proof.get("event_name") != "workflow_dispatch"
             or proof.get("environment") != environment
             or proof.get("sub") != self.policy["subjects"][environment]
@@ -124,6 +128,10 @@ class Auth:
             or proof.get("workflow_sha") not in workflow["revisions"]
             or proof.get("sha") != proof.get("workflow_sha")
             or str(proof.get("actor_id")) not in self.policy["dispatchers"]
+            or (
+                payload["requester"] in self.policy["reviewers"][role]
+                and proof.get("actor_id") == payload["requester"]
+            )
             or proof.get("run_attempt") != "1"
             or not re.fullmatch("[0-9]+", str(proof.get("run_id", "")))
             or not -15 <= now - proof["iat"] <= 600

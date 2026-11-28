@@ -6,12 +6,6 @@ terraform {
       version = "= 4.59.0"
     }
   }
-
-  backend "azurerm" {
-    use_azuread_auth = true
-    container_name   = "s4-tfstate"
-    key              = "terraform.tfstate"
-  }
 }
 
 provider "azurerm" {

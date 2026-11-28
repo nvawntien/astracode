@@ -52,11 +52,11 @@ variable "network" {
 }
 
 variable "compute" {
-  description = "Reviewed VM configuration. Enabling compute requires evidence that the controller is armed."
+  description = "Reviewed VM configuration. Enabled manages VM existence. Use the reviewed-plan entry point for create and replacement, and Azure deallocation for shutdown."
   type = object({
     enabled           = optional(bool, false)
-    app_size          = optional(string, "Standard_B2as_v2")
-    judge_size        = optional(string, "Standard_B2als_v2")
+    app_size          = optional(string, "Standard_B4s_v2")
+    judge_size        = optional(string, "Standard_B2ls_v2")
     app_os_disk_gib   = optional(number, 64)
     judge_os_disk_gib = optional(number, 64)
     app_data_disk_gib = optional(number, 64)

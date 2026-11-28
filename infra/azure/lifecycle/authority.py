@@ -239,6 +239,9 @@ class Authority:
             and proof.get("uid") == state["submission_uid"]
         ):
             return True
+        if request["environment"] == "s3" and request["action"] == "deploy":
+            if proof.get("sealed_recovery") and not state["in_flight"]:
+                return proof.get("boot") == view["boot_id"]
         # A service restart alone does not fence a runtime shim. A verified
         # new kernel boot on the same uniquely bound App VM fences its old PIDs.
         return (
