@@ -1,24 +1,14 @@
-name: Release container images
+# Historical tag and manual publishing entry point. Keep its old workflow ID
+# disabled after the separately authorized default-branch transition.
+name: Release container images (retired)
 
 on:
-  push:
-    branches: [develop]
+  workflow_call:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: release-images-${{ github.sha }}
-  cancel-in-progress: false
+permissions: {}
 
 jobs:
-  candidate:
-    uses: nvawntien/astracode/.github/workflows/release-candidate.yml@main
-    with:
-      source: ${{ github.sha }}
-      kind: canonical
-    permissions:
-      contents: read
-      actions: read
-      packages: write
-      id-token: write
+  retired:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Use the protected develop canonical publisher."

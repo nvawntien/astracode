@@ -27,7 +27,7 @@ operations = {
 }
 
 budget = {
-  amount    = 100
+  amount    = 80
   starts_at = "2026-11-01T00:00:00Z"
   email     = ["operations@example.invalid"]
 }

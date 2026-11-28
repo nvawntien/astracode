@@ -47,7 +47,6 @@ resource "azurerm_subnet" "network" {
   virtual_network_name            = azurerm_virtual_network.environment.name
   address_prefixes                = [each.value]
   default_outbound_access_enabled = false
-  service_endpoints               = each.key == "app" && var.target.slot == "S2" ? ["Microsoft.Storage.Global"] : []
 }
 
 resource "azurerm_network_security_group" "node" {

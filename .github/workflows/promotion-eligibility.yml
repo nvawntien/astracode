@@ -48,7 +48,7 @@ jobs:
         with:
           client-id: ${{ vars.ELIGIBILITY_READER_CLIENT_ID }}
           tenant-id: ${{ vars.S4_TENANT_ID }}
-          subscription-id: ${{ vars.S4_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
       - name: Evaluate the frozen request against protected S2 evidence
         env:
           FROZEN_REQUEST: ${{ needs.request.outputs.payload }}

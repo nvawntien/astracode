@@ -115,7 +115,7 @@ GitHub Actions workflows in `.github/workflows/`:
 | --- | --- | --- |
 | `ci.yml` | pull requests, pushes to `main`, called by release automation | Go test/vet/race, PostgreSQL integration suites (`postgres-integration` job), judge benchmark and collector checks, website typecheck/lint/tooling format/unit tests/gateway client contract/build, Envoy checks, development and production Compose validation, deployment-script checks, image builds |
 | `openspec.yml` | pull requests targeting `develop` or `main`, pushes to them, and exact-SHA release calls | `openspec validate --all --strict` (skipped while no specs or active changes exist) |
-| `release-images.yml` | protected `develop` pushes | Exact-SHA CI and canonical OCI publication through the protected reusable workflow after registration. |
+| `publish-canonical.yml` | protected `develop` pushes | Exact-SHA CI and canonical OCI publication through the protected reusable workflow after registration. |
 | `reconcile-releases.yml` | schedule or manual dispatch on protected `main` | Reconciles protected merge history without accepting a SHA input. |
 | `rehearsal-checks.yml` | labeled candidate PRs to `develop` | Read-only CI for the reviewed S3 head SHA. |
 | `staging-deploy.yml` | protected `main` dispatch | Freezes the release and runs protected deployment and smoke after native Environment approval. |

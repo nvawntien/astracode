@@ -1,10 +1,8 @@
 locals {
   subscription_scope = "/subscriptions/${var.target.subscription_id}"
   slots              = ["S1", "S2", "S3", "S4", "S5"]
-  firewall_ipv4 = {
-    operator = toset([for cidr in var.access.operator_ipv4 : trimsuffix(cidr, "/32")])
-    receipts = toset([for cidr in var.access.receipt_ipv4 : trimsuffix(cidr, "/32")])
-  }
+  operator_ipv4      = toset([for cidr in var.access.operator_ipv4 : trimsuffix(cidr, "/32")])
+
 }
 
 data "azurerm_client_config" "current" {}
@@ -62,13 +60,14 @@ resource "azurerm_storage_account" "shared" {
   https_traffic_only_enabled      = true
   allow_nested_items_to_be_public = false
   shared_access_key_enabled       = false
+  public_network_access_enabled   = true
   default_to_oauth_authentication = true
 
   network_rules {
-    default_action             = "Deny"
+    default_action             = each.key == "receipts" ? "Allow" : "Deny"
     bypass                     = ["None"]
-    ip_rules                   = each.key == "receipts" ? local.firewall_ipv4.receipts : local.firewall_ipv4.operator
-    virtual_network_subnet_ids = each.key == "receipts" ? var.access.receipt_subnet_ids : []
+    ip_rules                   = each.key == "receipts" ? [] : local.operator_ipv4
+    virtual_network_subnet_ids = []
   }
 
   dynamic "blob_properties" {
@@ -120,6 +119,8 @@ resource "azurerm_storage_container" "backup" {
 }
 
 resource "azurerm_role_assignment" "backup_operator" {
+  count = var.access.backup_operator_id == null ? 0 : 1
+
   scope                = azurerm_storage_container.backup.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = var.access.backup_operator_id
@@ -159,6 +160,8 @@ resource "azurerm_role_definition" "receipt_publisher" {
 }
 
 resource "azurerm_role_assignment" "receipt_publisher" {
+  count = var.access.receipt_publisher_id == null ? 0 : 1
+
   scope              = azurerm_storage_container.receipts.id
   role_definition_id = azurerm_role_definition.receipt_publisher.role_definition_resource_id
   principal_id       = var.access.receipt_publisher_id

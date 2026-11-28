@@ -107,11 +107,6 @@ output "vm_ids" {
 }
 
 
-output "app_subnet_id" {
-  description = "App source subnet for the separately scoped S4 receipt firewall."
-  value       = azurerm_subnet.network["app"].id
-}
-
 output "receipt_reader_principal_id" {
   value = azurerm_user_assigned_identity.runtime["app-receipts"].principal_id
 }

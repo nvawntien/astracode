@@ -49,7 +49,7 @@ Run the bootstrap checks from the repository root after backend-disabled initial
 
 - Start S4 bootstrap with an isolated local backend, then migrate to its dedicated Blob state. Keep state, backups and write-once canonical receipts separate. [S4 procedure](#task-22-first-time-s4-bootstrap)
 - S2 and S3 have distinct approved subscriptions and state scopes. Prepare the network, retained disk, Key Vault, budget, daily shutdown schedules and emergency authority before enabling compute. The reviewed-plan runner binds the current planning and apply scopes. Routine shutdown deallocates the pair and keeps the declared resources.
-- Each node has a static IPv4 for egress, with no unsolicited external Judge ingress. App permits HTTPS only from approved CIDRs. The scoped App identity reads the S4 receipt container over its approved network path. The Kubernetes API and SSH remain private.
+- Each node has a static IPv4 for egress, with no unsolicited external Judge ingress. App permits HTTPS only from approved CIDRs. The scoped App identity reads the S4 receipt container over the authenticated HTTPS endpoint. The Kubernetes API and SSH remain private.
 - The workload RG permits only the expected App/Judge VM names under Azure Policy. An emergency principal can read and deallocate only that pair. The delivery role has VM read and Action Run Command on App only.
 
 ## Task 2.1 review boundary
@@ -118,7 +118,7 @@ for slot in S2 S3; do
 done
 ```
 
-Inspect GitHub Environment settings for designated reviewers, protected `main`, self-review prevention and disabled administrator bypass. Check the workflow registration and repository OIDC template. Compare the expected subject from `identity.tf`, including repository ID, environment, ref and workflow ref. The issuer is `https://token.actions.githubusercontent.com` and Azure audience is `api://AzureADTokenExchange`. Check GHCR package visibility and the approved pull and publisher identities and receipt network path. Repository-level OIDC changes, workflow registration and activation require separate authorization. The S3 run verifies the actual token and wrong-context denials. [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc) · [Release workflow registration](../../scripts/release/README.md#separately-reviewed-default-branch-transition)
+Inspect GitHub Environment settings for designated reviewers, protected `main`, self-review prevention and disabled administrator bypass. Check the workflow registration and repository OIDC template. Compare the expected subject from `identity.tf`, including repository ID, environment, ref and workflow ref. The issuer is `https://token.actions.githubusercontent.com` and Azure audience is `api://AzureADTokenExchange`. Check GHCR package visibility and the approved pull and publisher identities. Repository-level OIDC changes, workflow registration and activation require separate authorization. The S3 run verifies the actual token and wrong-context denials. [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc) · [Release workflow registration](../../scripts/release/README.md#separately-reviewed-default-branch-transition)
 
 ```bash
 repo=nvawntien/astracode
@@ -134,33 +134,11 @@ gh api --method GET "repos/$repo/actions/oidc/customization/sub" --jq '{use_defa
 gh api --method GET "repos/$repo/actions/workflows/staging-deploy.yml" --jq '{path,state}'
 ```
 
-For S4, inspect only `astra-s4-shared`, check each proposed account name, and verify the approved network paths and separation of the state, recovery and receipt principals. Use `S4_PREFIX` from the approved S4 inputs. An unavailable name requires identifying the owner before proceeding. If an account already exists in the target, inspect its firewall and use the authenticated data-plane probe from the matching approved principal and network. A successful ARM read proves management visibility only. An empty target needs the scoped data-plane verification in Task 2.2. The App receipt reader requires the approved S2 subnet or other existing approved path, and the publisher needs its own verified restricted egress. [Storage firewall and service endpoints](https://learn.microsoft.com/en-us/troubleshoot/azure/azure-storage/blobs/networking/best-practices-for-storage-network-security)
+The Orchestrator verified that `astra-s4-shared` is absent and all three approved storage names are available. The initial S4 plan creates `astras4state`, `astras4backup` and `astras4receipts`. State and backup accept connections only from the approved operator IPv4 range. Only receipts allow ordinary Internet connections over HTTPS using Entra authentication and a container-scoped role. All accounts disable anonymous access and Shared Key. The locked `canonical-releases` container holds release metadata only. Keep credentials, secrets, backups and Terraform state outside it. This boundary preserves ADR-0004's restriction on public exposure of state and backups and its private cluster deployment path. [Owner observations](../../docs/evidence/m0-13-phase-a.md#simplified-architecture-preflight) · [Azure Storage authorization and firewall controls](https://learn.microsoft.com/en-us/troubleshoot/azure/azure-storage/blobs/networking/storage-network-security-faq)
 
-```bash
-: "${S4_PREFIX:?}"
-m013_az acc1 "$S4_SUB" group exists --name astra-s4-shared -o tsv
-for suffix in state backup receipts; do
-  m013_az acc1 "$S4_SUB" storage account check-name --name "${S4_PREFIX}${suffix}" \
-    --query '{available:nameAvailable,reason:reason}' -o json
-done
-# For existing in-scope accounts, inventory firewall and authentication metadata.
-m013_az acc1 "$S4_SUB" storage account list -g astra-s4-shared -o json |
-  jq --arg prefix "$S4_PREFIX" '[.[] | select(.name | startswith($prefix)) |
-    {name,publicNetwork: .publicNetworkAccess,allowSharedKey: .allowSharedKeyAccess,
-     defaultAction: .networkRuleSet.defaultAction,
-     subnetCount: (.networkRuleSet.virtualNetworkRules // [] | length),
-     ipRuleCount: (.networkRuleSet.ipRules // [] | length)}]'
-# Use these probes only if their accounts and containers already exist.
-m013_az acc1 "$S4_SUB" storage container show --account-name "${S4_PREFIX}state" --name s4-tfstate --auth-mode login -o none
-m013_az acc4 "$S2_SUB" storage container show --account-name "${S4_PREFIX}state" --name s2-tfstate --auth-mode login -o none
-m013_az acc3 "$S3_SUB" storage container show --account-name "${S4_PREFIX}state" --name s3-tfstate --auth-mode login -o none
-# Run with the approved receipt-reader profile and its approved receipt network.
-m013_az acc1 "$S4_SUB" storage container show --account-name "${S4_PREFIX}receipts" --name canonical-releases --auth-mode login -o none
-```
+The S4 operator's current public IPv4 is available as `S4_OPERATOR_IPV4` in the operator's session. Confirm that the distinct state operators and approved backup operator use that authorized path. Confirm the expected scope and tenant for each principal. Use Task 2.2 to prove state locking, unapproved network denial for state and backup, and Entra-only receipt access from the publisher and reader. S3 uses its protected rehearsal receipts and needs no S4 canonical receipt reader grant.
 
-The last command is an acc1 probe only if acc1 is the recorded receipt reader. Otherwise use the approved existing profile for that principal with the same S4 account and container. Receipt publisher first-write and isolation checks require the real scopes under Task 2.2. If the publisher UAMI will be hosted in S4, check that provider in S4 with `m013_az acc1 "$S4_SUB" provider show --namespace Microsoft.ManagedIdentity --query registrationState -o tsv`.
-
-Read existing budgets in the three working subscriptions. Confirm the planned amount, validity and 50/80/100 actual-spend alerts. Actual alert delivery is a later live check. Each subscription owner checks the Azure for Students credit and expiration in the Sponsorships portal. Report amount, currency, expiry and check date per slot. Subscription status and budget spend are separate from remaining credit. [Azure budgets API](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/list) · [Student credit balance and expiration](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)
+The Orchestrator found no budgets in S2, S3 or S4 and confirms the five subscriptions were registered on 2026-11-27 with USD 100 credit and one-year validity. Carry this owner-provided evidence forward. Use the proposed budgets of USD 80, USD 20 and USD 10 for S2, S3 and S4, with 50/80/100 actual-spend alerts. Check actual budget and notification behavior in the authorized live tasks. The following read-only command remains available if the budget evidence changes. [Azure budgets API](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/list) · [Student credit balance and expiration](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)
 
 ```bash
 for slot in S2 S3 S4; do
@@ -174,7 +152,7 @@ for slot in S2 S3 S4; do
 done
 ```
 
-Before requesting Task 2.2 authorization, account for existing S4 resources or confirm the target is empty. Prepare `S4_VARS` with the recorded S4 tenant, subscription and location, available prefix, distinct principals, approved source networks, receipt retention, budget date and recipients. Confirm stable operator egress, relevant role definition and assignment authority, the budget against real credits, Terraform 1.13.5, the pinned AzureRM provider and a protected directory for local state and plans. After authorization, use the [S4 bootstrap procedure](#task-22-first-time-s4-bootstrap).
+Before requesting Task 2.2 authorization, account for existing S4 resources or confirm the target is empty. Prepare `S4_VARS` with the recorded S4 tenant, subscription and location, available prefix, distinct principals, approved source networks, receipt retention, budget date and recipients. Confirm the private identity and budget inputs and the protected directory for local state and plans. Terraform 1.13.5 on Linux amd64 is owner-verified. Keep the AzureRM provider lock pinned. After authorization, use the [S4 bootstrap procedure](#task-22-first-time-s4-bootstrap).
 
 Before S3 allocation, complete S4 state migration and access checks, obtain separate S3 authorization, register the protected workflow and review the S3 candidate SHA and two isolated rehearsal receipts. Prepare the exact approved window in UTC, shutdown margin and emergency/notification paths, pinned Ubuntu image with VM Agent, App LUN 0 filesystem UUID, private ingress and Key Vault/registry access. Review the preparation and compute plans separately and verify the two native schedules before enabling compute. Keep S3 deployment and power-state proof in Tasks 2.3–2.4. [S3 procedure](#s3-provision-and-deploy)
 
@@ -186,26 +164,64 @@ Use separate protected identities and temporary grants. Centralized Reader acces
 | --- | --- |
 | S2/S3 subscription and approved RGs | Resource group read/create at subscription scope for initial RGs, or have the owner create the exact groups and import them with review. Use Contributor on the workload and operations RGs for Compute, Network, DevTestLab schedules, private DNS, Storage, Key Vault and user-assigned identity resources. Exclude storage `listKeys` and key regeneration in the provisioning identity and use separate limited identity-assignment authority for the exact UAMIs. Retain access to required network subnet joins. Use only approved Managed Run Command scripts with one-time scoped authority. |
 | Azure Policy and RBAC | Use temporary Resource Policy Contributor or equivalent reviewed policy definition and RG assignment actions. Subscription custom role definitions need `Microsoft.Authorization/roleDefinitions/read,write` at the definition scope. Separate role assignment write/delete at exact RG/resource or S4 container scopes, constrained to reviewed roles and principal IDs where possible. If needed, the owning operator performs these narrow steps using the existing Owner authority and retires temporary grants. |
-| S4 | Manage the dedicated shared RG and three storage accounts. Keep provider registration explicit. Require budget permissions at subscription scope. Cross-subscription service-endpoint rules may also require subnet join authorization on the source VNet. Scope state Blob Data Contributor to each independent slot container, backup contributor to `recovery`, receipt reader to `canonical-releases`. Verify whether the Terraform version uses ARM or Blob data operations for each storage resource. If bootstrap principal data-plane access is needed, grant it on the exact new account temporarily before rerunning the affected plan. |
+| S4 | Manage the dedicated shared RG and three storage accounts. Keep provider registration explicit. Require budget permissions at subscription scope. Scope state Blob Data Contributor to each independent slot container, backup contributor to `recovery`, receipt reader to `canonical-releases`. Verify whether the Terraform version uses ARM or Blob data operations for each storage resource. If bootstrap principal data-plane access is needed, grant it on the exact new account temporarily before rerunning the affected plan. |
 | Budgets | Subscription-level `Microsoft.Consumption/budgets/read,write` and read access to the relevant Cost Management data. Verify offer support, recipient delivery and usage in a separately authorized task. |
 
-Keep temporary infrastructure/bootstrap guest execution separate from routine delivery. For delivery, the custom role grants only `Microsoft.Compute/virtualMachines/read` and `Microsoft.Compute/virtualMachines/runCommand/action` on the exact App VM. Action Run Command is elevated guest execution, including scripts other than the installed delivery command if a principal holds that permission. Protect the exact GitHub workflow and its Environment and verify effective denials for wrong workflow/ref, start, deallocate, Judge, role assignment and S4 state. The VM agent needs outbound HTTPS to Azure. The S4 publisher and App receipt reader have separate Blob scopes. [Azure Action Run Command](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command) · [Azure Compute RBAC actions](https://learn.microsoft.com/en-us/azure/role-based-access-control/permissions/compute)
+Keep temporary infrastructure/bootstrap guest execution separate from routine delivery. For delivery, the custom role grants only `Microsoft.Compute/virtualMachines/read` and `Microsoft.Compute/virtualMachines/runCommand/action` on the exact App VM. Action Run Command is elevated guest execution, including scripts other than the installed delivery command if a principal holds that permission. Protect the exact GitHub workflow and its Environment and verify effective denials for wrong workflow/ref, start, deallocate, Judge, role assignment and S4 state. The VM agent needs outbound HTTPS to Azure. The S4 publisher and App receipt reader have separate roles on the canonical receipt container. [Azure Action Run Command](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command) · [Azure Compute RBAC actions](https://learn.microsoft.com/en-us/azure/role-based-access-control/permissions/compute)
 
 ## Task 2.2 first-time S4 bootstrap
 
-Prerequisites are task 2.1 clearance and separate S4 authorization, Terraform 1.13.5 and the checked provider lock, stable approved egress, reviewed S4 inputs, equal tenant/subscription assertions, and a protected encrypted location outside the repo. Confirm the [S4 owner or delegated permissions](#provisioning-privileges). Configure separate S4, S2 and S3 state principal IDs, backup and receipt principal IDs, and the restricted receipt networks. Preserve WORM retention selection, budget dates and 50/80/100% alert recipients in the reviewed inputs.
+Task 2.2 requires completed preflight and separate S4 authorization. The operator may prepare the private variables and review the plan beforehand. Use a protected directory outside the repository for variables, plan, state and receipt retention inputs. Terraform 1.13.5 and the AzureRM provider lock apply to both stages.
 
-Run from the root after checking that the exact S4 target is initially empty or fully accounted for. Set `PRIVATE_DIR`, `S4_VARS` and `S4_STATE_ACCOUNT` in the authorized shell. `S4_VARS` is an absolute path. `check_account` is the function above. The first copy has an implicit local backend. Removing its local state or changing its work directory before migration can orphan the new resources.
+| Grant | Principal | Scope and order |
+| --- | --- | --- |
+| State contributor S4 | Signed-in tenant A principal in `.acc1` | `astras4state/s4-tfstate` at first bootstrap. |
+| State contributor S3 | Distinct signed-in tenant A principal in `.acc3` | `astras4state/s3-tfstate` at first bootstrap. |
+| State contributor S2 | Distinct signed-in tenant A principal in `.acc4` | `astras4state/s2-tfstate` at first bootstrap. S1 and S5 containers receive no initial grant. |
+| Backup contributor | Proposed `.acc5` tenant A principal | `astras4backup/recovery` through a later plan after explicit approval. |
+| Receipt publisher | Proposed S4 UAMI `astra-s4-receipt-publisher` | Custom Blob read/write role on `astras4receipts/canonical-releases`. Add after the UAMI exists and the immutable container is in place. Use exact GitHub OIDC subjects. |
+| App receipt reader | S2 App `app-receipts` UAMI | Blob Data Reader on `astras4receipts/canonical-releases`. Add after S2 preparation creates the UAMI and before canonical S2 delivery. |
+| Promotion receipt reader | Separate future eligibility UAMI | Blob Data Reader on the same receipt container. Configure with the later eligibility transition. |
+
+The first plan omits `backup_operator_id`, `receipt_publisher_id` and `receipt_reader_ids`. It creates all containers and locks receipt retention without granting those roles. After the S4 state migration, create the approved publisher UAMI and its federated credentials in the existing S4 group through separately authorized IAM work. Read its actual principal ID with `az identity show -g astra-s4-shared -n astra-s4-receipt-publisher --subscription "$S4_SUB" --query principalId -o tsv` under `.acc1`. Load the S2 App reader's actual principal ID from the `receipt_reader_principal_id` output of the approved S2 environment preparation. Add only approved IDs to the private `access` object, preserving existing assignments, and review a fresh saved plan for each stage. Use the publisher's client ID for GitHub configuration and its principal ID for Azure RBAC. [Exact OIDC subjects](../../scripts/release/README.md#separately-reviewed-default-branch-transition)
+
+Export the approved subscription and tenant variables, `S4_OPERATOR_IPV4`, `S4_BUDGET_STARTS_AT` (first day of the budget month in UTC), `S4_BUDGET_EMAIL`, `S4_RECEIPT_RETENTION_DAYS` and `PRIVATE_DIR` in the operator's shell. Invoke `bash` for this procedure if the current shell is Zsh. Use the `m013_az` and `check_account` helpers from [Task 2.1](#task-21-review-boundary) in that Bash session. Run from the repository root. The budget recipient and locked retention require the approved values. This block builds private inputs and a saved plan.
 
 ```bash
-umask 077
 set +x
-: "${PRIVATE_DIR:?}" "${S4_VARS:?}" "${S4_SUB:?}" "${TENANT_A:?}" "${S4_STATE_ACCOUNT:?}"
+set -euo pipefail
+umask 077
+: "${PRIVATE_DIR:?}" "${TENANT_A:?}" "${S4_OPERATOR_IPV4:?}" "${S4_BUDGET_STARTS_AT:?}"
+: "${S4_BUDGET_EMAIL:?}" "${S4_RECEIPT_RETENTION_DAYS:?}"
+AZURE_CONFIG_DIR="$HOME/.acc4" check_account "$S2_SUB" "$TENANT_A"
+AZURE_CONFIG_DIR="$HOME/.acc3" check_account "$S3_SUB" "$TENANT_A"
 export AZURE_CONFIG_DIR="$HOME/.acc1"
 check_account "$S4_SUB" "$TENANT_A"
 test "$(az account show --query id -o tsv)" = "$S4_SUB"
-source_dir="$PWD/infra/azure"
-work=$(mktemp -d "$PRIVATE_DIR/m013-s4.XXXXXXXX")
+s2_principal=$(m013_az acc4 "$S2_SUB" ad signed-in-user show --query id -o tsv)
+s3_principal=$(m013_az acc3 "$S3_SUB" ad signed-in-user show --query id -o tsv)
+s4_principal=$(m013_az acc1 "$S4_SUB" ad signed-in-user show --query id -o tsv)
+: "${s2_principal:?}" "${s3_principal:?}" "${s4_principal:?}"
+
+repo_root=$(git rev-parse --show-toplevel)
+private_root=$(realpath -e -- "$PRIVATE_DIR")
+case "$private_root/" in "$repo_root/"*) exit 1;; esac
+source_dir="$repo_root/infra/azure"
+work=$(mktemp -d "$private_root/m013-s4.XXXXXXXX")
+S4_STATE_ACCOUNT=astras4state
+S4_VARS="$work/initial.tfvars.json"
+jq -n \
+  --arg subscription "$S4_SUB" --arg tenant "$TENANT_A" --arg ip "$S4_OPERATOR_IPV4" \
+  --arg s2 "$s2_principal" --arg s3 "$s3_principal" --arg s4 "$s4_principal" \
+  --arg start "$S4_BUDGET_STARTS_AT" --arg email "$S4_BUDGET_EMAIL" \
+  --argjson retention "$S4_RECEIPT_RETENTION_DAYS" \
+  '{target:{slot:"S4",subscription_id:$subscription,tenant_id:$tenant,
+            location:"koreacentral",storage_prefix:"astras4"},
+    access:{operator_ipv4:[$ip],state_operator_ids:{S2:$s2,S3:$s3,S4:$s4},
+            receipt_retention_days:$retention},
+    budget:{amount:10,starts_at:$start,email:[$email]}}' > "$S4_VARS"
+unset s2_principal s3_principal s4_principal
+
 mkdir "$work/bootstrap"
 cp -R "$source_dir/modules" "$work/modules"
 cp "$source_dir"/bootstrap/{main.tf,variables.tf,versions.tf,.terraform.lock.hcl} "$work/bootstrap/"
@@ -233,7 +249,7 @@ terraform -chdir="$work/bootstrap" init -migrate-state -lockfile=readonly \
   -backend-config="storage_account_name=$S4_STATE_ACCOUNT" \
   -backend-config="tenant_id=$TENANT_A" -backend-config="use_cli=true"
 terraform -chdir="$work/bootstrap" state pull >"$work/remote-after-migration.json"
-diff -u <(jq -cS '[.lineage,.resources]' "$work/local-before-migration.json") \
+cmp -s <(jq -cS '[.lineage,.resources]' "$work/local-before-migration.json") \
         <(jq -cS '[.lineage,.resources]' "$work/remote-after-migration.json")
 ```
 
@@ -256,7 +272,7 @@ Verify lock contention with a finite lease in the S4 maintenance window and no c
 terraform -chdir="$work/bootstrap" plan -refresh-only -input=false -var-file="$S4_VARS"
 ```
 
-Verify each assignment using the actual distinct state principals and stable network path. `az storage blob list --account-name "$S4_STATE_ACCOUNT" --container-name s2-tfstate --auth-mode login --query 'length(@)' -o tsv` should work as S2 and receive a data-plane authorization error as S3, then reverse the checks. Repeat against S4. Under the backup principal test `az storage blob list` on the backup account's `recovery` container and verify denial on state and receipts. Verify receipt reader write denial. With authorization for a retained synthetic probe name in the receipt container, use `az storage blob upload --auth-mode login --if-none-match '*' --overwrite false` with the receipt publisher and a protected test file. Require the repeat conditional create and an explicit overwrite/delete of only that probe to fail, verify its bytes separately, and record retention and principal scope. Arrange disposition of that locked probe before writing it. On completion retire the temporary bootstrap grants. Retain the original local snapshot in approved encrypted recovery storage, or dispose of it using the storage medium’s approved deletion procedure after validating recovery. Remove saved plans and incidental local copies under the same policy. [Entra Blob authentication and locking](https://developer.hashicorp.com/terraform/language/backend/azurerm)
+Verify each assignment using the actual distinct state principals and stable network path. `az storage blob list --account-name "$S4_STATE_ACCOUNT" --container-name s2-tfstate --auth-mode login --query 'length(@)' -o tsv` should work as S2 and receive a data-plane authorization error as S3, then reverse the checks. Repeat against S4. Under the backup principal test `az storage blob list` on the backup account's `recovery` container and verify denial on state and receipts. Verify receipt reader write denial and anonymous access denial. With authorization for a retained synthetic probe name in the receipt container, use `az storage blob upload --auth-mode login --if-none-match '*' --overwrite false` with the receipt publisher and a protected test file. Require the repeat conditional create and an explicit overwrite/delete of only that probe to fail, verify its bytes separately, and record retention and principal scope. Arrange disposition of that locked probe before writing it. On completion retire the temporary bootstrap grants. Retain the original local snapshot in approved encrypted recovery storage, or dispose of it using the storage medium’s approved deletion procedure after validating recovery. Remove saved plans and incidental local copies under the same policy. [Entra Blob authentication and locking](https://developer.hashicorp.com/terraform/language/backend/azurerm)
 
 ## S2/S3 VM maintenance
 

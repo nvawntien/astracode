@@ -274,10 +274,14 @@ class Publication(unittest.TestCase):
 
     def test_workflow_credentials_and_entry_points(self):
         root = Path(__file__).resolve().parents[2]
-        workflow = (root / ".github/workflows/release-images.yml").read_text()
+        workflow = (root / ".github/workflows/publish-canonical.yml").read_text()
         self.assertNotIn("workflow_dispatch", workflow)
         self.assertNotIn("tags:", workflow)
-        self.assertIn("release-images-${{ github.sha }}", workflow)
+        self.assertIn("publish-canonical-${{ github.sha }}", workflow)
+        legacy_publish = (root / ".github/workflows/release-images.yml").read_text()
+        self.assertNotIn("workflow_dispatch:", legacy_publish)
+        self.assertNotIn("push:", legacy_publish)
+        self.assertNotIn("packages: write", legacy_publish)
         legacy = (root / ".github/workflows/deploy-production.yml").read_text()
         self.assertNotIn("workflow_dispatch", legacy)
         self.assertNotIn("secrets.", legacy)
