@@ -18,11 +18,12 @@ network = {
   tester_ipv4 = ["192.0.2.30/32"]
 }
 
-controller = {
-  api_client_id       = "00000000-0000-0000-0000-000000000031"
-  caller_client_ids   = ["00000000-0000-0000-0000-000000000032", "00000000-0000-0000-0000-000000000033"]
-  alert_email         = "operations@example.invalid"
-  emergency_object_id = "00000000-0000-0000-0000-000000000034"
+operations = {
+  approved       = "synthetic-owner-approval"
+  earliest_start = "0800"
+  shutdown       = "1800"
+  alert_email    = "operations@example.invalid"
+  emergency_id   = "00000000-0000-0000-0000-000000000034"
 }
 
 budget = {

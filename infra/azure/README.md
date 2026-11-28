@@ -1,6 +1,6 @@
 # M0-13 Azure Terraform
 
-`bootstrap` defines S4 state, recovery and immutable canonical release records in separate storage accounts. `environment` defines the S2/S3 network, App and Judge VMs, retained App disk, runtime Key Vault, Flex Consumption controller and independent heartbeat alert. Each root defines a subscription budget with 50%, 80% and 100% actual-spend alerts.
+`bootstrap` defines S4 state, recovery and immutable canonical release records in separate storage accounts. `environment` defines the S2/S3 network, App and Judge VMs, retained App disk, runtime Key Vault, Azure-native daily shutdown, and scoped delivery and emergency roles. Each root defines a subscription budget with 50%, 80% and 100% actual-spend alerts.
 
 ## Offline verification
 
@@ -17,13 +17,13 @@ bash infra/azure/environment/tests/check-retained-disk.sh
 python3 -B infra/azure/environment/tests/test_reviewed_apply.py
 ```
 
-The retained-disk and compute test seeds state through the mock provider in a disposable directory. It checks that retargeting, disk replacement, expired startup inputs and toggling off existing VM resources fail. The operator fixture verifies saved-plan decisions and rejects stale or cancelled power windows. Azure resource eligibility, operator reachability, role propagation, timer execution and alert delivery require Phase B evidence.
+The retained-disk and compute test seeds state through the mock provider in a disposable directory. It checks that retargeting, disk replacement, expired startup inputs and toggling off existing VM resources fail. The operator fixture verifies saved-plan decisions and rejects stale approvals and proves initial creation and partial-replacement recovery against mocked instance views. Azure resource eligibility, operator reachability, role propagation, native deallocation and notification delivery require Phase B evidence.
 
 ## App and Judge bootstrap
 
 The VM custom data renders separate cloud-init configurations from `cloud-init/`. The installer verifies the pinned Linux amd64 K3s binary before enabling the systemd service. Both roles wait for the host firewall. App runs the server, Traefik and ServiceLB and uses its verified retained disk for local volumes. Judge runs the tainted agent and requires an independently issued, CA-pinned agent token in a root-only file. The protected delivery and rotation procedure requires live Phase B verification. [K3s release and checksums](https://github.com/k3s-io/k3s/releases/tag/v1.35.10%2Bk3s1) · [K3s token roles and formats](https://docs.k3s.io/cli/token)
 
-Set `compute.app_data_uuid` to the approved ext4 filesystem UUID for the App disk at Azure LUN 0. Initialize a fresh disk explicitly during authorized provisioning. The App disk check rejects an absent or mismatched device and the bootstrap performs no formatting. Reattach an existing approved disk as-is and confirm its identity before restarting the App K3s service, which requires the verified mount. Pod traffic to metadata and direct management ports is blocked at the host. The authenticated Kubernetes ClusterIP remains available for required system add-ons. App host IMDS is restricted to the poller and secret loader service accounts. Live placement, boot, mount recovery, join and traffic checks belong to the S3 rehearsal. [Azure Linux disk device aliases](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/azure-virtual-machine-utilities)
+Set `compute.app_data_uuid` to the approved ext4 filesystem UUID for the App disk at Azure LUN 0. Initialize a fresh disk explicitly during authorized provisioning. The App disk check rejects an absent or mismatched device and the bootstrap performs no formatting. Reattach an existing approved disk as-is and confirm its identity before restarting the App K3s service, which requires the verified mount. Pod traffic to metadata and direct management ports is blocked at the host. The authenticated Kubernetes ClusterIP remains available for required system add-ons. App host IMDS is restricted to the activation issuer and secret loader service accounts. Live placement, boot, mount recovery, join and traffic checks belong to the S3 rehearsal. [Azure Linux disk device aliases](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/azure-virtual-machine-utilities)
 
 Run the bootstrap checks from the repository root after backend-disabled initialization. The Terraform output and container inputs below use synthetic fixtures.
 
@@ -47,11 +47,10 @@ Run the bootstrap checks from the repository root after backend-disabled initial
 
 ## Scope and activation
 
-- Initial S4 bootstrap starts in a protected isolated root with the default local backend. Add the checked-in `backend.tf` after creating and verifying the storage and grants, then migrate to the matching Blob backend. Use the dedicated state scopes, avoid storage `listKeys` and preserve the recovery snapshot until remote locking and isolation are verified. [S4 bootstrap procedure](#task-22-first-time-s4-bootstrap)
-- S2 and S3 use independently approved subscriptions and separate state. The provider checks tenant and subscription and the first state write binds the target. Start with compute and controller exposure disabled. Verify the controller and monitors before the separate reviewed compute apply. The runner validates target and backend, plan digest, live controller deadline and approval. Use Azure deallocation for ordinary shutdown. Keep VM resources, their network identities and the independent data disk in state. Do not change `compute.enabled` to power off. [VM maintenance procedure](#s2s3-vm-maintenance)
-- The power roles use a dedicated workload resource group reserved by an enforced Azure Policy for the two planned VM names. This lets the controller and emergency operator have deallocation capability before either VM exists. S3 and emergency access are deallocate-only. The controller uses its own private storage account, separate from S4 state and release data.
-- Static IPv4 addresses provide explicit VM egress. Judge accepts only the App peer's cluster traffic. App HTTPS uses explicit tester CIDRs. A dedicated NAT gateway supplies the Flex Consumption subnet's public egress for Azure APIs and telemetry while controller storage uses Private Link. Verify the gateway's eligibility, deployment and standing cost in Phase B. [Flex Consumption networking](https://learn.microsoft.com/en-us/azure/azure-functions/functions-networking-options)
-- The App data disk is a separately managed resource protected against destruction and replacement while declared. Routine staging shutdown uses VM deallocation. S3 deletion of the retained disk requires the separately approved cleanup and inventory procedure.
+- Start S4 bootstrap with an isolated local backend, then migrate to its dedicated Blob state. Keep state, backups and write-once canonical receipts separate. [S4 procedure](#task-22-first-time-s4-bootstrap)
+- S2 and S3 have distinct approved subscriptions and state scopes. Prepare the network, retained disk, Key Vault, budget, daily shutdown schedules and emergency authority before enabling compute. The reviewed-plan runner binds the current planning and apply scopes. Routine shutdown deallocates the pair and keeps the declared resources.
+- Each node has a static IPv4 for egress, with no unsolicited external Judge ingress. App permits HTTPS only from approved CIDRs. The scoped App identity reads the S4 receipt container over its approved network path. The Kubernetes API and SSH remain private.
+- The workload RG permits only the expected App/Judge VM names under Azure Policy. An emergency principal can read and deallocate only that pair. The delivery role has VM read and Action Run Command on App only.
 
 ## Task 2.1 review boundary
 
@@ -88,7 +87,7 @@ gh api repos/nvawntien/astracode/actions/oidc/customization/sub
 gh api repos/nvawntien/astracode/environments --jq '.environments[] | {name, protection_rules}'
 ```
 
-Record the Azure Billing credit and expiry independently for every slot. Confirm the minimum IAM grants, Azure Policy, exact image, FC1 subscription quota/region eligibility, package and network path, receipt ingress and GitHub Environment/federation prerequisites before provisioning. The controller procedure depends on acceptance of Proposed ADR-0013 and confirmed directory authority. Task 2.1 captures preflight feasibility. Tasks 2.2–2.4 and 3.1–3.4 supply the actual cloud acceptance. [Proposed ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
+Record Azure Billing credit and expiry, provider registration including `Microsoft.DevTestLab`, location and quota, approved images (including Ubuntu VM Agent), scoped Azure RBAC, the native schedule and its notification path, protected GitHub Environment review and exact OIDC subject, and GHCR/S4 reachability. Verify the daily schedules can target the pair before creation. Check workflow registration and authorization for S3 separately from activating S2. The published role must deny power, Judge, role assignments and Terraform state. Prove native shutdown using actual instance views on S3. [Proposed ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md) · [Azure VM auto-shutdown](https://learn.microsoft.com/en-us/azure/virtual-machines/auto-shutdown-vm)
 
 ## Provisioning privileges
 
@@ -96,12 +95,12 @@ Use separate protected identities and temporary grants. Centralized Reader acces
 
 | Scope and duty | Minimum working authority to verify |
 | --- | --- |
-| S2/S3 subscription and approved RGs | Resource group read/create at subscription scope for initial RGs, or have the owner create the exact groups and import them with review. Use Contributor on the workload and operations RGs for Compute, Network, Web/FC1, Insights, OperationalInsights, private DNS, Storage, Key Vault and user-assigned identity resources. Exclude storage `listKeys` and key regeneration in the provisioning identity and use separate limited identity-assignment authority for the exact UAMIs. Retain access to required network subnet joins. Use only approved Managed Run Command scripts with one-time scoped authority. |
+| S2/S3 subscription and approved RGs | Resource group read/create at subscription scope for initial RGs, or have the owner create the exact groups and import them with review. Use Contributor on the workload and operations RGs for Compute, Network, DevTestLab schedules, private DNS, Storage, Key Vault and user-assigned identity resources. Exclude storage `listKeys` and key regeneration in the provisioning identity and use separate limited identity-assignment authority for the exact UAMIs. Retain access to required network subnet joins. Use only approved Managed Run Command scripts with one-time scoped authority. |
 | Azure Policy and RBAC | Use temporary Resource Policy Contributor or equivalent reviewed policy definition and RG assignment actions. Subscription custom role definitions need `Microsoft.Authorization/roleDefinitions/read,write` at the definition scope. Separate role assignment write/delete at exact RG/resource or S4 container scopes, constrained to reviewed roles and principal IDs where possible. If needed, the owning operator performs these narrow steps using the existing Owner authority and retires temporary grants. |
 | S4 | Manage the dedicated shared RG and three storage accounts. Keep provider registration explicit. Require budget permissions at subscription scope. Cross-subscription service-endpoint rules may also require subnet join authorization on the source VNet. Scope state Blob Data Contributor to each independent slot container, backup contributor to `recovery`, receipt reader to `canonical-releases`. Verify whether the Terraform version uses ARM or Blob data operations for each storage resource. If bootstrap principal data-plane access is needed, grant it on the exact new account temporarily before rerunning the affected plan. |
 | Budgets | Subscription-level `Microsoft.Consumption/budgets/read,write` and read access to the relevant Cost Management data. Verify offer support, recipient delivery and usage in a separately authorized task. |
 
-Use a separate time-limited Function resource grant for package administration. The per-slot Function UAMI needs Blob Data Owner only on its own controller account for the host containers and leases. The S2 controller separately reads S4 receipts. CI application delivery uses controller HTTPS without ARM or Terraform write permissions. If the receipt publisher needs subscription discovery with `azure/login`, verify the data-only login path first and review the minimum discovery permissions separately. Use an approved stable egress path for its S4 receipt connection.
+Keep temporary infrastructure/bootstrap guest execution separate from routine delivery. For delivery, the custom role grants only `Microsoft.Compute/virtualMachines/read` and `Microsoft.Compute/virtualMachines/runCommand/action` on the exact App VM. Action Run Command is elevated guest execution, including scripts other than the installed delivery command if a principal holds that permission. Protect the exact GitHub workflow and its Environment and verify effective denials for wrong workflow/ref, start, deallocate, Judge, role assignment and S4 state. The VM agent needs outbound HTTPS to Azure. The S4 publisher and App receipt reader have separate Blob scopes. [Azure Action Run Command](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command) · [Azure Compute RBAC actions](https://learn.microsoft.com/en-us/azure/role-based-access-control/permissions/compute)
 
 ## Task 2.2 first-time S4 bootstrap
 
@@ -172,29 +171,74 @@ Verify each assignment using the actual distinct state principals and stable net
 
 ## S2/S3 VM maintenance
 
-Keep `compute.enabled = true` for provisioned VMs in the managed configuration. Ordinary shutdown uses controller cancellation or expiry, or the separate pair-scoped emergency deallocate-only command. Confirm both instance views show `PowerState/deallocated`. Keep the App data disk, NICs and public IPs in state and leave the controller able to enforce its deadline.
+Configure `operations.earliest_start` and `operations.shutdown` from the recorded owner approval in UTC, with at least 12 hours off and a shutdown delay margin. No Azure auto-start. Verify that exact native schedules are enabled for both nodes, record measured deallocation times and wait for the minimum off interval before the next start. After a fresh owner approval for a window change, use a reviewed schedule-only plan while compute is closed and align the protected App host window configuration before startup.
 
-Create the network, disk, controller, package and alerts in reviewed plans before VM creation. For compute apply use `infra/azure/environment/reviewed-apply.py` in the protected operator context. Plan and apply in the same initialized state scope. Set Entra CLI auth, stable approved credentials and the default workspace. Keep all backend metadata, variables, plan and approval files in the protected location. Restrict Azure write access to the operation window and authorize saved plans through the operator review procedure.
+Plan VM creation, replacement or recovery from the same checked, initialized Terraform scope. For power-on plans set `compute.startup` to the exact pair, short UTC expiry and approval reference. The protected approval JSON binds `plan_sha256`, `target` from `plan_target`, `backend_account`, `operation`, `role` for single-VM actions, `expires_at`, `approval_ref`, `startup_approval_ref` and `window_ref`. Initial creation needs no prior off-time record. All existing VMs must be observed deallocated before a power-on plan.
 
-- A maintenance plan omits `compute.startup` and may reconcile deallocated VMs as existing resources. Any VM update that could power on or change identity requires review. The current runner allows changes outside the VM resource and rejects direct VM updates, so use an approved replacement for a supported VM change. The VM and attachment `prevent_destroy` guards reject turning the topology flag off after creation.
-- For creation or replacement set `compute.startup` with the exact controller ID, pair, approval reference and near-term UTC deadline. Review the saved plan. For S3 obtain the protected immutable experiment reference and deadline. For S2 use a protected native-reviewed `start` request with `terraformPlan` containing exact saved plan `sha256`, `operation` (`create` or `replace`), `role` (null for create), and `expiresAt` equal to the startup deadline. The request ID is the startup approval reference. The window allows Terraform's external VM power effect, keeps workload leases closed and emits only cleanup power actions. Start and deploy after normal deallocation with separate approvals.
-- For one approved replacement, from an isolated reviewed copy of `infra/azure` add an override file containing `resource "azurerm_linux_virtual_machine" "node" { lifecycle { prevent_destroy = false } }` as a multi-line block. For App only, similarly override `azurerm_virtual_machine_data_disk_attachment.app`, leaving the separate managed disk guard in place. Use `terraform plan -replace='azurerm_linux_virtual_machine.node["app"]' -replace='azurerm_virtual_machine_data_disk_attachment.app[0]' -out=...` for App, or the single Judge address for Judge. Require deallocation of both nodes, sealed work, current off-window and cleanup evidence, protected disk recovery point and cloud operator review. Verify one delete-before-create, the same name, size, NIC, IP, and the same App disk at LUN 0. Reattach as-is and verify the UUID and acceptance before admitting workloads. Remove the override and confirm a new plan without the override is clean. If replacement fails, keep cleanup active and reconcile the real state before requesting approval for the recovery plan. Do not add temporary VMs or IPv4s under the current quotas.
-- The protected approval JSON has `plan_sha256`, `target` copied from the plan's `plan_target`, `backend_account`, `operation` (including `maintenance`), `role` for replacement, `expires_at` and `approval_ref`. A power-on plan also has `startup_approval_ref` and `controller_grant`. Copy the S2 result from the approved run. For S3 supply the protected controller experiment's `approvalRef` and `deadline`. Confirm the evidence independently, the controllers and alerts are healthy, and both instance views match the expected scope before signing off the plan. Run `python3 infra/azure/environment/reviewed-apply.py --root "$REVIEWED_ROOT" --check "$SAVED_PLAN" "$APPROVAL_JSON"`, then the same command without `--check` only after authorization. The runner checks the plan again and uses the same privately copied bytes. Keep the sunset for temporary Azure write access.
+For one replacement, use an isolated reviewed root with an override allowing replacement of `azurerm_linux_virtual_machine.node` and, for App only, `azurerm_virtual_machine_data_disk_attachment.app`. Leave `azurerm_managed_disk.app` protected. Save a plan with `-replace='azurerm_linux_virtual_machine.node["app"]'` plus `-replace='azurerm_virtual_machine_data_disk_attachment.app[0]'` for App, or use only the Judge VM address for Judge. Verify one delete-before-create, same size, names, NIC/IP and original disk at LUN 0. Remove the override after the apply and check the clean plan. After a failed replace, reconcile the actual Azure inventory and Terraform state, verify the surviving VM is deallocated and the native schedules remain enabled, and review a new `recover` plan with the exact absent role. Keep original NIC/IP and disk in state. Use no spare VM or IP. Verify App's actual LUN and UUID before workloads or testers return. If schedule, disk or state evidence is missing, stop for protected infrastructure recovery before resuming.
 
-For actual create or replacement, stream a fresh controller-scoped token from the approved API client into the runner's standard input. The runner uses a separate Azure CLI profile for the infrastructure scope. A cancelled S2 window, stale heartbeat, changed plan, expired approval or inactive S3 experiment blocks the apply. An S3 replacement also needs the bounded external recovery window. The example below requires an approved CLI context capable of obtaining an access token for the controller API. Use the approved delegated client instead if tenant policy grants the scope only to that client.
+Use the deallocate-only emergency profile when an early or scheduled stop leaves either state uncertain. The script checks both Azure instance views and exits nonzero unless both are deallocated.
+
+```bash
+AZURE_CONFIG_DIR="$EMERGENCY_CLI" python3 infra/azure/lifecycle/emergency.py \
+  --slot s3 --subscription "$S3_SUB"
+```
+
+## S3 provision and deploy
+
+Run only following Task 2.1 clearance and separate authorization. Set the protected S3 CLI profile and verify its subscription and tenant. Keep the reviewed S3 variables, plans and approval files in a private operator directory. `S3_PREP_VARS` has compute disabled. `S3_COMPUTE_VARS` binds the approved compute window, pinned image, operator public key and App disk filesystem UUID. Configure the S3 environment and repository workflow in the separately authorized registration step before live automated delivery. S4 bootstrap must already be verified. [Release workflow registration](../../scripts/release/README.md#separately-reviewed-default-branch-transition)
 
 ```bash
 set -euo pipefail
 set +x
-: "${CONTROLLER_CLIENT_CONTEXT:?}" "${PROVISIONER_CONTEXT:?}" "${CONTROLLER_AUDIENCE:?}"
-AZURE_CONFIG_DIR="$CONTROLLER_CLIENT_CONTEXT" az account get-access-token \
-  --resource "$CONTROLLER_AUDIENCE" --query accessToken -o tsv |
-  AZURE_CONFIG_DIR="$PROVISIONER_CONTEXT" python3 infra/azure/environment/reviewed-apply.py \
-    --root "$REVIEWED_ROOT" "$SAVED_PLAN" "$APPROVAL_JSON"
+export AZURE_CONFIG_DIR="$S3_CLI" TF_DATA_DIR="$S3_PRIVATE/terraform-data"
+test "$(az account show --query id -o tsv)" = "$S3_SUB"
+test "$(az account show --query tenantId -o tsv)" = "$TENANT_A"
+s3root="$PWD/infra/azure/environment"
+terraform -chdir="$s3root" init -input=false -lockfile=readonly \
+  -backend-config="storage_account_name=$S4_STATE_ACCOUNT" \
+  -backend-config="container_name=s3-tfstate" -backend-config="key=terraform.tfstate" \
+  -backend-config="tenant_id=$TENANT_A" -backend-config="use_cli=true"
+terraform -chdir="$s3root" plan -input=false -var-file="$S3_PREP_VARS" -out="$S3_PRIVATE/prep.tfplan"
+terraform -chdir="$s3root" show -no-color "$S3_PRIVATE/prep.tfplan" > "$S3_PRIVATE/prep.review"
+sha256sum "$S3_PRIVATE/prep.tfplan"
+# After recording approval of the exact maintenance plan:
+python3 "$s3root/reviewed-apply.py" --check "$S3_PRIVATE/prep.tfplan" "$S3_PREP_APPROVAL"
+python3 "$s3root/reviewed-apply.py" "$S3_PRIVATE/prep.tfplan" "$S3_PREP_APPROVAL"
+
+terraform -chdir="$s3root" plan -input=false -var-file="$S3_COMPUTE_VARS" -out="$S3_PRIVATE/compute.tfplan"
+terraform -chdir="$s3root" show -no-color "$S3_PRIVATE/compute.tfplan" > "$S3_PRIVATE/compute.review"
+sha256sum "$S3_PRIVATE/compute.tfplan"
+# After fresh owner approval of the exact compute plan within its active window:
+python3 "$s3root/reviewed-apply.py" --check "$S3_PRIVATE/compute.tfplan" "$S3_COMPUTE_APPROVAL"
+python3 "$s3root/reviewed-apply.py" "$S3_PRIVATE/compute.tfplan" "$S3_COMPUTE_APPROVAL"
+terraform -chdir="$s3root" output -json vm_ids > "$S3_PRIVATE/vm-ids.json"
+APP_ID=$(jq -er .app "$S3_PRIVATE/vm-ids.json")
+JUDGE_ID=$(jq -er .judge "$S3_PRIVATE/vm-ids.json")
+az vm get-instance-view --ids "$APP_ID" --query "instanceView.statuses[?starts_with(code,'PowerState/')].code" -o tsv
+az vm get-instance-view --ids "$JUDGE_ID" --query "instanceView.statuses[?starts_with(code,'PowerState/')].code" -o tsv
 ```
+
+The initial App mount fails closed until the authorized operator initializes the new blank LUN 0 as ext4 with the previously approved UUID. Verify the target disk and blank state before formatting. Never format a retained disk. Complete protected host bootstrap, per-role credentials, backing services and installation of the exact reviewed rehearsal receipts under the [activation procedure](lifecycle/README.md#host-configuration-and-authority). Run the App mount check and `/usr/local/bin/k3s kubectl get nodes` through the approved private guest path. Keep workload admission closed until that verification and the separate deployment approval. On subsequent windows, verify both states and off-time before `az vm start --ids "$APP_ID" "$JUDGE_ID"`.
+
+After actual readiness, set `WINDOW_APPROVAL` to the recorded current owner approval reference. Send only this non-secret reference and UTC date through Azure Action Run Command. Initialize the journal only on the first new S3 setup. The routine workflow must remain disabled until the scoped role, federation and other live gates pass.
+
+```bash
+# Initial setup only, on the verified new App data disk:
+az vm run-command invoke --ids "$APP_ID" --command-id RunShellScript \
+  --scripts '/usr/bin/python3 -B /usr/local/libexec/astra/app/host_services.py delivery initialize' -o json
+window_payload=$(jq -cn --arg approval "$WINDOW_APPROVAL" --arg date "$(date -u +%F)" \
+  '{approval:$approval,date:$date}' | base64 -w0)
+az vm run-command invoke --ids "$APP_ID" --command-id RunShellScript \
+  --scripts "/usr/bin/python3 -B /usr/local/libexec/astra/app/host_services.py delivery open $window_payload" -o json
+jq -ce '{slot:"s3",action:"deploy",source,digest:.bundle,fallback_source:.source,fallback:.bundle}' \
+  "$S3_REHEARSAL_RECEIPT" > "$S3_PRIVATE/deployment.json"
+gh workflow run staging-deploy.yml --repo nvawntien/astracode --ref main \
+  -f "request=$(cat "$S3_PRIVATE/deployment.json")"
+```
+
+The maintainer reviews the frozen request in `s3-delivery`. Record the precise run ID, then use `gh run watch "$S3_DEPLOY_RUN" --repo nvawntien/astracode --exit-status` and confirm the staged release and smoke artifact. Stop at a missing mount, native schedule, protected transport or observed release mismatch and keep tester access closed. Verify standby and emergency shutdown using the scoped profile.
 
 ## Environment retirement
 
-For S2 during the 14–21 day submission horizon, schedule only needed 2–4 hour planning windows with separate approved sessions and keep at least the existing daily 12-hour off window. Track actual credit and cost, investigate standing charges during off-hours and verify notifications. Agree the end date before provisioning. After submission or the final demo, close tester access, deallocate both nodes, take approved data recovery snapshots or backups, verify recovery metadata and retain required state and receipts in S4. Review an exact S2 retirement plan for network, disks, controller, monitoring and credentials with the owner. Confirm last bills and retained inventory. S1 and S5 remain inactive for M0-13.
-
-For the S3 workload benchmark, rollback and recovery drills, use the [managed activation runbook](lifecycle/README.md#s3-pre-merge-rehearsal-and-cleanup).
+Close tester access before an early stop with the protected App guest command `host_services.py delivery close`. Observe the drain and deallocate both VMs. Retain the required data, state and receipts. Budget credits and expenses can continue while VMs are off. Review any disk, network, schedule or other resource removal separately after measuring final inventory and cost.

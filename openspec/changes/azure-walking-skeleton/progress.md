@@ -4,20 +4,21 @@
 
 ## Verified state
 
-- Branch — `feature/azure-walking-skeleton`. The reviewed implementation revision is `8db87e1`. Hosted CI and OpenSpec passed on that PR revision. The exact-head S3 rehearsal check was skipped. [Verification evidence](../../../docs/evidence/m0-13-phase-a.md#source-and-scope)
-- Progress — 7 of 15 tasks. The change-specific two-stage Gate 2 sequence and Phase A authorization are recorded separately from implementation and cloud acceptance. [Gate 1 Round 2](review-gate1-round2.md)
-- Documentation review scope — ADR-0012 acceptance recorded. ADR-0013 remains Proposed. The 36 ED scenarios have individual evidence rows. Runtime tests rely on the recorded implementation runs. [Scenario verification](../../../docs/evidence/m0-13-phase-a.md#scenario-verification)
+- Branch / worktree — `feature/azure-walking-skeleton`, [PR #73](https://github.com/nvawntien/astracode/pull/73).
+- Last verify run — `make test`, `make test-db`, strict OpenSpec (11), `actionlint` and shell checks passed.
+- Tasks done — 7/15, Phase A. Provider mocks (10 environment, 3 S4), reviewed apply (6), cloud-init schema/systemd/nft, strict overlays and native admission passed. App activation and smoke (22), PostgreSQL writer-fence and release policy/delivery (10) and package tests passed. [Reproduction and results](../../../docs/evidence/m0-13-phase-a.md#simplified-candidate-offline-verification)
 
 ## Last session
 
-- Recorded the Orchestrator's acceptance in [ADR-0012](../../../docs/architecture/adr/0012-judge-executor-trust-boundary.md) after review of `d1cfa4bd464fd189b4dd7da6f2da3d6d2ed7cc60`. The original Phase A approval remains linked there.
+- Replaced controller-owned startup and custom authentication with manual owner-approved startup, native shutdown and separately approved automated delivery. The App journal preserves release, migration, permit and recovery fencing. [Proposed ADR-0013](../../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
+- Initial VM creation without off-time history and single missing-VM recovery passed offline, including wrong-plan, wrong-disk and wrong-NIC refusal. S3 must confirm the real ARM and native schedule behavior.
 
 ## Broken or unverified
 
-- The privileged Judge workload, launch-gate trust assumptions and S3/S2 exposure follow Accepted ADR-0012 and still require real S3 isolation evidence.
-- The protected controller API, App poller, S2 controller-owned power, S3 recovery and independent cleanup, and workflow identity integration depend on Proposed ADR-0013. Tenant A directory support, actual federation and receipt access, billing and hosting feasibility remain unverified. Task 2.1 stays open.
-- The two outstanding lifecycle review findings remain separate and open. Their disposition requires implementation review, not this documentation change.
+- Independent ADR and product review, Task 2.1, actual Azure native schedule eligibility, App-only Run Command and GitHub federation denials, GHCR and S4 access, and actual cloud costs are pending.
+- S3 still needs separately authorized workflow registration, isolated deployment and the actual ADR-0012 sandbox and lifecycle drills. No S3/S2 acceptance has been claimed.
 
 ## Next action
 
-- Independent ADR-only documentation review under [workflow §10](../../../docs/process/workflow.md#10-adrs). The accepted ADR-0004 and historical review records remain intact. Return to Phase B only under separate authorization and the recorded prerequisites.
+- Next task — Task 2.1 following separate authorization. Use the [S4 bootstrap](../../../infra/azure/README.md#task-22-first-time-s4-bootstrap) and [S3 provision and deploy](../../../infra/azure/README.md#s3-provision-and-deploy) procedures when approved.
+- Azure operations, IAM changes, workflow activation and merging require separate authorization.

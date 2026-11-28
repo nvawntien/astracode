@@ -9,7 +9,7 @@ from node_state import RecoveryRequired
 def activate(
     state, request, release, effects, *, clock=lambda: datetime.now(timezone.utc)
 ):
-    # effects supplies the bounded host operations and the controller's
+    # effects supplies the bounded host operations and the App service's
     # conditional record writes. The record must precede the first mutation.
     def check():
         now = clock()

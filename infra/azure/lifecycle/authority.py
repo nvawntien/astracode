@@ -1,4 +1,4 @@
-"""App-side fixed activation authority. Read signed operations through the authenticated controller client."""
+"""App-side fixed activation authority. Read boot-bound operations from the protected local record."""
 
 import threading
 
@@ -8,8 +8,8 @@ from permits import qualified_image
 
 
 class Authority:
-    def __init__(self, controller, catalog, migration, slot, platform):
-        self.control, self.catalog, self.migration = controller, catalog, migration
+    def __init__(self, activation, catalog, migration, slot, platform):
+        self.control, self.catalog, self.migration = activation, catalog, migration
         self.clients = {
             r: Cluster(r, platform / "activation.kubeconfig") for r in ("app", "judge")
         }
@@ -53,7 +53,7 @@ class Authority:
             self._refresh(request)
 
     def _refresh(self, request):
-        # Require a fresh controller lease after any change to the local step,
+        # Require a fresh local authorization after any change to the local step,
         # and compare the current immutable operation binding on each renewal.
         snapshot = self.control.authorization(request)
         if (
@@ -141,7 +141,7 @@ class Authority:
                             self.control.require_recovery(failed)
                         except Exception:
                             # Short-lived grants still expire locally when the
-                            # controller cannot durably record this failure.
+                            # activation service cannot durably record this failure.
                             pass
 
     def running_digests(self, request, role):
@@ -239,7 +239,7 @@ class Authority:
             and proof.get("uid") == state["submission_uid"]
         ):
             return True
-        if request["environment"] == "s3" and request["action"] == "deploy":
+        if request["action"] == "deploy":
             if proof.get("sealed_recovery") and not state["in_flight"]:
                 return proof.get("boot") == view["boot_id"]
         # A service restart alone does not fence a runtime shim. A verified

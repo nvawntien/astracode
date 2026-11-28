@@ -22,7 +22,7 @@ def observe(app, judge):
     return report
 
 
-def finish(controller, settings, kubeconfig, status):
+def finish(activation, settings, kubeconfig, status):
     app = Cluster("app", kubeconfig)
     judge = Cluster("judge", kubeconfig)
     judge.scale("judge-worker", 0)
@@ -66,7 +66,7 @@ def finish(controller, settings, kubeconfig, status):
         timeout=10,
         stderr=subprocess.DEVNULL,
     )
-    controller.call(
+    activation.call(
         "drained",
         generation=status["generation"],
         epoch=left["epoch"],

@@ -37,7 +37,7 @@ def sign(binding, expires, issuer_key):
     now = datetime.now(timezone.utc)
     until = min(expires, now + timedelta(seconds=20))
     if until <= now:
-        raise RecoveryRequired("expired controller authorization")
+        raise RecoveryRequired("expired activation authorization")
     payload = json.dumps(
         dict(binding, issued=now.isoformat(), expires=until.isoformat()),
         sort_keys=True,

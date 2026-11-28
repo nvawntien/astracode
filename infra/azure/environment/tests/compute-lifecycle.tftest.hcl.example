@@ -1,16 +1,10 @@
 # Provider-mocked existing compute with valid synthetic resource IDs.
 variable "approved_subscription_ids" {}
-variable "controller" {}
+variable "operations" {}
 variable "network" {}
 variable "target" {}
 
 mock_provider "azurerm" {
-  mock_resource "azurerm_storage_account" {
-    defaults = {
-      id                    = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Storage/storageAccounts/astras2mockcontroller"
-      primary_blob_endpoint = "https://astras2mockcontroller.blob.core.windows.net/"
-    }
-  }
   mock_resource "azurerm_virtual_network" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/virtualNetworks/astra-s2-vnet"
@@ -29,16 +23,6 @@ mock_provider "azurerm" {
   mock_resource "azurerm_subnet" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/virtualNetworks/astra-s2-vnet/subnets/fixture"
-    }
-  }
-  mock_resource "azurerm_log_analytics_workspace" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.OperationalInsights/workspaces/fixture"
-    }
-  }
-  mock_resource "azurerm_service_plan" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Web/serverFarms/fixture"
     }
   }
   mock_resource "azurerm_network_security_group" {
@@ -60,22 +44,6 @@ mock_provider "azurerm" {
     defaults = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.ManagedIdentity/userAssignedIdentities/fixture"
       principal_id = "00000000-0000-4000-8000-000000000009"
-    }
-  }
-  mock_resource "azurerm_nat_gateway" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Network/natGateways/fixture"
-    }
-  }
-  mock_resource "azurerm_monitor_action_group" {
-    defaults = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Insights/actionGroups/fixture"
-    }
-  }
-  mock_resource "azurerm_application_insights" {
-    defaults = {
-      id                = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Insights/components/fixture"
-      connection_string = "InstrumentationKey=00000000-0000-4000-8000-000000000009"
     }
   }
   mock_resource "azurerm_linux_virtual_machine" {
@@ -115,7 +83,6 @@ run "seed_existing_compute" {
   command = apply
 
   variables {
-    controller = merge(var.controller, { armed = true })
     compute = {
       enabled        = true
       app_data_uuid  = "00000000-0000-4000-8000-000000000001"
@@ -128,7 +95,6 @@ run "seed_existing_compute" {
       }
       startup = {
         approval_ref  = "synthetic-approval"
-        controller_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2-ops/providers/Microsoft.Web/sites/astras2mock-controller"
         target_vm_ids = [
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
@@ -142,7 +108,6 @@ run "seed_existing_compute" {
 run "reconcile_existing_pair_without_startup_approval" {
   command = plan
   variables {
-    controller = merge(var.controller, { armed = true })
     compute = {
       enabled        = true
       app_data_uuid  = "00000000-0000-4000-8000-000000000001"
@@ -165,7 +130,6 @@ run "reject_expired_saved_startup_inputs" {
   command = plan
 
   variables {
-    controller = merge(var.controller, { armed = true })
     compute = {
       enabled        = true
       app_data_uuid  = "00000000-0000-4000-8000-000000000001"
@@ -178,7 +142,6 @@ run "reject_expired_saved_startup_inputs" {
       }
       startup = {
         approval_ref  = "synthetic-approval"
-        controller_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2-ops/providers/Microsoft.Web/sites/astras2mock-controller"
         target_vm_ids = [
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
@@ -194,7 +157,6 @@ run "reject_expired_saved_startup_inputs" {
 run "forbid_compute_flag_shutdown" {
   command = plan
   variables {
-    controller = merge(var.controller, { armed = true })
     compute    = {}
   }
 }

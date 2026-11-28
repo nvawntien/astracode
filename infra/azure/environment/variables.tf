@@ -70,7 +70,6 @@ variable "compute" {
     }))
     startup = optional(object({
       approval_ref  = string
-      controller_id = string
       target_vm_ids = set(string)
       expires_at    = string
     }))
@@ -86,24 +85,35 @@ variable "compute" {
   }
 }
 
-variable "controller" {
-  description = "Non-secret settings for the Flex Consumption controller and its independent monitor."
+variable "operations" {
+  description = "Owner-approved daily shutdown and identities for independent operations."
   type = object({
-    api_client_id       = string
-    caller_client_ids   = set(string)
-    alert_email         = string
-    emergency_object_id = string
-    armed               = optional(bool, false)
-    policy_json         = optional(string, "{}")
+    approved           = string
+    earliest_start     = string
+    shutdown           = string
+    alert_email        = string
+    emergency_id       = string
+    deployment_subject = optional(string)
+    deployment_active  = optional(bool, false)
   })
 
   validation {
-    condition = (
-      can(regex("^[0-9a-fA-F-]{36}$", var.controller.api_client_id)) &&
-      length(var.controller.caller_client_ids) > 0 &&
-      can(regex("^[^@ ]+@[^@ ]+$", var.controller.alert_email))
+    condition = try(
+      trimspace(var.operations.approved) != "" &&
+      can(regex("^([01][0-9]|2[0-3])[0-5][0-9]$", var.operations.earliest_start)) &&
+      can(regex("^([01][0-9]|2[0-3])[0-5][0-9]$", var.operations.shutdown)) &&
+      timecmp(
+        "2000-01-01T${substr(var.operations.shutdown, 0, 2)}:${substr(var.operations.shutdown, 2, 2)}:00Z",
+        "2000-01-01T${substr(var.operations.earliest_start, 0, 2)}:${substr(var.operations.earliest_start, 2, 2)}:00Z"
+      ) > 0 &&
+      timecmp(
+        "2000-01-01T${substr(var.operations.shutdown, 0, 2)}:${substr(var.operations.shutdown, 2, 2)}:00Z",
+        timeadd("2000-01-01T${substr(var.operations.earliest_start, 0, 2)}:${substr(var.operations.earliest_start, 2, 2)}:00Z", "11h30m")
+      ) <= 0 &&
+      can(regex("^[^@ ]+@[^@ ]+$", var.operations.alert_email)),
+      false
     )
-    error_message = "Set the controller's Entra API client ID, allowed calling applications and alert recipient."
+    error_message = "Set an approved same-day UTC window up to 11h30m, leaving a 30-minute margin above the 12-hour off-time floor."
   }
 }
 

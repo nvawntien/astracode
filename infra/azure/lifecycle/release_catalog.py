@@ -1,4 +1,4 @@
-"""Read digest-bound OCI release metadata returned by the protected controller."""
+"""Read digest-bound OCI release metadata returned by the protected App operation."""
 
 import base64
 import hashlib
@@ -25,8 +25,8 @@ def digest(data):
 
 
 class Catalog:
-    def __init__(self, controller, approved_executor):
-        self.control = controller
+    def __init__(self, activation, approved_executor):
+        self.control = activation
         if not DIGEST.fullmatch(approved_executor):
             raise ValueError("platform executor digest required")
         self.approved_executor = approved_executor
@@ -35,7 +35,7 @@ class Catalog:
     def verified_bundle(self, requested, slot):
         if slot not in {"s2", "s3"} or not DIGEST.fullmatch(requested):
             raise RecoveryRequired("invalid release target")
-        # A release ID is resolved only by the controller within the approved
+        # A release ID is resolved only by the activation service within the approved
         # operation. Independent hash checks bind the decoded bytes to that ID.
         key = (self.control.operation, requested, slot)
         if key in self.cache:
@@ -107,3 +107,60 @@ def unpack_migrations(release, root):
         ):
             raise RecoveryRequired("unrecognized migration package path")
         (root / name).write_bytes(base64.b64decode(value, validate=True))
+
+
+class ReceiptCatalog:
+    """Read an immutable receipt in the exact environment and verify its provenance."""
+
+    def __init__(self, settings, slot, token):
+        self.settings, self.slot, self.token = settings, slot, token
+        self.cache = {}
+
+    def record(self, requested, source):
+        from policy import SHA, verify_record
+        from transport import Blob
+
+        if not DIGEST.fullmatch(requested) or not SHA.fullmatch(source):
+            raise RecoveryRequired("invalid digest or source")
+        key = (requested, source)
+        if key in self.cache:
+            return self.cache[key]
+        if self.slot == "s2":
+            blob = Blob(
+                self.settings["receipt_account"],
+                "canonical-releases",
+                lambda: self.token(
+                    self.settings["receipt_client_id"], "https://storage.azure.com/"
+                ),
+            )
+            raw = blob.read(source + ".json")
+            kind = "canonical"
+        else:
+            if self.settings["rehearsal_sources"].get(requested) != source:
+                raise RecoveryRequired("release outside the protected S3 experiment")
+            path = Path("/etc/astracode/rehearsal") / (requested[7:] + ".json")
+            with path.open("rb") as receipt:
+                raw = receipt.read(4 * 1024 * 1024 + 1)
+            kind = "rehearsal"
+        if not raw or len(raw) > 4 * 1024 * 1024:
+            raise RecoveryRequired("missing or oversized immutable receipt")
+        record = json.loads(raw)
+        if (
+            record["bundle"] != requested
+            or verify_record(record, source)["kind"] != kind
+        ):
+            raise RecoveryRequired("immutable receipt differs from approved release")
+        if len(self.cache) >= 4:
+            self.cache.clear()
+        self.cache[key] = record
+        return record
+
+    def load(self, requested, source):
+        return dict(
+            json.loads(
+                base64.b64decode(
+                    self.record(requested, source)["payload"], validate=True
+                )
+            ),
+            digest=requested,
+        )

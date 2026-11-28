@@ -1,7 +1,7 @@
 locals {
-  subnet_names = ["app", "judge", "controller", "private-endpoints"]
-  subnet_cidrs = { for index, name in local.subnet_names : name => cidrsubnet(var.network.vnet_cidr, 3, index) }
-  node_ips     = { for role in keys(local.vm_names) : role => cidrhost(local.subnet_cidrs[role], 4) }
+  subnet_indices = { app = 0, judge = 1, private-endpoints = 3 }
+  subnet_cidrs   = { for name, index in local.subnet_indices : name => cidrsubnet(var.network.vnet_cidr, 3, index) }
+  node_ips       = { for role in keys(local.vm_names) : role => cidrhost(local.subnet_cidrs[role], 4) }
 
   common_egress = [
     { name = "DNS-UDP", protocol = "Udp", port = "53", prefixes = ["AzurePlatformDNS"] },
@@ -47,18 +47,7 @@ resource "azurerm_subnet" "network" {
   virtual_network_name            = azurerm_virtual_network.environment.name
   address_prefixes                = [each.value]
   default_outbound_access_enabled = false
-  service_endpoints               = each.key == "controller" ? ["Microsoft.Storage.Global"] : []
-
-  dynamic "delegation" {
-    for_each = each.key == "controller" ? [true] : []
-    content {
-      name = "flex-consumption"
-      service_delegation {
-        name    = "Microsoft.App/environments"
-        actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
-      }
-    }
-  }
+  service_endpoints               = each.key == "app" && var.target.slot == "S2" ? ["Microsoft.Storage.Global"] : []
 }
 
 resource "azurerm_network_security_group" "node" {
@@ -147,33 +136,4 @@ resource "azurerm_network_interface" "node" {
     private_ip_address            = local.node_ips[each.key]
     public_ip_address_id          = azurerm_public_ip.node[each.key].id
   }
-}
-
-# Flex Consumption sends outbound traffic through the delegated subnet.
-resource "azurerm_public_ip" "controller" {
-  name                = "${local.name}-controller-egress"
-  resource_group_name = azurerm_resource_group.operations.name
-  location            = azurerm_resource_group.operations.location
-  allocation_method   = "Static"
-  sku                 = "Standard"
-  ip_version          = "IPv4"
-}
-
-resource "azurerm_nat_gateway" "controller" {
-  name                = "${local.name}-controller-egress"
-  resource_group_name = azurerm_resource_group.operations.name
-  location            = azurerm_resource_group.operations.location
-  sku_name            = "Standard"
-}
-
-resource "azurerm_nat_gateway_public_ip_association" "controller" {
-  nat_gateway_id       = azurerm_nat_gateway.controller.id
-  public_ip_address_id = azurerm_public_ip.controller.id
-}
-
-resource "azurerm_subnet_nat_gateway_association" "controller" {
-  subnet_id      = azurerm_subnet.network["controller"].id
-  nat_gateway_id = azurerm_nat_gateway.controller.id
-
-  depends_on = [azurerm_nat_gateway_public_ip_association.controller]
 }

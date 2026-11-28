@@ -3,8 +3,6 @@ locals {
   subscription_scope = "/subscriptions/${lower(var.target.subscription_id)}"
   vm_names           = { for role in ["app", "judge"] : role => "${local.name}-${role}" }
   vm_ids             = { for role, name in local.vm_names : role => "${local.subscription_scope}/resourceGroups/${local.name}/providers/Microsoft.Compute/virtualMachines/${name}" }
-  controller_name    = "${var.target.storage_prefix}-controller"
-  controller_id      = "${local.subscription_scope}/resourceGroups/${local.name}-ops/providers/Microsoft.Web/sites/${local.controller_name}"
 
   state_target = {
     slot            = var.target.slot
@@ -104,20 +102,20 @@ output "plan_target" {
 }
 
 output "vm_ids" {
-  description = "Exact precomputable names for the controller to arm before VM creation."
+  description = "Exact precomputable names for approved scheduling and observed power-state checks."
   value       = local.vm_ids
 }
 
-output "controller_id" {
-  value = azurerm_function_app_flex_consumption.controller.id
+
+output "app_subnet_id" {
+  description = "App source subnet for the separately scoped S4 receipt firewall."
+  value       = azurerm_subnet.network["app"].id
 }
 
-output "controller_principal_id" {
-  description = "Use this principal for the separate S4 canonical receipt reader scope if authorized."
-  value       = azurerm_user_assigned_identity.runtime["controller"].principal_id
+output "receipt_reader_principal_id" {
+  value = azurerm_user_assigned_identity.runtime["app-receipts"].principal_id
 }
 
-output "controller_subnet_id" {
-  description = "Source subnet for the separate S4 receipt firewall after tenant/network preflight."
-  value       = azurerm_subnet.network["controller"].id
+output "deployment_client_id" {
+  value = try(azurerm_user_assigned_identity.delivery[0].client_id, null)
 }

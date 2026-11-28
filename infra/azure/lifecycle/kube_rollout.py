@@ -216,7 +216,7 @@ class Issuer:
         self.clients, self.key, self.slot = clients, issuer_key, slot
 
     def refresh(self, approval, now=None):
-        """Input is the verified controller lease narrowed by the current rollout step."""
+        """Input is the verified activation lease narrowed by the current rollout step."""
         now = now or datetime.now(timezone.utc)
         expires = min(approval["until"], now + timedelta(seconds=20))
         try:

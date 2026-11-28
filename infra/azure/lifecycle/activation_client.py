@@ -1,60 +1,24 @@
-"""Fixed App-to-controller operations. Tokens come from the trusted host service."""
+"""Fixed Unix-socket access to the App activation service."""
 
 from datetime import datetime
-import http.client
-import json
-import ssl
-from urllib.parse import urlsplit
 import uuid
 
+import local_rpc
 
-class Controller:
-    def __init__(self, endpoint, token):
-        target = urlsplit(endpoint)
-        if (
-            target.scheme != "https"
-            or not target.hostname
-            or target.username
-            or target.password
-            or target.netloc != target.hostname
-            or target.path not in ("", "/")
-            or target.query
-            or target.fragment
-        ):
-            raise ValueError("invalid protected controller endpoint")
-        self.host = target.hostname
-        self.token = token
+
+class ActivationClient:
+    def __init__(self, socket_path):
+        self.socket_path = socket_path
         self.operation = None
 
     def call(self, action, **payload):
-        conn = http.client.HTTPSConnection(
-            self.host, timeout=5, context=ssl.create_default_context()
-        )
-        try:
-            conn.request(
-                "POST",
-                "/api/v1/app/" + action,
-                json.dumps(payload, default=encode),
-                {
-                    "Content-Type": "application/json",
-                    "Authorization": "Bearer " + self.token(),
-                },
-            )
-            reply = conn.getresponse()
-            if reply.status != 200:
-                raise RuntimeError(f"controller refused {action} (HTTP {reply.status})")
-            raw = reply.read(524289)
-            if len(raw) > 524288:
-                raise ValueError("oversize controller response")
-            return json.loads(raw)
-        finally:
-            conn.close()
+        return local_rpc.call(self.socket_path, action, payload, timeout=20)
 
     def approved_operation(self, ticket):
         ticket = str(uuid.UUID(ticket))
         op = self.call("operation", ticket=ticket)
         if op["id"] != ticket:
-            raise ValueError("controller returned another operation")
+            raise ValueError("activation record returned another operation")
         op["deadline"] = timestamp(op["deadline"])
         self.operation = ticket
         return op
@@ -105,11 +69,11 @@ class Controller:
 def timestamp(text):
     dt = datetime.fromisoformat(text)
     if dt.tzinfo is None:
-        raise ValueError("controller timestamp requires timezone")
+        raise ValueError("activation timestamp requires timezone")
     return dt
 
 
 def encode(value):
     if isinstance(value, datetime) and value.tzinfo is not None:
         return value.isoformat()
-    raise TypeError("unsupported controller value")
+    raise TypeError("unsupported activation value")

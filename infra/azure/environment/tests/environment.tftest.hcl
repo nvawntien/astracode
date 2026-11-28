@@ -1,5 +1,5 @@
 variable "approved_subscription_ids" {}
-variable "controller" {}
+variable "operations" {}
 variable "network" {}
 variable "target" {}
 
@@ -12,7 +12,7 @@ mock_provider "azurerm" {
   }
 }
 
-run "prepare_operations_before_compute" {
+run "prepare_native_shutdown_before_compute" {
   command = plan
 
   assert {
@@ -21,38 +21,36 @@ run "prepare_operations_before_compute" {
       length(azurerm_virtual_machine_data_disk_attachment.app) == 0 &&
       azurerm_managed_disk.app.disk_size_gb == 64 &&
       !azurerm_managed_disk.app.public_network_access_enabled &&
-      !azurerm_function_app_flex_consumption.controller.public_network_access_enabled &&
-      !azurerm_monitor_scheduled_query_rules_alert_v2.heartbeat.enabled &&
-      azurerm_function_app_flex_consumption.controller.storage_authentication_type == "UserAssignedIdentity"
+      length(azurerm_dev_test_global_vm_shutdown_schedule.node) == 2 &&
+      alltrue([for schedule in azurerm_dev_test_global_vm_shutdown_schedule.node :
+      schedule.enabled && schedule.timezone == "UTC" && schedule.daily_recurrence_time == var.operations.shutdown])
     )
-    error_message = "Prepare private durable storage, controller and alert infrastructure before arming or creating compute."
+    error_message = "Prepare the retained disk and exact pair's native schedules before creating VMs."
   }
 
   assert {
     condition = (
-      alltrue([for subnet in azurerm_subnet.network : !subnet.default_outbound_access_enabled]) &&
+      alltrue([for s in azurerm_subnet.network : !s.default_outbound_access_enabled]) &&
       length(azurerm_public_ip.node) == 2 &&
-      azurerm_nat_gateway.controller.sku_name == "Standard" &&
       alltrue([for rule in azurerm_network_security_group.node["judge"].security_rule :
         rule.direction != "Inbound" || rule.access != "Allow" || contains(["Flannel", "Kubelet"], rule.name)
       ]) &&
-      !azurerm_key_vault.runtime.public_network_access_enabled &&
-      !azurerm_storage_account.controller.shared_access_key_enabled
+      !azurerm_key_vault.runtime.public_network_access_enabled
     )
-    error_message = "Node egress must be explicit, Judge ingress private and shared secrets/state network restricted."
+    error_message = "Keep egress explicit, Judge ingress private and Key Vault network restricted."
   }
 
   assert {
     condition = (
-      contains(one(azurerm_role_definition.power["controller"].permissions).actions, "Microsoft.Compute/virtualMachines/start/action") &&
-      !contains(one(azurerm_role_definition.power["emergency"].permissions).actions, "Microsoft.Compute/virtualMachines/start/action") &&
+      !contains(one(azurerm_role_definition.emergency.permissions).actions, "Microsoft.Compute/virtualMachines/start/action") &&
+      contains(one(azurerm_role_definition.emergency.permissions).actions, "Microsoft.Compute/virtualMachines/deallocate/action") &&
       azurerm_resource_group_policy_assignment.vm_names.enforce
     )
-    error_message = "The S2 controller and emergency operator must have different, pair-scoped power authority."
+    error_message = "Emergency permissions are pair-scoped and deallocate-only."
   }
 }
 
-run "s3_has_deallocate_only_controller" {
+run "s3_stays_in_separate_state" {
   command = plan
 
   variables {
@@ -74,11 +72,10 @@ run "s3_has_deallocate_only_controller" {
   assert {
     condition = (
       output.plan_target.state_container == "s3-tfstate" &&
-      azurerm_function_app_flex_consumption.controller.app_settings.ASTRA_CONTROLLER_MODE == "rehearsal" &&
-      toset(one(azurerm_role_definition.power["controller"].permissions).actions) ==
-      toset(one(azurerm_role_definition.power["emergency"].permissions).actions)
+      azurerm_dev_test_global_vm_shutdown_schedule.node["app"].virtual_machine_id == output.vm_ids.app &&
+      length(azurerm_role_assignment.delivery) == 0
     )
-    error_message = "The S3 rehearsal controller must not be able to start VMs or use S2 state."
+    error_message = "S3 must target its own state and schedules with federated delivery inactive by default."
   }
 }
 
@@ -126,7 +123,7 @@ run "reject_k3s_network_overlap" {
   expect_failures = [terraform_data.compute_admission]
 }
 
-run "reject_startup_approval_for_unarmed_compute" {
+run "reject_stale_boundary_for_compute" {
   command = plan
 
   variables {
@@ -141,8 +138,7 @@ run "reject_startup_approval_for_unarmed_compute" {
         version   = "24.04.1"
       }
       startup = {
-        approval_ref  = "synthetic-approval"
-        controller_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2-ops/providers/Microsoft.Web/sites/astras2mock-controller"
+        approval_ref = "synthetic-approval"
         target_vm_ids = [
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
@@ -159,7 +155,6 @@ run "plan_only_the_approved_vm_pair" {
   command = plan
 
   variables {
-    controller = merge(var.controller, { armed = true })
     compute = {
       enabled        = true
       app_data_uuid  = "00000000-0000-4000-8000-000000000001"
@@ -171,8 +166,7 @@ run "plan_only_the_approved_vm_pair" {
         version   = "24.04.1"
       }
       startup = {
-        approval_ref  = "synthetic-approval"
-        controller_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2-ops/providers/Microsoft.Web/sites/astras2mock-controller"
+        approval_ref = "synthetic-approval"
         target_vm_ids = [
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-app",
           "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/astra-s2/providers/Microsoft.Compute/virtualMachines/astra-s2-judge",
@@ -191,6 +185,33 @@ run "plan_only_the_approved_vm_pair" {
       length(azurerm_linux_virtual_machine.node["app"].identity) == 1 &&
       length(azurerm_linux_virtual_machine.node["judge"].identity) == 0
     )
-    error_message = "An armed compute plan must provision the exact App/Judge pair and attach storage and runtime identities to App only."
+    error_message = "An approved compute plan must provision the exact App/Judge pair and attach storage and runtime identities to App only."
+  }
+}
+
+run "reject_window_without_off_time_margin" {
+  command = plan
+  variables {
+    operations = merge(var.operations, { earliest_start = "0600", shutdown = "1830" })
+  }
+  expect_failures = [var.operations]
+}
+
+run "delivery_role_cannot_start_or_deallocate" {
+  command = plan
+  variables {
+    operations = merge(var.operations, {
+      deployment_subject = "repository_id:2:environment:s2-delivery:ref:refs/heads/main:workflow_ref:example/astra/.github/workflows/staging-deploy.yml@refs/heads/main"
+    })
+  }
+  assert {
+    condition = (
+      toset(one(azurerm_role_definition.delivery[0].permissions).actions) == toset([
+        "Microsoft.Compute/virtualMachines/read",
+        "Microsoft.Compute/virtualMachines/runCommand/action",
+      ]) &&
+      length(azurerm_role_assignment.delivery) == 0
+    )
+    error_message = "Delivery is narrowly scoped, and the role assignment awaits separate activation."
   }
 }

@@ -65,7 +65,7 @@ units = [path for path in files if path.startswith("/etc/systemd/system/")]
 subprocess.run(["systemd-analyze", "verify", "--man=no", *units], check=True)
 
 if node == "app":
-    for user in ("astra-poller", "astra-secret-loader"):
+    for user in ("astra-activation", "astra-poller", "astra-secret-loader"):
         subprocess.run(["useradd", "--system", user], check=True)
 check_bin = Path("/tmp/check-only")
 check_bin.mkdir()
@@ -81,3 +81,10 @@ subprocess.run(
 rules = Path("/tmp/fixture.nft").read_text()
 if ("meta skuid" in rules) != (node == "app") or "ip daddr 169.254.169.254 drop" not in rules:
     raise SystemExit("Unexpected host metadata policy for the node role")
+
+if node == "app":
+    import pwd
+
+    allowed = [str(pwd.getpwnam(user).pw_uid) for user in ("astra-activation", "astra-secret-loader")]
+    if f"meta skuid {{ {', '.join(allowed)} }} accept" not in rules:
+        raise SystemExit("App metadata access is not limited to the issuer and loader")

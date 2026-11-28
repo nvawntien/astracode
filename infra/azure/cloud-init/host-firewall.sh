@@ -11,9 +11,9 @@ done
 
 case "$role" in
   app)
-    poller_uid="$(id -u astra-poller)"
+    issuer_uid="$(id -u astra-activation)"
     loader_uid="$(id -u astra-secret-loader)"
-    imds_allow="ip daddr 169.254.169.254 meta skuid { $poller_uid, $loader_uid } accept"
+    imds_allow="ip daddr 169.254.169.254 meta skuid { $issuer_uid, $loader_uid } accept"
     ;;
   judge)
     imds_allow=""

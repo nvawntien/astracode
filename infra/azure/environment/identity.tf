@@ -4,46 +4,74 @@ locals {
     "Microsoft.Compute/virtualMachines/instanceView/read",
     "Microsoft.Compute/virtualMachines/deallocate/action",
   ]
-  power_roles = {
-    controller = {
-      actions      = concat(local.power_actions, var.target.slot == "S2" ? ["Microsoft.Compute/virtualMachines/start/action"] : [])
-      principal_id = azurerm_user_assigned_identity.runtime["controller"].principal_id
-    }
-    emergency = {
-      actions      = local.power_actions
-      principal_id = var.controller.emergency_object_id
-    }
-  }
 }
 
 resource "azurerm_user_assigned_identity" "runtime" {
-  for_each = toset(["controller", "app-poller", "app-secret-loader"])
+  for_each = toset(["app-receipts", "app-secret-loader"])
 
   name                = "${local.name}-${each.key}"
   location            = azurerm_resource_group.operations.location
   resource_group_name = azurerm_resource_group.operations.name
 }
 
-resource "azurerm_role_definition" "power" {
-  for_each = local.power_roles
-
-  name              = "AstraCode ${var.target.slot} ${each.key} VM power"
+resource "azurerm_role_definition" "emergency" {
+  name              = "AstraCode ${var.target.slot} emergency VM deallocation"
   scope             = local.subscription_scope
   assignable_scopes = [azurerm_resource_group.workload.id]
 
   permissions {
-    actions = each.value.actions
+    actions = local.power_actions
   }
 }
 
-resource "azurerm_role_assignment" "power" {
-  for_each = local.power_roles
-
+resource "azurerm_role_assignment" "emergency" {
   scope              = azurerm_resource_group.workload.id
-  role_definition_id = azurerm_role_definition.power[each.key].role_definition_resource_id
-  principal_id       = each.value.principal_id
+  role_definition_id = azurerm_role_definition.emergency.role_definition_resource_id
+  principal_id       = var.operations.emergency_id
 
   depends_on = [azurerm_resource_group_policy_assignment.vm_names]
+}
+
+resource "azurerm_user_assigned_identity" "delivery" {
+  count               = var.operations.deployment_subject != null ? 1 : 0
+  name                = "${local.name}-delivery"
+  location            = azurerm_resource_group.operations.location
+  resource_group_name = azurerm_resource_group.operations.name
+}
+
+resource "azurerm_federated_identity_credential" "delivery" {
+  count               = length(azurerm_user_assigned_identity.delivery)
+  name                = "protected-deployment"
+  parent_id           = azurerm_user_assigned_identity.delivery[0].id
+  resource_group_name = azurerm_resource_group.operations.name
+  audience            = ["api://AzureADTokenExchange"]
+  issuer              = "https://token.actions.githubusercontent.com"
+  subject             = var.operations.deployment_subject
+
+  lifecycle {
+    precondition {
+      condition     = can(regex("^repository_id:[0-9]+:environment:${lower(var.target.slot)}-delivery:ref:refs/heads/main:workflow_ref:[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/[.]github/workflows/staging-deploy[.]yml@refs/heads/main$", var.operations.deployment_subject))
+      error_message = "Delivery federation must bind the immutable repository ID, protected environment, main ref and staging deployment workflow."
+    }
+  }
+}
+
+resource "azurerm_role_definition" "delivery" {
+  count             = length(azurerm_user_assigned_identity.delivery)
+  name              = "AstraCode ${var.target.slot} App guest delivery"
+  scope             = local.subscription_scope
+  assignable_scopes = [azurerm_resource_group.workload.id]
+
+  permissions {
+    actions = ["Microsoft.Compute/virtualMachines/read", "Microsoft.Compute/virtualMachines/runCommand/action"]
+  }
+}
+
+resource "azurerm_role_assignment" "delivery" {
+  count              = var.operations.deployment_active && var.compute.enabled ? length(azurerm_user_assigned_identity.delivery) : 0
+  scope              = azurerm_linux_virtual_machine.node["app"].id
+  role_definition_id = azurerm_role_definition.delivery[0].role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.delivery[0].principal_id
 }
 
 resource "azurerm_key_vault" "runtime" {

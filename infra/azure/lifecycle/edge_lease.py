@@ -1,4 +1,4 @@
-"""Private Traefik forward-auth endpoint backed by very short controller leases."""
+"""Private Traefik forward-auth endpoint backed by very short local grants."""
 
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -6,12 +6,12 @@ import ipaddress
 import threading
 import time
 
-from controller_client import timestamp
+from activation_client import timestamp
 
 
 class Lease:
-    def __init__(self, controller):
-        self.controller = controller
+    def __init__(self, activation):
+        self.activation = activation
         self.lock = threading.Lock()
         self.value = {}
         self.until = 0
@@ -22,7 +22,7 @@ class Lease:
             if now >= self.until:
                 self.value = {}
                 try:
-                    value = self.controller().call("tester")
+                    value = self.activation().call("tester")
                     expiry = value.get("until")
                     if expiry:
                         remaining = (
@@ -36,11 +36,11 @@ class Lease:
             return self.value.get(scope) is True
 
 
-def serve(address, controller):
+def serve(address, activation):
     ip = ipaddress.IPv4Address(address)
     if not ip.is_private or ip.is_unspecified:
         raise ValueError("App private IPv4 address required")
-    lease = Lease(controller)
+    lease = Lease(activation)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):

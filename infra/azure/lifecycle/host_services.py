@@ -1,6 +1,7 @@
 """Platform entry points for the rollout user and the independent permit issuer."""
 
 import argparse
+import base64
 from datetime import datetime, timezone
 import http.client
 import json
@@ -15,29 +16,32 @@ import local_rpc
 from app_rollout import Rollout
 from attempt_secret import deliver
 from authority import Authority
-from controller_client import Controller
+from activation_client import ActivationClient
+from activation_record import Journal
 from coordinator import ForwardRequired, reconcile
 from drain_work import finish as finish_drain, observe as observe_nodes
 from edge_lease import serve as serve_edge
 from kube_rollout import Cluster
 from migration_job import MigrationJob
 from node_state import RecoveryRequired
-from release_catalog import Catalog, unpack_migrations
+from release_catalog import Catalog, ReceiptCatalog, unpack_migrations
 
 CONFIG = Path("/etc/astracode")
 ISSUER = "/run/astra-activation/control.sock"
 POLLER = "/run/astra-poller/effects.sock"
+STATE = "/run/astra-activation/state.sock"
+DELIVERY = "/run/astra-activation/delivery.sock"
 
 
-def token(settings):
+def identity_token(client_id, audience):
     # The audience and client ID are platform configuration. The host endpoint
     # never accepts either value from a ticket or from the peer socket.
-    client = str(uuid.UUID(settings["poller_client_id"]))
+    client = str(uuid.UUID(client_id))
     query = urlencode(
         {
             "api-version": "2018-02-01",
             "client_id": client,
-            "resource": settings["controller_audience"],
+            "resource": audience,
         }
     )
     conn = http.client.HTTPConnection("169.254.169.254", timeout=3)
@@ -49,15 +53,12 @@ def token(settings):
         )
         response = conn.getresponse()
         if response.status != 200:
-            raise RecoveryRequired("controller token unavailable")
+            raise RecoveryRequired("managed identity token unavailable")
         raw = response.read(32769)
         if len(raw) > 32768:
             raise ValueError("invalid identity response")
         data = json.loads(raw)
-        if (
-            data["resource"] != settings["controller_audience"]
-            or data["token_type"].lower() != "bearer"
-        ):
+        if data["resource"] != audience or data["token_type"].lower() != "bearer":
             raise ValueError("unexpected token scope")
         return data["access_token"]
     finally:
@@ -142,10 +143,6 @@ class RemoteAuthority:
         return self.invoke("migrate")
 
 
-def controller(settings, provider):
-    return Controller(settings["controller_endpoint"], provider)
-
-
 def run_poller(settings):
     lock = threading.Lock()
     current = {"ticket": None}
@@ -154,7 +151,7 @@ def run_poller(settings):
     def check(ticket):
         if current["ticket"] != ticket:
             raise RecoveryRequired("wrong poll operation")
-        c = controller(settings, lambda: token(settings))
+        c = ActivationClient(STATE)
         op = c.approved_operation(ticket)
         if c.lease(op) <= datetime.now(timezone.utc) or c.contest_frozen():
             raise RecoveryRequired("operation unavailable")
@@ -208,32 +205,30 @@ def run_poller(settings):
         args=(
             POLLER,
             "astra-activation",
-            {"token": lambda: token(settings), "job": job, "retire": retire},
+            {"job": job, "retire": retire},
         ),
         daemon=True,
     ).start()
 
     def client():
-        return controller(settings, lambda: token(settings))
+        return ActivationClient(STATE)
 
     def heartbeat():
-        sides = {
-            role: Cluster(role, CONFIG / "rollout.kubeconfig")
-            for role in ("app", "judge")
-        }
         drained = None
         while True:
             try:
                 c = client()
-                status = c.call(
-                    "observe", **observe_nodes(sides["app"], sides["judge"])
-                )
-                if status["phase"] == "draining" and drained != status["generation"]:
+                status = c.call("observe")
+                if (
+                    status["phase"] == "draining"
+                    and not status["in_flight"]
+                    and drained != status["generation"]
+                ):
                     finish_drain(c, settings, CONFIG / "rollout.kubeconfig", status)
                     drained = status["generation"]
             except Exception:
-                # Failure leaves the drain incomplete. The independent timer
-                # enforces the hard cleanup deadline and retains pending work.
+                # Lack of fresh observations closes the edge and process permits.
+                # VM shutdown is scheduled independently on Azure.
                 pass
             time.sleep(2)
 
@@ -242,14 +237,14 @@ def run_poller(settings):
     threading.Thread(target=heartbeat, daemon=True).start()
     while True:
         try:
-            c = controller(settings, lambda: token(settings))
+            c = ActivationClient(STATE)
             ticket = c.call("poll")["ticket"]
             if ticket:
                 with lock:
                     current["ticket"] = str(uuid.UUID(ticket))
                     Rollout(c, RemoteAuthority(ticket), settings).run(ticket)
         except Exception:
-            # Report state through the controller. Never log a token, payload or fixture.
+            # Report only a fixed error in the host log. Never log a token, payload or fixture.
             print("Protected rollout waiting for verified state", flush=True)
         finally:
             current["ticket"] = None
@@ -257,9 +252,11 @@ def run_poller(settings):
 
 
 def run_issuer(settings):
-    c = controller(settings, lambda: local_rpc.call(POLLER, "token", {}))
+    c = ActivationClient(STATE + ".issuer")
     slot = (CONFIG / "slot").read_text().strip()
-    catalog = Catalog(c, settings["executor_digest"])
+    executor = settings["executor_digest"]
+    receipts = ReceiptCatalog(settings, slot, identity_token)
+    catalog = Catalog(c, executor)
     single = threading.Lock()
 
     def migrate(req, release):
@@ -332,15 +329,72 @@ def run_issuer(settings):
                         erase_attempt=lambda attempt: deliver(attempt, None),
                     )
                 except ForwardRequired as exc:
-                    if slot == "s3":
-                        c.call(
-                            "sealed-recovery",
-                            operation=req["id"],
-                            versions=exc.versions,
-                        )
+                    c.call(
+                        "sealed-recovery", operation=req["id"], versions=exc.versions
+                    )
                     raise
 
     authority = Authority(c, catalog, migrate, slot, CONFIG)
+    journal = Journal(
+        "/srv/astracode/data/activation",
+        slot,
+        dict(
+            settings,
+            daily_window=json.loads((CONFIG / "daily-window.json").read_text()),
+        ),
+        receipts,
+        lambda: observe_nodes(authority.clients["app"], authority.clients["judge"]),
+    )
+    state_actions = (
+        "poll",
+        "tester",
+        "operation",
+        "state",
+        "authorization",
+        "contest",
+        "verified",
+        "termination",
+        "begin",
+        "close",
+        "complete",
+        "open",
+        "recovery-required",
+        "bundle",
+        "migration",
+        "bind-migration",
+        "retired-job",
+        "sealed-recovery",
+        "drained",
+    )
+    state_routes = {
+        action: (lambda action: lambda **params: journal.act(action, **params))(action)
+        for action in state_actions
+    }
+    state_routes["observe"] = lambda: journal.observe_current(**journal.observe())
+
+    # Only the rollout and issuer Unix users can access the state transitions.
+    for suffix, peer in (("", "astra-poller"), (".issuer", "astra-activation")):
+        threading.Thread(
+            target=local_rpc.serve,
+            args=(STATE + suffix, peer, state_routes),
+            daemon=True,
+        ).start()
+    threading.Thread(
+        target=local_rpc.serve,
+        args=(
+            DELIVERY,
+            0,
+            {
+                "initialize": journal.initialize,
+                "open": journal.open,
+                "close": journal.close,
+                "submit": journal.submit,
+                "status": journal.status,
+                "admit-testers": journal.admit_testers,
+            },
+        ),
+        daemon=True,
+    ).start()
     threading.Thread(target=authority.renew_loop, daemon=True).start()
 
     def handle(method, ticket, **params):
@@ -393,9 +447,41 @@ def run_issuer(settings):
     )
 
 
+def run_delivery(action, payload):
+    import os
+
+    if os.geteuid() != 0:
+        raise RecoveryRequired("App platform operator required")
+    if action not in {"initialize", "open", "close", "submit", "admit-testers"}:
+        raise RecoveryRequired("unsupported guest command")
+    result = local_rpc.call(DELIVERY, action, payload, timeout=55)
+    if action != "submit":
+        return result
+    ticket = result
+    deadline = time.monotonic() + 635
+    while time.monotonic() < deadline:
+        result = local_rpc.call(DELIVERY, "status", ticket)
+        if result:
+            return result
+        time.sleep(2)
+    raise RecoveryRequired("no successful protected rollout result")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("role", choices=("poller", "activation"))
-    role = parser.parse_args().role
-    settings = json.loads((CONFIG / (role + ".json")).read_text())
-    (run_poller if role == "poller" else run_issuer)(settings)
+    parser.add_argument("role", choices=("poller", "activation", "delivery"))
+    parser.add_argument("command", nargs="?")
+    parser.add_argument("payload", nargs="?", default="e30=")
+    args = parser.parse_args()
+    if args.role == "delivery":
+        try:
+            data = json.loads(base64.b64decode(args.payload, validate=True))
+            print(
+                "ASTRA_DELIVERY="
+                + json.dumps(run_delivery(args.command, data), separators=(",", ":"))
+            )
+        except (ValueError, RuntimeError, OSError, KeyError):
+            parser.exit(1, "Protected App guest command refused or requires recovery\n")
+    else:
+        settings = json.loads((CONFIG / (args.role + ".json")).read_text())
+        (run_poller if args.role == "poller" else run_issuer)(settings)

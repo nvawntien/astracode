@@ -118,7 +118,7 @@ GitHub Actions workflows in `.github/workflows/`:
 | `release-images.yml` | protected `develop` pushes | Exact-SHA CI and canonical OCI publication through the protected reusable workflow after registration. |
 | `reconcile-releases.yml` | schedule or manual dispatch on protected `main` | Reconciles protected merge history without accepting a SHA input. |
 | `rehearsal-checks.yml` | labeled candidate PRs to `develop` | Read-only CI for the reviewed S3 head SHA. |
-| `staging-request.yml` | protected `main` dispatch | Reviews the immutable originating request under the appropriate GitHub environment. |
+| `staging-deploy.yml` | protected `main` dispatch | Freezes the release and runs protected deployment and smoke after native Environment approval. |
 | `promotion-eligibility.yml` | protected `main` dispatch | Checks canonical S2 evidence and the reviewed tag mapping. |
 | `deploy-production.yml` | retired | Historical dispatch and credentials are retired through the separate owner-reviewed transition. |
 
@@ -146,7 +146,7 @@ For website development, use `npm run dev` (`next dev -p 3000`), `npm run build`
 
 ## Verify Azure delivery offline
 
-From the repository root, keep the usual `make test` and `make test-db` gates. For M0-13 also validate the pinned Terraform roots with the backend disabled and provider mocks, render both Kustomize overlays and run the strict schema and native API fixture, and validate the synthetic App and Judge cloud-init renders. The managed database fixture uses a disposable PostgreSQL container. The release and controller fixtures use synthetic receipts, identities, time and VM outcomes. Use `actionlint`, `shellcheck`, and shell syntax checks for changed workflow and shell files.
+From the repository root, keep the usual `make test` and `make test-db` gates. For M0-13 also validate the pinned Terraform roots with the backend disabled and provider mocks, render both Kustomize overlays and run the strict schema and native API fixture, and validate the synthetic App and Judge cloud-init renders. The managed database fixture uses a disposable PostgreSQL container. The release, App activation and reviewed compute fixtures use synthetic receipts, approval windows, node observations and VM outcomes. Use `actionlint`, `shellcheck`, and shell syntax checks for changed workflow and shell files.
 
 The [M0-13 evidence map](../evidence/m0-13-phase-a.md) links verification commands and results. See [Azure procedures](../../infra/azure/README.md) for operator steps and [release verification](../../scripts/release/README.md) for CI and default-branch registration.
 

@@ -6,9 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
-import sys
 import tempfile
 
 
@@ -17,11 +15,10 @@ NODES = {
 }
 ATTACHMENT = "azurerm_virtual_machine_data_disk_attachment.app[0]"
 DISK = "azurerm_managed_disk.app"
-CONTROLLER = "azurerm_function_app_flex_consumption.controller"
-ALERTS = [
-    f"azurerm_monitor_scheduled_query_rules_alert_v2.{name}"
-    for name in ("heartbeat", "cleanup")
-]
+SCHEDULES = {
+    role: f'azurerm_dev_test_global_vm_shutdown_schedule.node["{role}"]'
+    for role in NODES
+}
 KEEP_NETWORK = {
     "azurerm_network_interface",
     "azurerm_public_ip",
@@ -57,14 +54,6 @@ def classify(plan):
     require(
         not plan.get("deferred_changes"), "deferred resource actions require review"
     )
-    require(
-        not any(
-            r["address"] in (*NODES.values(), DISK, ATTACHMENT)
-            or r["type"] in KEEP_NETWORK
-            for r in plan.get("resource_drift", [])
-        ),
-        "reconcile drift on a protected VM, disk or network resource before applying",
-    )
     vm_actions = {
         role: changes.get(address, {}).get("actions", ["no-op"])
         for role, address in NODES.items()
@@ -82,6 +71,36 @@ def classify(plan):
         ),
         "only initial pair creation or one delete-before-create VM replacement is supported",
     )
+    missing_role = next(iter(creating)) if len(creating) == 1 else None
+    permitted_drift = {NODES[missing_role]} if missing_role else set()
+    if missing_role == "app":
+        permitted_drift.add(ATTACHMENT)
+    require(
+        not any(
+            (
+                row["address"]
+                in (*NODES.values(), DISK, ATTACHMENT, *SCHEDULES.values())
+                or row["type"] in KEEP_NETWORK
+            )
+            and not (
+                row["address"] in permitted_drift
+                and row["change"]["actions"] == ["delete"]
+            )
+            for row in plan.get("resource_drift", [])
+        ),
+        "reconcile protected drift before applying; only the exact missing recovery target may be recreated",
+    )
+    for role in creating:
+        vm = changes[NODES[role]]["after"]
+        nic = changes[f'azurerm_network_interface.node["{role}"]']["before"]
+        ip = changes[f'azurerm_public_ip.node["{role}"]']["before"]
+        require(
+            vm["name"] == nic["name"].removesuffix("-nic")
+            and vm["size"] == plan["variables"]["compute"]["value"][role + "_size"]
+            and vm["network_interface_ids"] == [nic["id"]]
+            and nic["ip_configuration"][0]["public_ip_address_id"] == ip["id"],
+            "VM creation must reuse the exact reviewed NIC, public IP and capacity",
+        )
     approved_deletes = set()
     if replacing:
         role = next(iter(replacing))
@@ -140,20 +159,22 @@ def classify(plan):
     if creating or replacing:
         require(
             set(NODES.values()) <= changes.keys()
-            and changes[CONTROLLER]["before"]["public_network_access_enabled"] is True
-            and all(changes[a]["before"]["enabled"] is True for a in ALERTS)
+            and all(
+                changes[address]["before"]["enabled"] is True
+                and changes[address]["before"]["timezone"] == "UTC"
+                for address in SCHEDULES.values()
+            )
             and changes[DISK]["before"]["id"]
             and changes[ATTACHMENT]["after"]["managed_disk_id"]
-            == changes[DISK]["before"]["id"],
-            "armed controller, independent monitors and retained App disk must already exist",
+            == changes[DISK]["before"]["id"]
+            and changes[ATTACHMENT]["after"]["lun"] == 0,
+            "native shutdown schedules and the retained App disk must already exist",
         )
-    return (
-        ("create", None)
-        if creating
-        else ("replace", role)
-        if replacing
-        else ("maintenance", None)
-    )
+    if replacing:
+        return "replace", role
+    if missing_role:
+        return "recover", missing_role
+    return ("create", None) if creating else ("maintenance", None)
 
 
 def verify(plan, approval, plan_sha, now):
@@ -190,44 +211,32 @@ def verify(plan, approval, plan_sha, now):
             f"/providers/Microsoft.Compute/virtualMachines/{target['resource_group']}-{role}"
             for role in NODES
         }
-        controller = outputs["controller_id"]["value"]
         require(
             compute["enabled"]
             and startup
             and ids == expected
             and sorted(i.lower() for i in startup["target_vm_ids"])
             == sorted(i.lower() for i in expected.values())
-            and startup["controller_id"].lower() == controller.lower()
             and startup["approval_ref"] == approval["startup_approval_ref"]
             and deadline
             <= expires_at(startup["expires_at"])
             <= now + timedelta(minutes=30),
-            "fresh startup approval for the exact controller and pair required",
+            "fresh owner-approved infrastructure window for the exact pair required",
         )
-        grant = approval["controller_grant"]
-        if slot == "S2":
-            require(
-                grant["accepted"] is True
-                and grant["phase"] == "compute-maintenance"
-                and grant["requestId"] == startup["approval_ref"]
-                and grant["terraformPlan"]
-                == {
-                    "sha256": plan_sha,
-                    "operation": mode,
-                    "role": role,
-                    "expiresAt": startup["expires_at"],
-                }
-                and expires_at(grant["expires"]) == expires_at(startup["expires_at"]),
-                "S2 requires the matching native-approved controller power window",
-            )
-        else:
-            require(
-                grant["approvalRef"] == startup["approval_ref"]
-                and deadline
-                <= expires_at(startup["expires_at"])
-                <= expires_at(grant["deadline"]),
-                "S3 startup must be within the protected experiment deadline",
-            )
+        schedule = plan["variables"]["operations"]["value"]
+        day = now.astimezone(timezone.utc).date().isoformat()
+        cutoff = expires_at(
+            f"{day}T{schedule['shutdown'][:2]}:{schedule['shutdown'][2:]}:00Z"
+        )
+        earliest = expires_at(
+            f"{day}T{schedule['earliest_start'][:2]}:{schedule['earliest_start'][2:]}:00Z"
+        )
+        require(
+            approval["window_ref"] == schedule["approved"]
+            and earliest <= now
+            and expires_at(startup["expires_at"]) + timedelta(minutes=10) <= cutoff,
+            "approved infrastructure window or shutdown margin differs",
+        )
     return target, deadline
 
 
@@ -262,80 +271,55 @@ def check_execution_scope(root, approval, target):
     )
 
 
-def verify_controller_status(status, plan, approval, now):
-    slot = approval["target"]["slot"].lower()
-    heartbeat = expires_at(status["heartbeat"])
-    require(
-        status["environment"] == slot
-        and status["contest"] is False
-        and timedelta(0) <= now - heartbeat < timedelta(minutes=3)
-        and expires_at(status["expires"]) > now,
-        "live controller environment, deadline or heartbeat differs",
-    )
-    grant = approval["controller_grant"]
-    if slot == "s2":
-        require(
-            status["phase"] == "compute-maintenance"
-            and status["terraform_window"]
-            == {
-                "requestId": grant["requestId"],
-                "terraformPlan": grant["terraformPlan"],
-            }
-            and expires_at(status["expires"]) == expires_at(grant["expires"]),
-            "S2 compute approval is no longer active",
-        )
-    else:
-        experiment = status["experiment"]
-        ids = plan["planned_values"]["outputs"]["vm_ids"]["value"]
-        require(
-            status["phase"] == "starting"
-            and not status["inventory_followup"]
-            and expires_at(status["expires"]) >= expires_at(approval["expires_at"])
-            and experiment["approvalRef"] == grant["approvalRef"]
-            and expires_at(experiment["deadline"]) == expires_at(grant["deadline"])
-            and experiment["targets"] == ids,
-            "S3 experiment is no longer active for the exact VM pair",
-        )
-        recovery = status.get("rehearsal_recovery")
-        if approval["operation"] == "replace":
+def azure_json(*args):
+    return json.loads(subprocess.check_output(["az", *args, "-o", "json"], timeout=30))
+
+
+def check_azure_compute(plan, approval, target):
+    ids = plan["planned_values"]["outputs"]["vm_ids"]["value"]
+    schedule = plan["variables"]["operations"]["value"]
+    approval_tag = schedule["approved"]
+    present = {
+        vm["id"].lower()
+        for vm in azure_json("vm", "list", "--resource-group", target["resource_group"])
+    }
+    missing = {role for role, vm_id in ids.items() if vm_id.lower() not in present}
+    expected = {
+        "create": {"app", "judge"},
+        "recover": {approval.get("role")},
+        "replace": set(),
+    }[approval["operation"]]
+    require(missing == expected, "actual absent VMs differ from the reviewed operation")
+    for role, vm_id in ids.items():
+        if role not in missing:
+            view = azure_json("vm", "get-instance-view", "--ids", vm_id)
             require(
-                recovery
-                and not recovery["boots_confirmed"]
-                and expires_at(recovery["bootDeadline"])
-                >= expires_at(approval["expires_at"]),
-                "S3 replacement requires the bounded recovery power window",
+                any(
+                    s["code"] == "PowerState/deallocated"
+                    for s in view["instanceView"]["statuses"]
+                ),
+                "verify existing VM deallocation before compute apply",
             )
-
-
-def check_controller(plan, approval):
-    # Use the standard release HTTPS client so a redirect cannot forward the token.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "release"))
-    from transport import request
-
-    config = next(
-        row["change"]["before"]
-        for row in plan["resource_changes"]
-        if row["address"] == CONTROLLER
-    )
-    host = config["default_hostname"]
-    require(
-        re.fullmatch(r"[a-z0-9][a-z0-9-]*[.]azurewebsites[.]net", host),
-        "unexpected Azure Function HTTPS hostname",
-    )
-    token = sys.stdin.readline(32769).strip()
-    require(
-        re.fullmatch(r"[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+[.][A-Za-z0-9_-]+", token),
-        "provide a current controller-scoped access token on standard input",
-    )
-    _, _, body = request(
-        f"https://{host}/api/v1/status",
-        "POST",
-        b"{}",
-        {"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-    )
-    verify_controller_status(
-        json.loads(body), plan, approval, datetime.now(timezone.utc)
-    )
+        native = azure_json(
+            "resource",
+            "show",
+            "--resource-type",
+            "Microsoft.DevTestLab/schedules",
+            "--resource-group",
+            target["resource_group"],
+            "--name",
+            "shutdown-computevm-" + vm_id.split("/")[-1],
+        )
+        props = native["properties"]
+        require(
+            native["tags"]["owner_approval"] == approval_tag
+            and props["status"] == "Enabled"
+            and props["targetResourceId"].lower() == vm_id.lower()
+            and props["taskType"] == "ComputeVmShutdownTask"
+            and props["timeZoneId"] == "UTC"
+            and props["dailyRecurrence"]["time"] == schedule["shutdown"],
+            "native automatic shutdown must be active for the reviewed VM and cutoff",
+        )
 
 
 def main():
@@ -370,7 +354,7 @@ def main():
             if not args.check:
                 check_execution_scope(root, approval, target)
                 if approval["operation"] != "maintenance":
-                    check_controller(plan, approval)
+                    check_azure_compute(plan, approval, target)
                 require(
                     datetime.now(timezone.utc) < deadline,
                     "approval expired before apply",

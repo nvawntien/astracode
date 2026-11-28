@@ -10,7 +10,7 @@ import uuid
 from activation_record import transition
 from app_rollout import Rollout
 from authority import Authority
-from controller_client import Controller
+from activation_client import ActivationClient
 from kube_rollout import APP, EXECUTION
 from node_state import RecoveryRequired
 
@@ -38,7 +38,7 @@ class Node:
 
     def replace_images(self, name, images, configs):
         self.generation += 1
-        for workload in (EXECUTION if name == "judge-worker" else (name,)):
+        for workload in EXECUTION if name == "judge-worker" else (name,):
             self.view["containers"].append(
                 dict(
                     workload=workload,
@@ -64,7 +64,7 @@ class Node:
         )
 
 
-class Records(Controller):
+class Records(ActivationClient):
     def __init__(self, state, events):
         self.state, self.events = state, events
         self.operation = None
@@ -75,7 +75,7 @@ class Records(Controller):
             current, action, data, datetime.now(timezone.utc), lambda *a: {}
         )
         self.state = current
-        self.events.append(("controller", action))
+        self.events.append(("activation", action))
         return copy.deepcopy(result)
 
 
@@ -106,7 +106,10 @@ class RolloutIntegration(unittest.TestCase):
             deadline=(now + timedelta(minutes=3)).isoformat(),
         )
         names = (*APP, *EXECUTION)
-        images = {n: "fixture.invalid/" + n + "@sha256:" + "a" * 64 for n in names}
+        images = {
+            n: "fixture.invalid/" + n + "@sha256:" + "a" * 64
+            for n in (*names, "postgres", "redis", "kafka", "minio")
+        }
         versions = dict(auth=1, problem=1, submission=1)
         release = dict(
             digest="release",
@@ -158,6 +161,9 @@ class RolloutIntegration(unittest.TestCase):
 
         authority = Authority(control, Catalog(), migration, "s3", Path("/unused"))
         nodes = {r: Node(r, events) for r in ("app", "judge")}
+        nodes["app"].view["backing"] = {
+            name: images[name] for name in ("postgres", "redis", "kafka", "minio")
+        }
         authority.clients = nodes
         authority.issuer = Issuer(events)
         rollout = Rollout(
@@ -179,8 +185,9 @@ class RolloutIntegration(unittest.TestCase):
             if failure == "smoke":
                 raise RecoveryRequired("smoke failed")
 
-        with patch("app_rollout.subprocess.run") as probe, patch(
-            "app_rollout.smoke", side_effect=smoke
+        with (
+            patch("app_rollout.subprocess.run") as probe,
+            patch("app_rollout.smoke", side_effect=smoke),
         ):
             probe.return_value.returncode = 0
             if failure:
@@ -202,7 +209,7 @@ class RolloutIntegration(unittest.TestCase):
             events.index(("start", "envoy")), events.index(("start", "judge-worker"))
         )
         self.assertLess(
-            events.index(("smoke",)), events.index(("controller", "complete"))
+            events.index(("smoke",)), events.index(("activation", "complete"))
         )
 
     def test_failed_schema_or_smoke_keeps_recovery_record(self):
@@ -212,7 +219,7 @@ class RolloutIntegration(unittest.TestCase):
                 self.assertFalse(state["tester_open"])
                 self.assertEqual(state["operation"]["phase"], "recovery-required")
                 self.assertTrue(state["in_flight"])
-                self.assertNotIn(("controller", "complete"), events)
+                self.assertNotIn(("activation", "complete"), events)
                 self.assertIn(("revoked",), events)
                 if failure == "schema":
                     self.assertFalse(any(e[0] == "start" for e in events))

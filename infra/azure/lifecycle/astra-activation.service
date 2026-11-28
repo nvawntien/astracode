@@ -2,6 +2,7 @@
 Description=AstraCode protected activation service
 After=astra-k3s.service network-online.target
 PartOf=astra-k3s.service
+RequiresMountsFor=/srv/astracode/data
 ConditionPathExists=/etc/astracode/activation.json
 ConditionPathExists=/usr/local/libexec/astra/app/host_services.py
 
@@ -11,6 +12,7 @@ RuntimeDirectory=astra-activation
 RuntimeDirectoryMode=0755
 UMask=0077
 Environment=PGSERVICEFILE=/etc/astracode/fencer-pg-service.conf
+ReadWritePaths=/srv/astracode/data/activation
 ExecStart=/usr/bin/python3 -B /usr/local/libexec/astra/app/host_services.py activation
 Restart=on-failure
 RestartSec=2

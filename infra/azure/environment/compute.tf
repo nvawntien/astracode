@@ -14,21 +14,15 @@ resource "terraform_data" "compute_admission" {
 
   lifecycle {
     precondition {
-      condition     = !var.compute.enabled || var.controller.armed
-      error_message = "Keep the controller and independent alerts armed while Terraform manages the VM pair."
-    }
-
-    precondition {
       condition = var.compute.startup == null || try(
         var.compute.enabled &&
         trimspace(var.compute.startup.approval_ref) != "" &&
-        lower(var.compute.startup.controller_id) == lower(local.controller_id) &&
         toset([for id in var.compute.startup.target_vm_ids : lower(id)]) == toset([for id in values(local.vm_ids) : lower(id)]) &&
         timecmp(var.compute.startup.expires_at, plantimestamp()) > 0 &&
         timecmp(var.compute.startup.expires_at, timeadd(plantimestamp(), "30m")) <= 0,
         false
       )
-      error_message = "A compute startup approval requires the already armed controller, the exact VM pair and a deadline within 30 minutes."
+      error_message = "A compute startup approval requires the exact VM pair and a deadline within 30 minutes."
     }
 
     precondition {
@@ -108,7 +102,7 @@ resource "azurerm_linux_virtual_machine" "node" {
     content {
       type = "UserAssigned"
       identity_ids = [
-        azurerm_user_assigned_identity.runtime["app-poller"].id,
+        azurerm_user_assigned_identity.runtime["app-receipts"].id,
         azurerm_user_assigned_identity.runtime["app-secret-loader"].id,
       ]
     }
@@ -120,10 +114,9 @@ resource "azurerm_linux_virtual_machine" "node" {
 
   depends_on = [
     terraform_data.compute_admission,
-    azurerm_monitor_scheduled_query_rules_alert_v2.heartbeat,
-    azurerm_monitor_scheduled_query_rules_alert_v2.cleanup,
+    azurerm_dev_test_global_vm_shutdown_schedule.node,
     azurerm_resource_group_policy_assignment.vm_names,
-    azurerm_role_assignment.power,
+    azurerm_role_assignment.emergency,
     azurerm_subnet_network_security_group_association.node,
   ]
 }

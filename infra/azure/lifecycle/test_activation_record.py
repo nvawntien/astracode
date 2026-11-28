@@ -122,5 +122,188 @@ class Records(unittest.TestCase):
             self.run_action("authorization")
 
 
+class LocalJournal(unittest.TestCase):
+    def setUp(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from activation_record import APP, JUDGE, Journal
+
+        self.scratch = TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.directory = Path(self.scratch.name)
+        self.now = datetime(2026, 11, 28, 12, tzinfo=timezone.utc)
+        self.views = {
+            role: dict(boot=role + "-boot", epoch=role + "-epoch", retired_jobs=[])
+            for role in ("app", "judge")
+        }
+        self.digest = "sha256:" + "d" * 64
+        self.source = "a" * 40
+        workloads = {name: "sha256:" + "1" * 64 for name in APP | JUDGE | {"migrate"}}
+        self.release = dict(
+            digest=self.digest,
+            versions=dict(auth=1, problem=1, submission=1),
+            images={},
+            migration_package={},
+            environments={"s3": {"workloads": workloads, "digest": "expected"}},
+        )
+        self.settings = dict(
+            daily_window=dict(earliest_start="0700", shutdown="1800"),
+            contest_windows=[],
+            migration={"system_id": "10", "recovery_point": "test"},
+        )
+        self.catalog = type("FixtureCatalog", (), {"load": lambda *_: self.release})()
+        self.observed = lambda: self.views
+        self.journal = Journal(
+            self.directory,
+            "s3",
+            self.settings,
+            self.catalog,
+            self.observed,
+            clock=lambda: self.now,
+            mount=lambda _: True,
+        )
+
+    def open(self):
+        self.journal.open(approval="owner/window", date="2026-11-28")
+
+    def submit(self, action="deploy", run="123", recovery=None):
+        return self.journal.submit(
+            action,
+            self.source,
+            self.digest,
+            self.source,
+            self.digest,
+            run,
+            "1",
+            recovery,
+        )["ticket"]
+
+    def test_no_admission_from_missing_mount_or_unapproved_time(self):
+        with self.assertRaises(RecoveryRequired):
+            self.open()
+        self.journal.initialize()
+        self.now = self.now.replace(hour=19)
+        with self.assertRaises(RecoveryRequired):
+            self.open()
+        self.journal.mount = lambda _: False
+        with self.assertRaisesRegex(RecoveryRequired, "data mount"):
+            self.journal.act("tester")
+
+    def test_single_run_and_changed_epoch_close_rolling_authorization(self):
+        self.journal.initialize()
+        self.open()
+        operation = self.submit()
+        with self.assertRaises(RecoveryRequired):
+            self.submit(run="124")
+        self.journal.act("begin", operation=operation, release=self.digest)
+        self.assertTrue(self.journal.act("tester")["smoke"])
+        self.assertFalse(self.journal.act("tester")["tester"])
+        self.views["judge"]["epoch"] = "different"
+        self.journal.observe_current(**self.views)
+        self.assertFalse(self.journal.act("tester")["smoke"])
+        with self.assertRaises(RecoveryRequired):
+            self.journal.act("authorization", operation=operation)
+
+    def test_reboot_preserves_retained_migration_and_requires_exact_recovery(self):
+        self.journal.initialize()
+        self.open()
+        operation = self.submit()
+        self.journal.act("begin", operation=operation, release=self.digest)
+        self.journal.generation = None
+        self.assertFalse(self.journal.act("tester")["tester"])
+        self.open()
+        with self.assertRaisesRegex(RecoveryRequired, "new App boot"):
+            self.submit(
+                "recover",
+                "124",
+                {"operation": operation, "versions": self.release["versions"]},
+            )
+        self.views["app"] = dict(self.views["app"], epoch="fresh", boot="fresh")
+        self.journal.generation = None
+        self.open()
+        with self.assertRaisesRegex(RecoveryRequired, "explicit recovery"):
+            self.submit(run="124")
+        with self.assertRaisesRegex(RecoveryRequired, "interrupted operation"):
+            self.submit(
+                "recover",
+                "124",
+                {"operation": "wrong", "versions": self.release["versions"]},
+            )
+        ticket = self.submit(
+            "recover",
+            "124",
+            {"operation": operation, "versions": self.release["versions"]},
+        )
+        self.assertNotEqual(ticket, operation)
+        self.journal.act("begin", operation=ticket, release=self.digest)
+        self.assertNotIn(
+            "migrate",
+            self.journal.act("authorization", operation=ticket)["allowed_workloads"],
+        )
+
+    def test_verified_run_does_not_open_access_without_exact_handoff(self):
+        from activation_record import APP, JUDGE
+
+        backing = ("postgres", "redis", "kafka", "minio")
+        self.release["images"] = {
+            name: f"approved/{name}" for name in (*APP, *JUDGE, *backing)
+        }
+        self.journal.initialize()
+        self.open()
+        ticket = self.submit()
+        self.journal.act("begin", operation=ticket, release=self.digest)
+        config = self.release["environments"]["s3"]["workloads"]
+        observed = {
+            role: dict(
+                boot=self.views[role]["boot"],
+                epoch=self.views[role]["epoch"],
+                containers={
+                    name: dict(
+                        uid=name,
+                        container=name,
+                        workload=name,
+                        image=self.release["images"][name],
+                        config=config[name],
+                    )
+                    for name in workloads
+                },
+            )
+            for role, workloads in (("app", APP), ("judge", JUDGE))
+        }
+        observed["app"]["backing"] = {
+            name: self.release["images"][name] for name in backing
+        }
+        self.journal.act(
+            "complete",
+            operation=ticket,
+            versions=self.release["versions"],
+            observed=observed,
+        )
+        self.journal.act("open", operation=ticket)
+        self.assertEqual(self.journal.status(ticket)["smoke"], "passed")
+        self.assertFalse(self.journal.act("tester")["tester"])
+        with self.assertRaises(RecoveryRequired):
+            self.journal.admit_testers("124", ticket, self.digest)
+        self.journal.admit_testers("123", ticket, self.digest)
+        self.assertTrue(self.journal.act("tester")["tester"])
+        with self.assertRaises(RecoveryRequired):
+            self.journal.admit_testers("123", ticket, self.digest)
+
+    def test_observation_and_daily_cutoff_close_without_workflow(self):
+        self.journal.initialize()
+        self.open()
+        operation = self.submit()
+        self.journal.act("begin", operation=operation, release=self.digest)
+        self.now += timedelta(seconds=16)
+        self.assertFalse(self.journal.act("tester")["smoke"])
+        self.journal.observe_current(**self.views)
+        self.assertTrue(self.journal.act("tester")["smoke"])
+        self.now = self.now.replace(hour=17, minute=58)
+        self.assertEqual(
+            self.journal.observe_current(**self.views)["phase"], "draining"
+        )
+        self.assertFalse(self.journal.act("tester")["tester"])
+
+
 if __name__ == "__main__":
     unittest.main()

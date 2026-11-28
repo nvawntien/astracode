@@ -161,13 +161,8 @@ def deliver_runtime(settings, access):
 
 
 if __name__ == "__main__":
-    from host_services import token
+    from host_services import identity_token
 
     settings = json.loads(Path("/etc/astracode/secret-loader.json").read_text())
-    access = token(
-        {
-            "poller_client_id": settings["loader_client_id"],
-            "controller_audience": "https://vault.azure.net",
-        }
-    )
+    access = identity_token(settings["loader_client_id"], "https://vault.azure.net")
     deliver_runtime(settings, access)

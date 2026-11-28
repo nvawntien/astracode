@@ -1,4 +1,4 @@
-"""Protected App rollout participant. Controller and host authority are independent services."""
+"""Protected App rollout participant. The local activation service issues workload permits."""
 
 from datetime import datetime, timezone
 import ipaddress
@@ -12,8 +12,8 @@ from smoke import smoke
 
 
 class Rollout:
-    def __init__(self, controller, authority, settings):
-        self.controller = controller
+    def __init__(self, activation, authority, settings):
+        self.activation = activation
         self.authority = authority
         self.settings = settings
         self.sides = {
@@ -25,14 +25,14 @@ class Rollout:
     def run(self, ticket):
         # The command accepts only a ticket ID. Read the operation and bundle
         # from the authenticated services, never from workflow CLI parameters.
-        self.request = self.controller.approved_operation(ticket)
+        self.request = self.activation.approved_operation(ticket)
         self.release = self.authority.release(self.request["release"])
         return activate(
-            self.controller.activation_state(), self.request, self.release, self
+            self.activation.activation_state(), self.request, self.release, self
         )
 
     def lease_current(self, request, now):
-        return self.controller.lease(request) > now
+        return self.activation.lease(request) > now
 
     def epochs_match(self, request):
         return self.authority.current_epochs() == {
@@ -40,19 +40,19 @@ class Rollout:
         }
 
     def contest_frozen(self):
-        return self.controller.contest_frozen()
+        return self.activation.contest_frozen()
 
     def verify_release(self, request, release):
         return self.authority.verify_release(request, release)
 
     def verified_rollback(self, release):
-        return self.controller.was_verified(release["digest"], release["versions"])
+        return self.activation.was_verified(release["digest"], release["versions"])
 
     def begin(self, request, release):
-        self.controller.begin_if_current(request, release["digest"])
+        self.activation.begin_if_current(request, release["digest"])
 
     def close_edge(self):
-        self.controller.close_edge(self.request)
+        self.activation.close_edge(self.request)
 
     def quiesce_worker(self):
         self.authority.begin(self.request)
@@ -67,7 +67,7 @@ class Rollout:
             if (
                 time.monotonic() >= check_until
                 or not self.epochs_match(self.request)
-                or self.controller.lease(self.request) <= datetime.now(timezone.utc)
+                or self.activation.lease(self.request) <= datetime.now(timezone.utc)
             ):
                 return False
             time.sleep(0.25)
@@ -172,15 +172,15 @@ class Rollout:
         )
 
     def record_verified(self, request, release, versions):
-        self.controller.complete_if_current(
+        self.activation.complete_if_current(
             request, self.authority.observed_release(release), versions
         )
 
     def open_edge(self, request):
-        self.controller.open_verified_edge(request)
+        self.activation.open_verified_edge(request)
 
     def revoke_permits(self):
         self.authority.revoke(self.request)
 
     def recovery_required(self, request):
-        self.controller.require_recovery(request)
+        self.activation.require_recovery(request)

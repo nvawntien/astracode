@@ -19,6 +19,7 @@ Restart=on-failure
 RestartSec=10
 %{ if node == "app" ~}
 ExecStartPre=/usr/local/libexec/astra/app-disk before-k3s
+ExecStartPre=/usr/bin/install -d -o astra-activation -g astra-activation -m 0700 /srv/astracode/data/activation
 %{ endif ~}
 ExecStartPre=/usr/local/libexec/astra/reset-epochs
 ExecStartPre=/usr/local/libexec/astra/k3s-credential ${node}

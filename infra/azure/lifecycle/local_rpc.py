@@ -50,7 +50,7 @@ def call(path, operation, params, timeout=10):
 
 
 def serve(path, peer, dispatch):
-    uid = pwd.getpwnam(peer).pw_uid
+    uid = peer if isinstance(peer, int) else pwd.getpwnam(peer).pw_uid
     slots = threading.BoundedSemaphore(6)
 
     def handle(conn):
