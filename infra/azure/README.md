@@ -88,7 +88,7 @@ gh api repos/nvawntien/astracode/actions/oidc/customization/sub
 gh api repos/nvawntien/astracode/environments --jq '.environments[] | {name, protection_rules}'
 ```
 
-Record the Azure Billing credit and expiry independently for every slot. Confirm the minimum IAM grants, Azure Policy, exact image, FC1 subscription quota/region eligibility, package and network path, receipt ingress and GitHub Environment/federation prerequisites before provisioning. Complete the [tenant A decision](../../openspec/changes/azure-walking-skeleton/design.md#pending-entra-and-github-federation-decision) and save the authorization for task 2.2. Task 2.1 captures preflight feasibility. Tasks 2.2–2.4 and 3.1–3.4 supply the actual cloud acceptance.
+Record the Azure Billing credit and expiry independently for every slot. Confirm the minimum IAM grants, Azure Policy, exact image, FC1 subscription quota/region eligibility, package and network path, receipt ingress and GitHub Environment/federation prerequisites before provisioning. The controller procedure depends on acceptance of Proposed ADR-0013 and confirmed directory authority. Task 2.1 captures preflight feasibility. Tasks 2.2–2.4 and 3.1–3.4 supply the actual cloud acceptance. [Proposed ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
 
 ## Provisioning privileges
 

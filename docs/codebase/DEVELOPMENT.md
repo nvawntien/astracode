@@ -122,8 +122,7 @@ GitHub Actions workflows in `.github/workflows/`:
 | `promotion-eligibility.yml` | protected `main` dispatch | Checks canonical S2 evidence and the reviewed tag mapping. |
 | `deploy-production.yml` | retired | Historical dispatch and credentials are retired through the separate owner-reviewed transition. |
 
-These rows describe the checked-in workflows. M0-13 implements the approval-gated
-Azure/k3s delivery model proposed in [ADR-0004](../architecture/adr/0004-azure-topology-and-subscription-layout.md).
+These rows describe workflow definitions in the checkout. Registration on `main`, protected environment configuration and live activation require their own evidence. [Staging architecture](../architecture/deployment.md) · [Release transition](../../scripts/release/README.md)
 
 Documentation-only PRs skip the Docker build steps and still report all six
 required image checks. CI checks both paths of renames. Code, migration SQL,
@@ -149,7 +148,7 @@ For website development, use `npm run dev` (`next dev -p 3000`), `npm run build`
 
 From the repository root, keep the usual `make test` and `make test-db` gates. For M0-13 also validate the pinned Terraform roots with the backend disabled and provider mocks, render both Kustomize overlays and run the strict schema and native API fixture, and validate the synthetic App and Judge cloud-init renders. The managed database fixture uses a disposable PostgreSQL container. The release and controller fixtures use synthetic receipts, identities, time and VM outcomes. Use `actionlint`, `shellcheck`, and shell syntax checks for changed workflow and shell files.
 
-The [Phase A evidence map](../evidence/m0-13-phase-a.md) links exact commands and the S3 and S2 acceptance still required. See the [staging runbook](../architecture/deployment.md) for the protected operator path and [release verification](../../scripts/release/README.md) for CI and default-branch registration.
+The [M0-13 evidence map](../evidence/m0-13-phase-a.md) links verification commands and results. See [Azure procedures](../../infra/azure/README.md) for operator steps and [release verification](../../scripts/release/README.md) for CI and default-branch registration.
 
 ## Migrations and operational checks
 

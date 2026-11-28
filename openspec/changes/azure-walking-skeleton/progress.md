@@ -4,24 +4,20 @@
 
 ## Verified state
 
-- Branch — `feature/azure-walking-skeleton`. Reviewed base for remediation was `c89c132`, the head of draft PR #73. CI and OpenSpec succeeded on that hosted head. Its rehearsal-head check was skipped.
-- Repository checks — `make test-quick` and `make test` passed on Go 1.25.8 with writable temporary directories and loopback. Full verification covered test/vet/race, benchmark checks, 620 website tests, website build, Compose config and 11 strict OpenSpec items. `make test-db` passed all targeted PostgreSQL suites.
-- Task 1.1 — `terraform fmt -check -recursive infra/azure`, both backend-disabled initializations and validations, and bootstrap/environment mocks passed (3 and 8). The retained-disk and compute regression checked existing-state reconciliation, expired approval, protected state/disk and VM/attachment removal. Reviewed-plan tests passed 7/7.
-- Task 1.6 — Controller tests passed 14/14, including two-release rollback, source/digest allowlist, recovery after hard stop, stale boot and Job rejection, expired or unauthorized restart, sealed partial histories and S2 plan approval. Activation, record, host, migration, rollout and loopback smoke fixtures passed 17/17. The managed PostgreSQL fixture passed writer fencing, partial histories and compatible rollback.
-- Task 1.7 — Both Kustomize overlays passed strict Kubernetes/Traefik schemas with 118 resources and 13 image pins each. Native admission and RBAC passed on a disposable API server. Release policy and packaging passed 8/8 and cloud-init host fixtures passed 9/9. Actionlint, ShellCheck, Bash syntax, Python checks, strict OpenSpec and Git whitespace checks passed.
-- Progress — 7 of 15 tasks. PA-01, PA-02 and PA-03 have offline regression evidence; S3 exercises retain their live acceptance requirements. [Evidence](../../../docs/evidence/m0-13-phase-a.md)
+- Branch — `feature/azure-walking-skeleton`. The reviewed implementation revision is `8db87e1`. Hosted CI and OpenSpec passed on that PR revision. The exact-head S3 rehearsal check was skipped. [Verification evidence](../../../docs/evidence/m0-13-phase-a.md#source-and-scope)
+- Progress — 7 of 15 tasks. The change-specific two-stage Gate 2 sequence and Phase A authorization are recorded separately from implementation and cloud acceptance. [Gate 1 Round 2](review-gate1-round2.md)
+- Documentation review scope — Two Proposed ADR drafts and ownership consolidation only. The 36 ED scenarios have individual evidence rows. Runtime tests rely on the recorded implementation runs. [Scenario verification](../../../docs/evidence/m0-13-phase-a.md#scenario-verification)
 
 ## Last session
 
-- Corrected the S3 experiment release set and hard-stop recovery, added reviewed-plan protection for VM creation and replacement, selected the Korea Central sizes, and documented first-time S4 bootstrap and state migration.
-- Consolidated preflight facts and estimates into the existing evidence file, executable procedures into infrastructure READMEs, durable topology and trust boundaries into deployment and security, and the pending identity decision into this change's design.
+- Drafted [ADR-0012](../../../docs/architecture/adr/0012-judge-executor-trust-boundary.md) and [ADR-0013](../../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md). Routed implementation details and commands to the existing design and runbooks. The executor's original approval is linked from ADR-0012.
 
 ## Broken or unverified
 
-- Task 2.1 remains open for tenant A administrator support, protected immutable OIDC and receipt reachability, verified balances and expiry, effective provisioning and data access, and outstanding Flex Consumption and approval feasibility. [Pending decision](design.md#pending-entra-and-github-federation-decision)
-- Azure allocation, deployment, actual two-release rollback, hard-stop recovery, budget notifications and cleanup remain pending. The privileged local K3s hard-stop VM was not rerun in this session. Hosted CI and independent review must assess the remediation revision.
+- The privileged Judge workload, launch-gate trust assumptions and S3/S2 exposure depend on Proposed ADR-0012 and real S3 isolation evidence.
+- The protected controller API, App poller, S2 controller-owned power, S3 recovery and independent cleanup, and workflow identity integration depend on Proposed ADR-0013. Tenant A directory support, actual federation and receipt access, billing and hosting feasibility remain unverified. Task 2.1 stays open.
+- The two outstanding lifecycle review findings remain separate and open. Their disposition requires implementation review, not this documentation change.
 
 ## Next action
 
-- Review the offline remediation and the tenant A proposal. Run the authorized read-only scope checks and record evidence before considering S4 bootstrap. [Operator commands](../../../infra/azure/README.md#task-21-review-boundary)
-- Retain the pre-provisioning boundary and the accepted two-stage Gate 2 sequencing. Main workflow registration, publication and delivery activation, S2 acceptance and archive remain separate gates.
+- Independent ADR-only documentation review under [workflow §10](../../../docs/process/workflow.md#10-adrs). The accepted ADR-0004 and historical review records remain intact. Return to Phase B only under separate authorization and the recorded prerequisites.

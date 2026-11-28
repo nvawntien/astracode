@@ -1,6 +1,6 @@
 # AstraCode dual-node Compose deployment reference
 
-The Azure/k3s path for M0-13 is the staging delivery path. See the [staging runbook](architecture/deployment.md) for provisioning boundaries, start and deployment approvals, smoke, expiry and recovery. The first real environment requires Phase B authorization and S3 verification. [ADR-0004](architecture/adr/0004-azure-topology-and-subscription-layout.md)
+The Azure/k3s staging candidate is described in [deployment architecture](architecture/deployment.md). Its executable procedures live in the [Azure](../infra/azure/README.md) and [lifecycle](../infra/azure/lifecycle/README.md) runbooks. The first real environment requires Phase B authorization and S3 verification. [ADR-0004](architecture/adr/0004-azure-topology-and-subscription-layout.md)
 
 The rest of this file preserves the previous Docker Compose and SSH deployment reference. Its hosted production workflow is retired on the maintained workflow definition. The separate default-branch transition also requires disabling historical dispatch and retiring its credentials. Local development still uses Compose.
 
@@ -20,9 +20,9 @@ applications. Run one sequence per owning database with deployment-provided
 credentials. Verify all three outcomes before starting the applications.
 Each service also checks its expected version read-only at startup.
 
-The existing production Compose configuration does not run migrations before
+The legacy production Compose configuration does not run migrations before
 activation. It excludes the local migration job and local database credential
-overrides. The Azure/k3s path uses the existing Goose CLI and service-owned SQL migrations with a separate managed writer fence. Follow the staging runbook for this path.
+overrides. The Azure/k3s candidate uses the existing Goose CLI and service-owned SQL migrations with a separate managed writer fence. Follow the [managed activation runbook](../infra/azure/lifecycle/README.md) for that path.
 [ADR-0011](architecture/adr/0011-local-goose-migrations.md)
 
 ## Historical Compose release policy
@@ -431,8 +431,9 @@ Node verifies the consumer group reported by that Worker.
 
 ### First protected rollout from a legacy pair
 
-Use a maintenance window. Keep the production lock, node-owned configuration,
-and private network topology stable and prevent other Worker launches. In the
+This section describes the legacy Compose workflow for historical reference.
+It required a maintenance window, stable production lock, node-owned configuration
+and private network topology, with other Worker launches prevented. In the
 manual **Deploy production** workflow, select the protected target
 `image_tag`, enter the installed App/Judge tag as `legacy_from`, and enter the
 Judge Node's Kafka-visible private IPv4 address as `legacy_judge_peer`. Obtain
@@ -480,7 +481,7 @@ the old Worker can still use fallback limits and acknowledge failed DLT writes.
 
 ### Normal protected rollout
 
-The manual **Deploy production** workflow:
+The historical manual **Deploy production** workflow performed these steps:
 
 1. validates and checks out the requested semantic release tag;
 2. checks that all six GHCR release image manifests exist;
@@ -598,5 +599,6 @@ Worker gRPC, or Sandbox HTTP to the public Internet.
 ## Deprecated command
 
 `scripts/deploy-production.sh` intentionally exits without deploying. It is a
-deprecated combined-node entrypoint retained only to prevent accidental use;
-use the protected GitHub workflow instead.
+deprecated combined-node entrypoint retained to prevent accidental use. The
+legacy workflow above is historical reference. See the [current release delivery
+runbook](../scripts/release/README.md) for the separately reviewed transition.

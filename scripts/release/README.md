@@ -1,6 +1,6 @@
 # Exact-revision release delivery
 
-Phase A defines these paths and exercises them offline. No workflow, registry publication, Azure identity or storage operation has been activated by this change. `M013_PUBLICATION_ENABLED` and `M013_DELIVERY_ENABLED` remain unset until the separately authorized registration and live verification.
+Phase A defines these paths and exercises them offline. Keep `M013_PUBLICATION_ENABLED` and `M013_DELIVERY_ENABLED` disabled until the separately authorized transition and live verification. The controller admission and workflow identity split depend on Proposed ADR-0013. [Proposed ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
 
 `release-images.yml` accepts protected `develop` pushes only. It calls the reviewed reusable publisher on protected `main`. Each exact source SHA runs the existing Go, database, frontend, gateway, Compose, deployment-script, benchmark and six image checks, plus strict OpenSpec. Existing check names remain intact. CI records its explicit checkout SHA, run, attempt and linked outcome. Publication has a separate job with registry and S4 receipt permissions. PR checks have neither permission.
 
