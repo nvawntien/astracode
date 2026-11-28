@@ -93,7 +93,7 @@ On 2026-11-28 the Orchestrator supplied these observations from authenticated Az
 - Southeast Asia was policy-blocked. East Asia showed the candidate SKUs and was policy-blocked in S2. The desired B-series sizes were absent from the Indonesia Central check. Korea Central was allowed for S2, S3 and S4. S2 and S3 returned empty SKU restrictions in this region for `Standard_B4s_v2`, `Standard_B4ls_v2`, `Standard_B2s_v2` and `Standard_B2ls_v2`. Actual allocation and sustained performance are pending.
 - S2/S3 registered Compute, Network, Storage, KeyVault, ManagedIdentity, Web, App, Insights, OperationalInsights, Authorization and Consumption. S4 registered Storage, Authorization and Consumption.
 - S2/S3/S4 returned 0 of 250 Storage Accounts in use and StorageV2 with Standard_LRS available. S2/S3 reported Korea Central availability for Key Vault and Functions Flex Consumption. Subscription FC1 eligibility and quota, deployment package delivery, VNet and private Blob access, timer delivery, Entra authentication, managed identity authorization and notifications require live evidence.
-- Tenant A disallows member app creation and the available accounts reported no directory role assignments. Tenant B allows member app creation. No cross-tenant enterprise application, consent or role assignment was demonstrated. See the [Proposed ADR-0013](../architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md).
+- Tenant A disallows member app creation and the available accounts reported no directory role assignments. Tenant B allows member app creation. No cross-tenant enterprise application, consent or role assignment was demonstrated. The accepted operating model uses UAMI federation. See [ADR-0013](../architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md).
 - GitHub reported a public repository, Orchestrator ADMIN access, an existing `production` environment with no protection rules, and default immutable OIDC subjects with prefix `repo:nvawntien@200005493/astracode@1157203560`. Native approval, federation and negative access proof remain pending.
 
 ### S2 and S3 quota per subscription
@@ -113,7 +113,7 @@ The A/B candidate consumed all 6 regional vCPUs and all 3 Standard Public IPv4 a
 
 ### Candidate and retail estimate
 
-The public Azure Retail Prices API returned USD 0.208/hour for `Virtual Machines Bsv2 Series`, SKU and meter `B4s v2`, region `koreacentral`, type `Consumption`, effective 2023-09-01. The same response listed separate Windows, Spot, Low Priority and Cloud Services meters. The previously supplied USD 0.052/hour Judge rate estimates USD 0.260/hour for both VMs. [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
+The A/B forecast below is historical. The public Azure Retail Prices API returned USD 0.208/hour for `Virtual Machines Bsv2 Series`, SKU and meter `B4s v2`, region `koreacentral`, type `Consumption`, effective 2023-09-01. The same response listed separate Windows, Spot, Low Priority and Cloud Services meters. The previously supplied USD 0.052/hour Judge rate estimates USD 0.260/hour for both VMs. [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices)
 
 | Resource | Supplied retail unit rate | 30-day standing estimate |
 | --- | ---: | ---: |
@@ -124,3 +124,22 @@ The public Azure Retail Prices API returned USD 0.208/hour for `Virtual Machines
 | Total | | USD 72.00 |
 
 At 2–4 VM hours/day, 14 days estimates USD 40.88–48.16 and 21 days USD 61.32–72.24. The scenario uses 30-day proration and pay-as-you-go rates. The other quoted VM rate for B2s_v2 is USD 0.104/hour. The estimate excludes NAT processing at the supplied USD 0.045/GB, E6 operations at USD 0.002 per 10,000, endpoint traffic, Storage, Key Vault, DNS, Functions, monitoring, taxes and student benefits. The Orchestrator expects typical usage below eight hours/day. Actual billed rates, credits and workload hours were not measured. The forecast is limited to the submission horizon.
+
+
+### Simplified architecture preflight
+
+- ADR-0013 and the revised NFR-F03 were accepted after independent review of [`fe7c521`](https://github.com/nvawntien/astracode/commit/fe7c521f57b2918d55a29e5831e3fcc8a7810c89). Hosted CI and OpenSpec passed for that commit in PR #73. The rehearsal-head workflow was skipped.
+- On 2026-11-28, GitHub Environment GET returned only `production` with an empty protection list. The repository OIDC endpoint reported `use_default: true` and no explicit claim list. The contents GET on `main` and workflow registration GET returned HTTP 404 for `staging-deploy.yml`. Protected deployment configuration, matching federation and registration remain pending. [Read-only probes](../../infra/azure/README.md#task-21-review-boundary)
+- Reuse recorded Azure mapping, access, region and quota. The simplified environment requires six regional vCPUs, two static Standard IPv4s and one Key Vault private endpoint per S2 or S3. Provider registration and schedule operation results, existing S4 account reachability or empty-target inventory, operator and publisher network paths, budget readiness and Azure for Students balances and expiry still need the operator's results. S4 data-plane creation checks belong to Task 2.2. Native schedule creation for S3, effective App-only authority, actual VM allocation and confirmed shutdown belong to Tasks 2.3–2.4.
+
+The revised planning subtotal uses the following USD rates. Rechecked public retail VM, disk, static IP, DNS and Blob rates on 2026-11-28. The USD 0.01/hour Key Vault private endpoint is a carried-forward planning assumption pending a Korea Central quote. This is a planning subtotal. Actual subscription costs and credits need offer-specific confirmation. [Azure Retail Prices API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices) · [Private Link pricing](https://azure.microsoft.com/en-us/pricing/details/private-link/)
+
+| Per S2 or S3 environment | Basis | 30-day standing subtotal |
+| --- | --- | ---: |
+| Three Standard SSD E6 LRS 64 GiB disks | USD 4.80/month each | USD 14.40 |
+| Two Standard static IPv4s | USD 0.005/hour each × 720 hours | USD 7.20 |
+| One Key Vault private endpoint | planning at USD 0.01/hour × 720 hours | USD 7.20 |
+| One private DNS zone | USD 0.50/month | USD 0.50 |
+| Total standing | | USD 29.30 |
+
+Linux on-demand rates are USD 0.208/hour for App and USD 0.052/hour for Judge. At 2–4 billed hours/day for both VMs, one environment totals **USD 20.95–28.23 for 14 days** or **USD 31.43–42.35 for 21 days**. For short S3 use, calculate `29.30 × retained days / 30 + 0.26 × pair runtime hours`. For S4, the first Hot LRS Block Blob capacity tier is USD 0.02/GB-month across the three separately scoped accounts. As a sizing example, 30 GB total bills USD 0.60 per month for capacity. Storage volume remains unmeasured. The subtotals exclude disk and Blob operations, private endpoint data, DNS queries, Key Vault requests, backups and versions, egress, taxes and credits. Add the approved usage forecast and confirm available credit and expiry per slot before spending. [Azure for Students credit check](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)

@@ -54,40 +54,129 @@ Run the bootstrap checks from the repository root after backend-disabled initial
 
 ## Task 2.1 review boundary
 
-Use the owning subscription contexts after the Orchestrator authorizes the next Phase B operation. This Bash fragment checks account and scope locally without printing identities. Use only trusted, protected local values for the variables below. Keep shell tracing disabled. Use the expected names from the [preflight record](../../docs/evidence/m0-13-phase-a.md#azure-preflight-observations).
+Use the approved mapping below. Carry forward the recorded permissions, Korea Central SKU restrictions and quotas. Repeat a completed lookup only if its scope or evidence changes. Keep subscription IDs, principal IDs and network addresses in the protected operator session. Record only sanitized results by slot. [Existing observations](../../docs/evidence/m0-13-phase-a.md#azure-preflight-observations) · [Accepted ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
+
+| Slot | CLI profile | Tenant | Preflight use |
+| --- | --- | --- | --- |
+| S1 | `.acc5` | A | Credit and expiry record |
+| S2 | `.acc4` | A | Shutdown and delivery readiness |
+| S3 | `.acc3` | A | Shutdown and delivery readiness |
+| S4 | `.acc1` | A | State, receipts and budget readiness |
+| S5 | `.acc2` | B | Credit and expiry record |
+
+In Bash, load the already approved `S2_SUB`, `S3_SUB` and `S4_SUB` values. Keep shell tracing disabled. The account check also remains the scope check for the separately authorized S4 procedure.
 
 ```bash
-set -euo pipefail
 set +x
-: "${TENANT_A:?}" "${TENANT_B:?}" "${S1_SUB:?}" "${S2_SUB:?}" "${S3_SUB:?}" "${S4_SUB:?}" "${S5_SUB:?}"
+: "${S2_SUB:?}" "${S3_SUB:?}" "${S4_SUB:?}"
+m013_az() {
+  local profile=$1 sub=$2
+  shift 2
+  AZURE_CONFIG_DIR="$HOME/.$profile" az "$@" --subscription "$sub" --only-show-errors
+}
 check_account() {
   az account show --subscription "$1" -o json |
     jq -e --arg sub "$1" --arg tenant "$2" \
       '.id == $sub and .tenantId == $tenant and .state == "Enabled"' >/dev/null
 }
-AZURE_CONFIG_DIR="$HOME/.acc5" check_account "$S1_SUB" "$TENANT_A"
-AZURE_CONFIG_DIR="$HOME/.acc2" check_account "$S5_SUB" "$TENANT_B"
-for pair in acc4:S2 acc3:S3 acc1:S4; do
-  slot=${pair#*:}
-  export AZURE_CONFIG_DIR="$HOME/.${pair%:*}"
-  subvar="${slot}_SUB"
-  sub=${!subvar}
-  check_account "$sub" "$TENANT_A"
-  az provider list --subscription "$sub" --query "[?registrationState=='Registered'].namespace" -o tsv
-  if [[ "$slot" != S4 ]]; then
-    az vm list-usage --subscription "$sub" --location koreacentral -o table
-    az network list-usages --subscription "$sub" --location koreacentral -o table
-    az vm list-skus --subscription "$sub" --location koreacentral --resource-type virtualMachines \
-      --all --query "[?name=='Standard_B4s_v2' || name=='Standard_B2ls_v2'].{sku:name,restrictions:restrictions}" -o json
-    az vm image list --subscription "$sub" --location koreacentral --all \
-      --publisher Canonical --offer ubuntu-24_04-lts --sku server --query '[].urn' -o tsv
-  fi
-done
-gh api repos/nvawntien/astracode/actions/oidc/customization/sub
-gh api repos/nvawntien/astracode/environments --jq '.environments[] | {name, protection_rules}'
 ```
 
-Record Azure Billing credit and expiry, provider registration including `Microsoft.DevTestLab`, location and quota, approved images (including Ubuntu VM Agent), scoped Azure RBAC, the native schedule and its notification path, protected GitHub Environment review and exact OIDC subject, and GHCR/S4 reachability. Verify the daily schedules can target the pair before creation. Check workflow registration and authorization for S3 separately from activating S2. The published role must deny power, Judge, role assignments and Terraform state. Prove native shutdown using actual instance views on S3. [Proposed ADR-0013](../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md) · [Azure VM auto-shutdown](https://learn.microsoft.com/en-us/azure/virtual-machines/auto-shutdown-vm)
+On S2/S3, confirm `Microsoft.DevTestLab` reports `Registered`, inspect its `schedules` catalog, and check the Compute operation catalog for the exact Action Run Command action. Catalog metadata proves the API is advertised. The separately authorized S3 preparation must show that the offer and policy permit both schedule resources before VM creation. Tasks 2.3–2.4 verify actual authorization, notifications, deallocation and recovery with VMs. A location or registration issue stays open until resolved by the authorized operator.
+
+```bash
+for slot in S2 S3; do
+  case "$slot" in S2) profile=acc4; sub=$S2_SUB;; S3) profile=acc3; sub=$S3_SUB;; esac
+  printf '%s\n' "$slot"
+  m013_az "$profile" "$sub" provider show --namespace Microsoft.DevTestLab \
+    --query "{registration:registrationState,schedules:resourceTypes[?resourceType=='schedules'].{locations:locations,apiVersions:apiVersions}}" -o json
+  m013_az "$profile" "$sub" provider operation show --namespace Microsoft.DevTestLab -o json |
+    jq -r '.. | objects | .name? // empty | select(ascii_downcase | startswith("microsoft.devtestlab/schedules/"))'
+  m013_az "$profile" "$sub" provider operation show --namespace Microsoft.Compute -o json |
+    jq -r '.. | objects | .name? // empty | select(ascii_downcase == "microsoft.compute/virtualmachines/runcommand/action")'
+done
+```
+
+Inspect any existing delivery custom role, UAMI and federation. A missing identity or role is expected for an empty environment and leaves live federation and effective-scope checks for S3. For an existing principal inspect all its Azure assignments in the target subscription, including parent scopes on App. The role must contain only `Microsoft.Compute/virtualMachines/read` and `Microsoft.Compute/virtualMachines/runCommand/action`. The assignment belongs on `astra-s2-app` or `astra-s3-app` exactly. Also review inherited and group access, and cross-subscription access to S4 where applicable. These are metadata checks. S3 must prove the actual approved action succeeds and Judge, VM power, IAM and state access are denied.
+
+```bash
+for slot in S2 S3; do
+  case "$slot" in S2) profile=acc4; sub=$S2_SUB;; S3) profile=acc3; sub=$S3_SUB;; esac
+  stem="astra-${slot,,}"
+  app_scope="/subscriptions/$sub/resourceGroups/$stem/providers/Microsoft.Compute/virtualMachines/$stem-app"
+  m013_az "$profile" "$sub" role definition list --name "AstraCode $slot App guest delivery" \
+    --query '[].{name:roleName,permissions:permissions}' -o json
+  if principal=$(m013_az "$profile" "$sub" identity show -g "$stem-ops" -n "$stem-delivery" --query principalId -o tsv); then
+    m013_az "$profile" "$sub" identity federated-credential list -g "$stem-ops" --identity-name "$stem-delivery" \
+      --query '[].{name:name,issuer:issuer,audiences:audiences,subject:subject}' -o json
+    m013_az "$profile" "$sub" role assignment list --assignee-object-id "$principal" --fill-principal-name false --all \
+      --query '[].{scope:scope,role:roleDefinitionName}' -o json
+    m013_az "$profile" "$sub" role assignment list --assignee-object-id "$principal" --fill-principal-name false \
+      --scope "$app_scope" --include-inherited --query '[].{scope:scope,role:roleDefinitionName}' -o json
+    m013_az acc1 "$S4_SUB" role assignment list --assignee-object-id "$principal" --fill-principal-name false --all \
+      --query '[].{scope:scope,role:roleDefinitionName}' -o json
+  fi
+done
+```
+
+Inspect GitHub Environment settings for designated reviewers, protected `main`, self-review prevention and disabled administrator bypass. Check the workflow registration and repository OIDC template. Compare the expected subject from `identity.tf`, including repository ID, environment, ref and workflow ref. The issuer is `https://token.actions.githubusercontent.com` and Azure audience is `api://AzureADTokenExchange`. Check GHCR package visibility and the approved pull and publisher identities and receipt network path. Repository-level OIDC changes, workflow registration and activation require separate authorization. The S3 run verifies the actual token and wrong-context denials. [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc) · [Release workflow registration](../../scripts/release/README.md#separately-reviewed-default-branch-transition)
+
+```bash
+repo=nvawntien/astracode
+gh api --method GET "repos/$repo" --jq '{id,visibility,default_branch}'
+gh api --method GET "repos/$repo/environments" --jq '.environments[].name'
+for env_name in s2-delivery s3-delivery canonical-publication; do
+  gh api --method GET "repos/$repo/environments/$env_name" \
+    --jq '{name,protection_rules:[.protection_rules[] | {type,prevent_self_review,reviewer_count:(.reviewers // [] | length)}],deployment_branch_policy,can_admins_bypass}'
+  gh api --method GET "repos/$repo/environments/$env_name/deployment-branch-policies" \
+    --jq '.branch_policies[] | {name,type}'
+done
+gh api --method GET "repos/$repo/actions/oidc/customization/sub" --jq '{use_default,include_claim_keys}'
+gh api --method GET "repos/$repo/actions/workflows/staging-deploy.yml" --jq '{path,state}'
+```
+
+For S4, inspect only `astra-s4-shared`, check each proposed account name, and verify the approved network paths and separation of the state, recovery and receipt principals. Use `S4_PREFIX` from the approved S4 inputs. An unavailable name requires identifying the owner before proceeding. If an account already exists in the target, inspect its firewall and use the authenticated data-plane probe from the matching approved principal and network. A successful ARM read proves management visibility only. An empty target needs the scoped data-plane verification in Task 2.2. The App receipt reader requires the approved S2 subnet or other existing approved path, and the publisher needs its own verified restricted egress. [Storage firewall and service endpoints](https://learn.microsoft.com/en-us/troubleshoot/azure/azure-storage/blobs/networking/best-practices-for-storage-network-security)
+
+```bash
+: "${S4_PREFIX:?}"
+m013_az acc1 "$S4_SUB" group exists --name astra-s4-shared -o tsv
+for suffix in state backup receipts; do
+  m013_az acc1 "$S4_SUB" storage account check-name --name "${S4_PREFIX}${suffix}" \
+    --query '{available:nameAvailable,reason:reason}' -o json
+done
+# For existing in-scope accounts, inventory firewall and authentication metadata.
+m013_az acc1 "$S4_SUB" storage account list -g astra-s4-shared -o json |
+  jq --arg prefix "$S4_PREFIX" '[.[] | select(.name | startswith($prefix)) |
+    {name,publicNetwork: .publicNetworkAccess,allowSharedKey: .allowSharedKeyAccess,
+     defaultAction: .networkRuleSet.defaultAction,
+     subnetCount: (.networkRuleSet.virtualNetworkRules // [] | length),
+     ipRuleCount: (.networkRuleSet.ipRules // [] | length)}]'
+# Use these probes only if their accounts and containers already exist.
+m013_az acc1 "$S4_SUB" storage container show --account-name "${S4_PREFIX}state" --name s4-tfstate --auth-mode login -o none
+m013_az acc4 "$S2_SUB" storage container show --account-name "${S4_PREFIX}state" --name s2-tfstate --auth-mode login -o none
+m013_az acc3 "$S3_SUB" storage container show --account-name "${S4_PREFIX}state" --name s3-tfstate --auth-mode login -o none
+# Run with the approved receipt-reader profile and its approved receipt network.
+m013_az acc1 "$S4_SUB" storage container show --account-name "${S4_PREFIX}receipts" --name canonical-releases --auth-mode login -o none
+```
+
+The last command is an acc1 probe only if acc1 is the recorded receipt reader. Otherwise use the approved existing profile for that principal with the same S4 account and container. Receipt publisher first-write and isolation checks require the real scopes under Task 2.2. If the publisher UAMI will be hosted in S4, check that provider in S4 with `m013_az acc1 "$S4_SUB" provider show --namespace Microsoft.ManagedIdentity --query registrationState -o tsv`.
+
+Read existing budgets in the three working subscriptions. Confirm the planned amount, validity and 50/80/100 actual-spend alerts. Actual alert delivery is a later live check. Each subscription owner checks the Azure for Students credit and expiration in the Sponsorships portal. Report amount, currency, expiry and check date per slot. Subscription status and budget spend are separate from remaining credit. [Azure budgets API](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/list) · [Student credit balance and expiration](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)
+
+```bash
+for slot in S2 S3 S4; do
+  case "$slot" in S2) profile=acc4; sub=$S2_SUB;; S3) profile=acc3; sub=$S3_SUB;; S4) profile=acc1; sub=$S4_SUB;; esac
+  printf '%s\n' "$slot"
+  m013_az "$profile" "$sub" rest --method get \
+    --url "https://management.azure.com/subscriptions/$sub/providers/Microsoft.Consumption/budgets?api-version=2024-08-01" \
+    -o json | jq '[.value[] | {name,amount: .properties.amount,timePeriod: .properties.timePeriod,
+      spend: .properties.currentSpend,alerts: [(.properties.notifications // {})[] |
+        {enabled,threshold,thresholdType}]}]'
+done
+```
+
+Before requesting Task 2.2 authorization, account for existing S4 resources or confirm the target is empty. Prepare `S4_VARS` with the recorded S4 tenant, subscription and location, available prefix, distinct principals, approved source networks, receipt retention, budget date and recipients. Confirm stable operator egress, relevant role definition and assignment authority, the budget against real credits, Terraform 1.13.5, the pinned AzureRM provider and a protected directory for local state and plans. After authorization, use the [S4 bootstrap procedure](#task-22-first-time-s4-bootstrap).
+
+Before S3 allocation, complete S4 state migration and access checks, obtain separate S3 authorization, register the protected workflow and review the S3 candidate SHA and two isolated rehearsal receipts. Prepare the exact approved window in UTC, shutdown margin and emergency/notification paths, pinned Ubuntu image with VM Agent, App LUN 0 filesystem UUID, private ingress and Key Vault/registry access. Review the preparation and compute plans separately and verify the two native schedules before enabling compute. Keep S3 deployment and power-state proof in Tasks 2.3–2.4. [S3 procedure](#s3-provision-and-deploy)
 
 ## Provisioning privileges
 

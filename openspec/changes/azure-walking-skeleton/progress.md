@@ -5,20 +5,19 @@
 ## Verified state
 
 - Branch / worktree — `feature/azure-walking-skeleton`, [PR #73](https://github.com/nvawntien/astracode/pull/73).
-- Last verify run — `make test`, `make test-db`, strict OpenSpec (11), `actionlint` and shell checks passed.
-- Tasks done — 7/15, Phase A. Provider mocks (10 environment, 3 S4), reviewed apply (6), cloud-init schema/systemd/nft, strict overlays and native admission passed. App activation and smoke (22), PostgreSQL writer-fence and release policy/delivery (10) and package tests passed. [Reproduction and results](../../../docs/evidence/m0-13-phase-a.md#simplified-candidate-offline-verification)
+- Tasks done — 7/15, Phase A. Hosted CI and OpenSpec passed for `fe7c521`. The hosted rehearsal-head job was skipped. [Offline verification](../../../docs/evidence/m0-13-phase-a.md#simplified-candidate-offline-verification)
+- Local verification — `make test-quick` and `make test` passed with Go 1.25.8. Strict OpenSpec passed 11 items. Documentation links and fenced shell syntax passed.
 
 ## Last session
 
-- Replaced controller-owned startup and custom authentication with manual owner-approved startup, native shutdown and separately approved automated delivery. The App journal preserves release, migration, permit and recovery fencing. [Proposed ADR-0013](../../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
-- Initial VM creation without off-time history and single missing-VM recovery passed offline, including wrong-plan, wrong-disk and wrong-NIC refusal. S3 must confirm the real ARM and native schedule behavior.
+- Recorded Orchestrator acceptance of ADR-0013 and the revised NFR-F03 after independent review of `fe7c521f57b2918d55a29e5831e3fcc8a7810c89`. [Accepted ADR-0013](../../../docs/architecture/adr/0013-staging-lifecycle-control-plane-and-identity.md)
+- Reused prior Azure observations. GitHub read-only checks found the default OIDC template and missing delivery workflow and Environments. Refreshed retail inputs and documented remaining read-only probes. [Preflight evidence](../../../docs/evidence/m0-13-phase-a.md#simplified-architecture-preflight)
 
 ## Broken or unverified
 
-- Independent ADR and product review, Task 2.1, actual Azure native schedule eligibility, App-only Run Command and GitHub federation denials, GHCR and S4 access, and actual cloud costs are pending.
-- S3 still needs separately authorized workflow registration, isolated deployment and the actual ADR-0012 sandbox and lifecycle drills. No S3/S2 acceptance has been claimed.
+- Task 2.1 remains open for the Orchestrator's native provider, role and S4 access or inventory results, budget, verified credits and expiry, and protected workflow/federation readiness.
+- Actual S4 data-plane checks belong to 2.2. Actual S3 schedule creation, approved guest execution, isolation and deallocation belong to 2.3–2.4.
 
 ## Next action
 
-- Next task — Task 2.1 following separate authorization. Use the [S4 bootstrap](../../../infra/azure/README.md#task-22-first-time-s4-bootstrap) and [S3 provision and deploy](../../../infra/azure/README.md#s3-provision-and-deploy) procedures when approved.
-- Azure operations, IAM changes, workflow activation and merging require separate authorization.
+- Complete the [read-only preflight](../../../infra/azure/README.md#task-21-review-boundary). With separate authorization, verify the saved S4 bootstrap plan and migrate the initial local state under Task 2.2. [S4 bootstrap](../../../infra/azure/README.md#task-22-first-time-s4-bootstrap)
